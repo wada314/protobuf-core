@@ -185,12 +185,12 @@ where
 
 /// Write a variant to a writer.
 ///
-/// Encodes a u64 value as a varint and writes it to the provided writer.
+/// Encodes a VariantValue as a varint and writes it to the provided writer.
 /// Returns the number of bytes written on success.
 ///
 /// # Arguments
 /// * `writer` - The writer to write the encoded varint to
-/// * `value` - The u64 value to encode
+/// * `value` - The VariantValue to encode
 ///
 /// # Returns
 /// * `Ok(usize)` - Number of bytes written
@@ -199,10 +199,11 @@ where
 /// # Example
 /// ```
 /// use std::io::Write;
-/// use protobuf_core::variant::write_variant;
+/// use protobuf_core::variant::{write_variant, VariantValue};
 ///
+/// let variant = VariantValue::new([150, 0, 0, 0, 0, 0, 0, 0]);
 /// let mut buffer = Vec::new();
-/// write_variant(&mut buffer, 150).unwrap();
+/// write_variant(&mut buffer, &variant).unwrap();
 /// assert_eq!(buffer, vec![0x96, 0x01]);
 /// ```
 ///
@@ -212,11 +213,13 @@ where
 /// - Avoids multiple write operations
 /// - Leverages the optimized encode_variant function
 /// - Maintains compatibility with std::io::Write trait
-pub fn write_variant<W>(writer: &mut W, value: u64) -> std::io::Result<usize>
+/// - Provides type consistency with read_variant
+pub fn write_variant<W>(writer: &mut W, value: &VariantValue) -> std::io::Result<usize>
 where
     W: std::io::Write,
 {
-    let (bytes, count) = encode_variant(value);
+    let u64_value = value.to_uint64();
+    let (bytes, count) = encode_variant(u64_value);
     writer.write_all(&bytes[..count])?;
     Ok(count)
 }
@@ -311,31 +314,36 @@ mod tests {
     #[test]
     fn test_write_variant() {
         // Test encoding small values
+        let variant = VariantValue::new([150, 0, 0, 0, 0, 0, 0, 0]);
         let mut buffer = Vec::new();
-        let bytes_written = write_variant(&mut buffer, 150).unwrap();
+        let bytes_written = write_variant(&mut buffer, &variant).unwrap();
         assert_eq!(bytes_written, 2);
         assert_eq!(buffer, vec![0x96, 0x01]);
 
         // Test encoding single-byte values
+        let variant = VariantValue::new([127, 0, 0, 0, 0, 0, 0, 0]);
         let mut buffer = Vec::new();
-        let bytes_written = write_variant(&mut buffer, 127).unwrap();
+        let bytes_written = write_variant(&mut buffer, &variant).unwrap();
         assert_eq!(bytes_written, 1);
         assert_eq!(buffer, vec![0x7F]);
 
         // Test encoding zero
+        let variant = VariantValue::new([0, 0, 0, 0, 0, 0, 0, 0]);
         let mut buffer = Vec::new();
-        let bytes_written = write_variant(&mut buffer, 0).unwrap();
+        let bytes_written = write_variant(&mut buffer, &variant).unwrap();
         assert_eq!(bytes_written, 1);
         assert_eq!(buffer, vec![0x00]);
 
         // Test encoding large values
+        let variant = VariantValue::new([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]);
         let mut buffer = Vec::new();
-        let bytes_written = write_variant(&mut buffer, 0x7FFFFFFFFFFFFFFF).unwrap();
+        let bytes_written = write_variant(&mut buffer, &variant).unwrap();
         assert_eq!(bytes_written, 9); // 9-byte varint
 
         // Test encoding maximum varint (10 bytes)
+        let variant = VariantValue::new([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
         let mut buffer = Vec::new();
-        let bytes_written = write_variant(&mut buffer, 0xFFFFFFFFFFFFFFFF).unwrap();
+        let bytes_written = write_variant(&mut buffer, &variant).unwrap();
         assert_eq!(bytes_written, 10); // Maximum varint size
     }
 
@@ -344,12 +352,19 @@ mod tests {
         let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
 
         for &value in &test_values {
+            // Create VariantValue from the test value
+            let mut bytes = [0u8; 8];
+            for i in 0..8 {
+                bytes[i] = ((value >> (i * 8)) & 0xFF) as u8;
+            }
+            let variant = VariantValue::new(bytes);
+
             let mut buffer = Vec::new();
-            write_variant(&mut buffer, value).unwrap();
+            write_variant(&mut buffer, &variant).unwrap();
 
             let mut iter = buffer.iter().copied();
-            let variant = read_variant(&mut iter).unwrap().unwrap();
-            let decoded_value = variant.to_uint64();
+            let decoded_variant = read_variant(&mut iter).unwrap().unwrap();
+            let decoded_value = decoded_variant.to_uint64();
 
             assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
         }
@@ -398,8 +413,14 @@ mod tests {
             let (array_bytes, array_count) = encode_variant(value);
 
             // Method 2: write_variant (std::io::Write)
+            let mut bytes = [0u8; 8];
+            for i in 0..8 {
+                bytes[i] = ((value >> (i * 8)) & 0xFF) as u8;
+            }
+            let variant = VariantValue::new(bytes);
+
             let mut vec_buffer = Vec::new();
-            let vec_count = write_variant(&mut vec_buffer, value).unwrap();
+            let vec_count = write_variant(&mut vec_buffer, &variant).unwrap();
 
             // Both methods should produce the same result
             assert_eq!(array_count, vec_count);
