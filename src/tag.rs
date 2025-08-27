@@ -62,7 +62,7 @@ where
     let Some(variant) = variant_result else {
         return Ok(None);
     };
-    let tag_value = variant.to_uint64() as u32;
+    let tag_value = variant.to_uint32()?;
     let (field_number, wire_type) = parse_tag(tag_value)?;
     Ok(Some((field_number, wire_type)))
 }
