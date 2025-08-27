@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_write_variant() {
-        use std::io::Write;
+        
 
         // Test encoding small values
         let mut buffer = Vec::new();
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_write_variant_roundtrip() {
-        use std::io::Write;
+        
 
         let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
 
