@@ -4,6 +4,8 @@
 //! implementing Protocol Buffers encoding and decoding according to the
 //! official wire format specification.
 
+use std::convert::TryFrom;
+
 /// Wire types used in Protocol Buffers encoding.
 ///
 /// The wire type tells the parser how big the payload is and how to interpret it.
