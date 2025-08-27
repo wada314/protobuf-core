@@ -3,27 +3,31 @@
 //! This module provides basic variant operations including encoding, decoding,
 //! and conversion to various protobuf integer types.
 //!
+//! # Implementation Philosophy
+//!
+//! This is a **reference implementation** designed for clarity and educational value.
+//! While functional and correct, it is not optimized for performance. Implementors
+//! are encouraged to:
+//! - Use platform-specific optimizations (e.g., SIMD instructions)
+//! - Replace manual loops with built-in methods where appropriate
+//! - Profile and optimize based on their specific use cases
+//!
 //! # Design Decisions
 //!
 //! ## read_variant function
-//! The function returns both the VariantValue and the number of bytes consumed.
-//! While the iterator could theoretically track the number of .next() calls,
-//! returning the length provides several benefits:
-//! 1. Clear indication of how many bytes were actually consumed
-//! 2. Useful for callers who need to advance other buffers or track position
-//! 3. Makes the API more explicit and self-documenting
+//! The function returns the VariantValue if successfully read.
+//! Returns `Ok(None)` if no input is available (empty iterator).
+//! Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
 //!
 //! ## Error Handling Strategy
-//! The read_variant function has two distinct failure cases:
-//! 1. No input available (empty iterator)
-//! 2. Input too long (exceeds MAX_VARINT_SIZE)
-//! These are distinguished by returning None in both cases, but the caller
-//! can check the iterator state to determine which case occurred.
+//! The read_variant function has two distinct failure scenarios:
+//! 1. **No input available**: The iterator is empty (no bytes to read) → `Ok(None)`
+//! 2. **Input too long**: The variant exceeds MAX_VARINT_SIZE bytes → `Err(VariantError::TooLong)`
 //!
 //! ## Conversion Method Design
 //! Conversion methods that can fail (e.g., when values exceed target type limits)
-//! return Option<T> to make error handling explicit. Methods that cannot fail
-//! (like to_uint64 and to_bool) return their values directly.
+//! return `Result<T, VariantError>` to make error handling explicit.
+//! Methods that cannot fail (like `to_uint64` and `to_bool`) return their values directly.
 
 use crate::wire_format::MAX_VARINT_SIZE;
 
@@ -167,7 +171,14 @@ where
     }
 
     // Convert the decoded u64 value to 8-byte array (little-endian)
-    let result_bytes = decoded_value.to_le_bytes();
+    // This is a reference implementation - implementors may optimize this
+    // by using u64::to_le_bytes() or other platform-specific optimizations
+    let mut result_bytes = [0u8; 8];
+    for i in 0..8 {
+        // Extract each byte from the u64 value
+        // For little-endian: least significant byte first
+        result_bytes[i] = ((decoded_value >> (i * 8)) & 0xFF) as u8;
+    }
 
     Ok(Some(VariantValue::new(result_bytes)))
 }
