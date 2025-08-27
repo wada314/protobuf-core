@@ -66,9 +66,24 @@ This project aims to create a **language-neutral protobuf utility library** that
    - `parse_tag()` - parse tag into field number and wire type
    - `read_tag()` - read tag from byte iterator
 
+4. **Field Number Type** (`src/field_number.rs`)
+   - `FieldNumber` wrapper type for validated protobuf field numbers
+   - Range validation: 1 to 2^29 - 1 (536,870,911)
+   - Helper methods for common use cases:
+     - `is_small()` - checks if field number ≤ 16 (efficient encoding)
+     - `is_common()` - checks if field number ≤ 16 (most efficient)
+     - `is_reserved()` - checks if in reserved range 19000-19999
+     - `is_in_range(min, max)` - custom range checking
+     - `tag_encoded_size()` - calculates tag size considering 3-bit shift
+     - `tag_size_with_wire_type(wire_type)` - specific tag size calculation
+     - `encoded_size()` - field number only size (reference)
+   - Proper error handling with `FieldNumberError`
+   - Integration with existing tag and wire_format modules
+   - Comprehensive test coverage including edge cases
+
 ### 🔄 Next Steps
-4. **Minimum error types** - Essential error handling for protobuf operations
-5. **Descriptor.proto and plugin.proto** - Minimal implementations for code generation support
+5. **Minimum error types** - Essential error handling for protobuf operations
+6. **Descriptor.proto and plugin.proto** - Minimal implementations for code generation support
 
 ## Design Decisions
 

@@ -4,6 +4,7 @@
 //! implementing Protocol Buffers encoding and decoding according to the
 //! official wire format specification.
 
+use crate::field_number::FieldNumber;
 use std::convert::TryFrom;
 
 /// Wire types used in Protocol Buffers encoding.
@@ -53,10 +54,10 @@ impl TryFrom<u8> for WireType {
 /// Maximum field number allowed in Protocol Buffers.
 ///
 /// Field numbers must be in the range [1, 2^29 - 1].
-pub const MAX_FIELD_NUMBER: u32 = 536_870_911; // 2^29 - 1
+pub const MAX_FIELD_NUMBER: FieldNumber = FieldNumber::MAX;
 
 /// Minimum field number allowed in Protocol Buffers.
-pub const MIN_FIELD_NUMBER: u32 = 1;
+pub const MIN_FIELD_NUMBER: FieldNumber = FieldNumber::MIN;
 
 /// Maximum message size when serialized (2 GiB).
 pub const MAX_MESSAGE_SIZE: usize = 2 * 1024 * 1024 * 1024;
@@ -156,8 +157,8 @@ mod tests {
 
     #[test]
     fn test_constants() {
-        assert_eq!(MAX_FIELD_NUMBER, 536_870_911);
-        assert_eq!(MIN_FIELD_NUMBER, 1);
+        assert_eq!(MAX_FIELD_NUMBER, FieldNumber::MAX);
+        assert_eq!(MIN_FIELD_NUMBER, FieldNumber::MIN);
         assert_eq!(MAX_MESSAGE_SIZE, 2 * 1024 * 1024 * 1024);
         assert_eq!(WIRE_TYPE_MASK, 0b111);
         assert_eq!(FIELD_NUMBER_SHIFT, 3);
