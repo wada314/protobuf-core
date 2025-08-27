@@ -83,29 +83,42 @@ impl VariantValue {
 
     /// Convert to protobuf UInt32 type (32-bit unsigned integer).
     ///
-    /// This conversion can fail if the value exceeds u32::MAX.
-    /// Returns None if the value is too large.
+    /// Protobuf UInt32 interprets the first 4 bytes as an unsigned 32-bit integer.
+    /// This conversion can fail if the upper 4 bytes contain non-zero values.
+    /// Returns None if the value exceeds 32-bit range.
     pub fn to_uint32(&self) -> Option<u32> {
-        let value = self.to_uint64();
-        u32::try_from(value).ok()
+        // 最初の4バイトをu32として解釈（リトルエンディアン）
+        let mut bytes = [0u8; 4];
+        bytes.copy_from_slice(&self.0[..4]);
+        let value = u32::from_le_bytes(bytes);
+
+        // 上位4バイトが0でない場合、オーバーフロー
+        if self.0[4..].iter().any(|&b| b != 0) {
+            None
+        } else {
+            Some(value)
+        }
     }
 
     /// Convert to protobuf Int32 type (32-bit signed integer, no encoding).
     ///
-    /// This conversion can fail if the value exceeds i32::MAX.
-    /// Returns None if the value is too large.
+    /// Protobuf Int32 interprets the first 4 bytes as a signed 32-bit integer.
+    /// This conversion can fail if the upper 4 bytes contain non-zero values.
+    /// Returns None if the value exceeds 32-bit range.
     pub fn to_int32(&self) -> Option<i32> {
-        let value = self.to_uint64();
-        i32::try_from(value).ok()
+        // to_uint32で上位4バイトのチェックと値の取得を行う
+        let uint32_value = self.to_uint32()?;
+        // u32からi32への変換（これは常に成功する）
+        Some(uint32_value as i32)
     }
 
     /// Convert to protobuf Int64 type (64-bit signed integer, no encoding).
     ///
-    /// This conversion can fail if the value exceeds i64::MAX.
-    /// Returns None if the value is too large.
-    pub fn to_int64(&self) -> Option<i64> {
-        let value = self.to_uint64();
-        i64::try_from(value).ok()
+    /// Protobuf Int64 interprets all 8 bytes as a signed 64-bit integer.
+    /// This conversion cannot fail as all 8 bytes are used.
+    pub fn to_int64(&self) -> i64 {
+        // 8バイトをi64として解釈（リトルエンディアン）
+        i64::from_le_bytes(self.0)
     }
 
     /// Convert to protobuf SInt32 type (32-bit signed integer with ZigZag decoding).
@@ -212,7 +225,7 @@ mod tests {
         // Test all integer conversions
         assert_eq!(variant.to_uint64(), 150);
         assert_eq!(variant.to_uint32(), Some(150));
-        assert_eq!(variant.to_int64(), Some(150));
+        assert_eq!(variant.to_int64(), 150);
         assert_eq!(variant.to_int32(), Some(150));
         assert_eq!(variant.to_bool(), true);
     }
