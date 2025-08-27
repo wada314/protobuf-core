@@ -163,22 +163,18 @@ impl VariantValue {
 /// Read a variant from a byte iterator.
 ///
 /// Returns the VariantValue and the number of bytes consumed.
-/// Returns None if the variant is malformed or exceeds MAX_VARINT_SIZE.
+/// Returns `Ok(None)` if no input is available (empty iterator).
+/// Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
 ///
 /// # Error Cases
 /// This function has two distinct failure scenarios:
-/// 1. **No input available**: The iterator is empty (no bytes to read)
-/// 2. **Input too long**: The variant exceeds MAX_VARINT_SIZE bytes
+/// 1. **No input available**: The iterator is empty (no bytes to read) → `Ok(None)`
+/// 2. **Input too long**: The variant exceeds MAX_VARINT_SIZE bytes → `Err(VariantError::TooLong)`
 ///
-/// Both cases return None, but the caller can distinguish them by checking:
-/// - If the iterator is empty after the call, it was case 1
-/// - If the iterator has remaining items, it was case 2
-///
-/// # Alternative Design Considerations
-/// We could take the first byte as a separate argument to reduce error cases,
-/// but this would make the API more complex and less ergonomic for most use cases.
-/// The current design maintains simplicity while providing enough information
-/// for error handling.
+/// The `Result<Option<T>, E>` pattern clearly distinguishes between:
+/// - Successful reads with data: `Ok(Some((VariantValue, usize)))`
+/// - No data available: `Ok(None)`
+/// - Error conditions: `Err(VariantError)`
 pub fn read_variant<I>(iter: &mut I) -> Result<Option<(VariantValue, usize)>, VariantError>
 where
     I: Iterator<Item = u8>,
