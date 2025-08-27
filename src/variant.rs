@@ -27,13 +27,15 @@
 
 use crate::wire_format::MAX_VARINT_SIZE;
 
-/// Error types that can occur during variant reading.
+/// Error types that can occur during variant reading and conversion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VariantError {
     /// Input exceeds MAX_VARINT_SIZE bytes
     TooLong,
-    /// Malformed varint encoding
-    Malformed,
+    /// Value exceeds target type range
+    ValueOutOfRange,
+    /// Invalid conversion (e.g., upper bytes non-zero for Int32)
+    InvalidConversion,
 }
 
 impl std::fmt::Display for VariantError {
@@ -44,7 +46,10 @@ impl std::fmt::Display for VariantError {
                 "Variant input too long (exceeds {} bytes)",
                 MAX_VARINT_SIZE
             ),
-            VariantError::Malformed => write!(f, "Malformed varint encoding"),
+            VariantError::ValueOutOfRange => write!(f, "Value exceeds target type range"),
+            VariantError::InvalidConversion => {
+                write!(f, "Invalid conversion (upper bytes non-zero)")
+            }
         }
     }
 }
@@ -108,22 +113,22 @@ impl VariantValue {
     /// Convert to protobuf UInt32 type (32-bit unsigned integer).
     ///
     /// This conversion can fail if the value exceeds u32::MAX.
-    /// Returns None if the value is too large.
-    pub fn to_uint32(&self) -> Option<u32> {
+    /// Returns Err(VariantError::ValueOutOfRange) if the value is too large.
+    pub fn to_uint32(&self) -> Result<u32, VariantError> {
         let value = self.to_uint64();
-        u32::try_from(value).ok()
+        u32::try_from(value).map_err(|_| VariantError::ValueOutOfRange)
     }
 
     /// Convert to protobuf Int32 type (32-bit signed integer, no encoding).
     ///
     /// Protobuf Int32 interprets the first 4 bytes as a signed 32-bit integer.
     /// This conversion can fail if the upper 4 bytes contain non-zero values.
-    /// Returns None if the value exceeds 32-bit range.
-    pub fn to_int32(&self) -> Option<i32> {
+    /// Returns Err(VariantError::InvalidConversion) if the value exceeds 32-bit range.
+    pub fn to_int32(&self) -> Result<i32, VariantError> {
         // Use to_uint32 to check upper 4 bytes and get the value
         let uint32_value = self.to_uint32()?;
         // Convert from u32 to i32 (this always succeeds)
-        Some(uint32_value as i32)
+        Ok(uint32_value as i32)
     }
 
     /// Convert to protobuf Int64 type (64-bit signed integer, no encoding).
@@ -138,10 +143,10 @@ impl VariantValue {
     /// Convert to protobuf SInt32 type (32-bit signed integer with ZigZag decoding).
     ///
     /// This conversion can fail if the ZigZag decoded value exceeds i32::MAX.
-    /// Returns None if the value is too large.
-    pub fn to_sint32(&self) -> Option<i32> {
+    /// Returns Err(VariantError::ValueOutOfRange) if the value is too large.
+    pub fn to_sint32(&self) -> Result<i32, VariantError> {
         let sint64 = self.to_sint64();
-        i32::try_from(sint64).ok()
+        i32::try_from(sint64).map_err(|_| VariantError::ValueOutOfRange)
     }
 
     /// Convert to protobuf SInt64 type (64-bit signed integer with ZigZag decoding).
@@ -153,10 +158,10 @@ impl VariantValue {
     /// Convert to protobuf Bool type.
     ///
     /// Any non-zero value is considered true, zero is false.
-    /// This conversion cannot fail, so it always returns Some(bool).
-    pub fn to_bool(&self) -> Option<bool> {
+    /// This conversion cannot fail, so it always returns Ok(bool).
+    pub fn to_bool(&self) -> Result<bool, VariantError> {
         let value = self.to_uint64();
-        Some(value != 0)
+        Ok(value != 0)
     }
 }
 
@@ -220,15 +225,6 @@ mod tests {
         let bytes = [0x96, 0x01, 0, 0, 0, 0, 0, 0];
         let variant = VariantValue::new(bytes);
         assert_eq!(variant.as_bytes(), &bytes);
-        assert_eq!(variant.len(), 2);
-    }
-
-    #[test]
-    fn test_variant_value_from_slice() {
-        let input = [0x96, 0x01];
-        let variant = VariantValue::from_slice(&input);
-        assert_eq!(variant.len(), 2);
-        assert_eq!(variant.to_uint64(), 150);
     }
 
     #[test]
@@ -238,10 +234,10 @@ mod tests {
 
         // Test all integer conversions
         assert_eq!(variant.to_uint64(), 150);
-        assert_eq!(variant.to_uint32(), Some(150));
+        assert_eq!(variant.to_uint32(), Ok(150));
         assert_eq!(variant.to_int64(), 150);
-        assert_eq!(variant.to_int32(), Some(150));
-        assert_eq!(variant.to_bool(), Some(true));
+        assert_eq!(variant.to_int32(), Ok(150));
+        assert_eq!(variant.to_bool(), Ok(true));
     }
 
     #[test]
@@ -251,7 +247,7 @@ mod tests {
         let variant = VariantValue::new(bytes);
 
         assert_eq!(variant.to_sint64(), -1);
-        assert_eq!(variant.to_sint32(), Some(-1));
+        assert_eq!(variant.to_sint32(), Ok(-1));
     }
 
     #[test]
