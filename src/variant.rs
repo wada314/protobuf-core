@@ -207,37 +207,62 @@ where
 /// ```
 ///
 /// # Implementation Notes
-/// This is a reference implementation that writes one byte at a time.
-/// Implementors may optimize by:
-/// - Writing multiple bytes in a single operation where possible
-/// - Using platform-specific optimizations
-/// - Batching writes for better performance
+/// This implementation uses encode_variant internally for efficiency,
+/// then writes all bytes at once to the writer. This approach:
+/// - Avoids multiple write operations
+/// - Leverages the optimized encode_variant function
+/// - Maintains compatibility with std::io::Write trait
 pub fn write_variant<W>(writer: &mut W, value: u64) -> std::io::Result<usize>
 where
     W: std::io::Write,
 {
+    let (bytes, count) = encode_variant(value);
+    writer.write_all(&bytes[..count])?;
+    Ok(count)
+}
+
+/// Encode a variant and return the bytes with count.
+///
+/// Returns a tuple of (bytes, count) where:
+/// - bytes: fixed-size array containing the encoded varint
+/// - count: actual number of bytes used (1-10)
+///
+/// This is the most efficient method as it avoids any memory allocation
+/// and returns a fixed-size array that can be easily copied or sliced.
+///
+/// # Example
+/// ```
+/// use protobuf_core::variant::encode_variant;
+///
+/// let (bytes, count) = encode_variant(150);
+/// assert_eq!(count, 2);
+/// assert_eq!(&bytes[..count], &[0x96, 0x01]);
+/// ```
+///
+/// # Implementation Notes
+/// This is a reference implementation that processes one byte at a time.
+/// Implementors may optimize by:
+/// - Using platform-specific SIMD instructions
+/// - Processing multiple bytes in parallel
+/// - Using lookup tables for common values
+pub fn encode_variant(value: u64) -> ([u8; 10], usize) {
+    let mut bytes = [0u8; 10];
     let mut bytes_written = 0;
     let mut remaining_value = value;
 
-    // Encode the value as a varint
-    // Each byte contains 7 bits of data and 1 continuation bit
-    loop {
-        let byte = (remaining_value & 0x7F) as u8;
+    for byte in bytes.iter_mut() {
+        *byte = (remaining_value & 0x7F) as u8;
         remaining_value >>= 7;
+        bytes_written += 1;
 
         if remaining_value == 0 {
-            // Last byte - no continuation bit
-            writer.write_all(&[byte])?;
-            bytes_written += 1;
             break;
         } else {
-            // More bytes to come - set continuation bit
-            writer.write_all(&[byte | 0x80])?;
-            bytes_written += 1;
+            *byte |= 0x80; // continuation bit
         }
     }
 
-    Ok(bytes_written)
+    (bytes, bytes_written)
 }
 
 #[cfg(test)]
@@ -331,6 +356,50 @@ mod tests {
             let decoded_value = variant.to_uint64();
 
             assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
+        }
+    }
+
+    #[test]
+    fn test_encode_variant() {
+        // Test encoding small values
+        let (bytes, count) = encode_variant(150);
+        assert_eq!(count, 2);
+        assert_eq!(&bytes[..count], &[0x96, 0x01]);
+
+        // Test encoding single-byte values
+        let (bytes, count) = encode_variant(127);
+        assert_eq!(count, 1);
+        assert_eq!(&bytes[..count], &[0x7F]);
+
+        // Test encoding zero
+        let (bytes, count) = encode_variant(0);
+        assert_eq!(count, 1);
+        assert_eq!(&bytes[..count], &[0x00]);
+
+        // Test encoding large values
+        let (bytes, count) = encode_variant(0x7FFFFFFFFFFFFFFF);
+        assert_eq!(count, 9);
+
+        // Test encoding maximum varint (10 bytes)
+        let (bytes, count) = encode_variant(0xFFFFFFFFFFFFFFFF);
+        assert_eq!(count, 10);
+    }
+
+    #[test]
+    fn test_all_encoding_methods_consistency() {
+        let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
+
+        for &value in &test_values {
+            // Method 1: encode_variant
+            let (array_bytes, array_count) = encode_variant(value);
+
+            // Method 2: write_variant (std::io::Write)
+            let mut vec_buffer = Vec::new();
+            let vec_count = write_variant(&mut vec_buffer, value).unwrap();
+
+            // Both methods should produce the same result
+            assert_eq!(array_count, vec_count);
+            assert_eq!(&array_bytes[..array_count], &vec_buffer[..]);
         }
     }
 }
