@@ -83,7 +83,7 @@ pub const MAX_VARINT_SIZE: usize = 10;
 /// Maximum varint value that can be encoded in 9 bytes.
 ///
 /// This is used for optimization in varint encoding/decoding.
-pub const MAX_9_BYTE_VARINT: u64 = 0x7F_FFFF_FFFF_FFFF;
+pub const MAX_9_BYTE_VARINT: u64 = 0x7FFF_FFFF_FFFF_FFFF;
 
 /// Maximum varint value that can be encoded in 8 bytes.
 pub const MAX_8_BYTE_VARINT: u64 = 0xFFFF_FFFF_FFFF_FF;
@@ -177,12 +177,41 @@ mod tests {
         assert_eq!(MAX_6_BYTE_VARINT, 0x3FF_FFFF_FFFF);
         assert_eq!(MAX_7_BYTE_VARINT, 0x1FFFF_FFFF_FFFF);
         assert_eq!(MAX_8_BYTE_VARINT, 0xFFFF_FFFF_FFFF_FF);
-        assert_eq!(MAX_9_BYTE_VARINT, 0x7F_FFFF_FFFF_FFFF);
+        assert_eq!(MAX_9_BYTE_VARINT, 0x7FFF_FFFF_FFFF_FFFF);
     }
 
     #[test]
     fn test_fixed_size_constants() {
         assert_eq!(FIXED32_SIZE, 4);
         assert_eq!(FIXED64_SIZE, 8);
+    }
+
+    #[test]
+    fn test_varint_size_constants_mathematical() {
+        // Each constant should be exactly 2^(7*N) - 1 where N is the number of bytes
+        let constants = [
+            MAX_1_BYTE_VARINT,
+            MAX_2_BYTE_VARINT,
+            MAX_3_BYTE_VARINT,
+            MAX_4_BYTE_VARINT,
+            MAX_5_BYTE_VARINT,
+            MAX_6_BYTE_VARINT,
+            MAX_7_BYTE_VARINT,
+            MAX_8_BYTE_VARINT,
+            MAX_9_BYTE_VARINT,
+        ];
+
+        for (i, &constant) in constants.iter().enumerate() {
+            let expected_bits = (i + 1) * 7;
+            let expected_value = (1u64 << expected_bits) - 1;
+            assert_eq!(
+                constant,
+                expected_value,
+                "MAX_{}_BYTE_VARINT should be 2^{} - 1 = {}",
+                i + 1,
+                expected_bits,
+                expected_value
+            );
+        }
     }
 }
