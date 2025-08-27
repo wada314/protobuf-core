@@ -73,21 +73,12 @@ impl VariantValue {
     }
 
     /// Convert to protobuf UInt64 type (64-bit unsigned integer).
+    ///
+    /// Since the VariantValue contains the decoded value (not encoded varint),
+    /// this method simply converts the 8-byte array to u64 using little-endian interpretation.
     pub fn to_uint64(&self) -> u64 {
-        let mut result = 0u64;
-        let mut shift = 0;
-
-        for &byte in &self.0 {
-            let value = (byte & 0x7F) as u64;
-            result |= value << shift;
-
-            if byte & 0x80 == 0 {
-                break;
-            }
-            shift += 7;
-        }
-
-        result
+        // Use Rust's built-in method to convert bytes to u64
+        u64::from_le_bytes(self.0)
     }
 
     /// Convert to protobuf UInt32 type (32-bit unsigned integer).
@@ -96,11 +87,7 @@ impl VariantValue {
     /// Returns None if the value is too large.
     pub fn to_uint32(&self) -> Option<u32> {
         let value = self.to_uint64();
-        if value > u32::MAX as u64 {
-            None
-        } else {
-            Some(value as u32)
-        }
+        u32::try_from(value).ok()
     }
 
     /// Convert to protobuf Int32 type (32-bit signed integer, no encoding).
@@ -109,11 +96,7 @@ impl VariantValue {
     /// Returns None if the value is too large.
     pub fn to_int32(&self) -> Option<i32> {
         let value = self.to_uint64();
-        if value > i32::MAX as u64 {
-            None
-        } else {
-            Some(value as i32)
-        }
+        i32::try_from(value).ok()
     }
 
     /// Convert to protobuf Int64 type (64-bit signed integer, no encoding).
@@ -122,11 +105,7 @@ impl VariantValue {
     /// Returns None if the value is too large.
     pub fn to_int64(&self) -> Option<i64> {
         let value = self.to_uint64();
-        if value > i64::MAX as u64 {
-            None
-        } else {
-            Some(value as i64)
-        }
+        i64::try_from(value).ok()
     }
 
     /// Convert to protobuf SInt32 type (32-bit signed integer with ZigZag decoding).
@@ -135,11 +114,7 @@ impl VariantValue {
     /// Returns None if the value is too large.
     pub fn to_sint32(&self) -> Option<i32> {
         let sint64 = self.to_sint64();
-        if sint64 >= i32::MIN as i64 && sint64 <= i32::MAX as i64 {
-            Some(sint64 as i32)
-        } else {
-            None
-        }
+        i32::try_from(sint64).ok()
     }
 
     /// Convert to protobuf SInt64 type (64-bit signed integer with ZigZag decoding).
@@ -177,27 +152,36 @@ pub fn read_variant<I>(iter: &mut I) -> Option<(VariantValue, usize)>
 where
     I: Iterator<Item = u8>,
 {
-    let mut bytes = [0u8; 8];
     let mut bytes_read = 0;
+    let mut decoded_value = 0u64;
+    let mut shift = 0;
 
     for byte in iter {
         if bytes_read >= MAX_VARINT_SIZE {
             return None; // Variant too long
         }
 
-        bytes[bytes_read] = byte;
+        let value = (byte & 0x7F) as u64;
+        decoded_value |= value << shift;
         bytes_read += 1;
 
         if byte & 0x80 == 0 {
             break;
         }
+        shift += 7;
     }
 
     if bytes_read == 0 {
         return None; // No bytes read
     }
 
-    Some((VariantValue::new(bytes), bytes_read))
+    // Convert the decoded u64 value to 8-byte array (little-endian)
+    let mut result_bytes = [0u8; 8];
+    for i in 0..8 {
+        result_bytes[i] = ((decoded_value >> (i * 8)) & 0xFF) as u8;
+    }
+
+    Some((VariantValue::new(result_bytes), bytes_read))
 }
 
 #[cfg(test)]
