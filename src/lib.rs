@@ -1,14 +1,9 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Protocol Buffers core utility library.
+//!
+//! This library provides common definitions, constants, enums, and trivial logic
+//! for implementing Protocol Buffers in any programming language.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod wire_format;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// Re-export commonly used items for convenience
+pub use wire_format::{MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER, WireType};
