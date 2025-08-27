@@ -40,8 +40,9 @@ where
 {
     use crate::variant::read_variant;
 
-    let (tag_value, bytes_read) = read_variant(iter)?;
-    let (field_number, wire_type) = parse_tag(tag_value as u32)?;
+    let (variant, bytes_read) = read_variant(iter)?;
+    let tag_value = variant.to_uint64() as u32;
+    let (field_number, wire_type) = parse_tag(tag_value)?;
     Some((field_number, wire_type, bytes_read))
 }
 

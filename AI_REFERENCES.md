@@ -49,12 +49,15 @@ This project aims to create a **language-neutral protobuf utility library** that
 
 2. **Variant Encoding/Decoding** (`src/variant.rs`)
    - VariantValue type with fixed-size [u8; 8] array
+   - **Only supports varint encoding** (variable-length integer encoding)
    - Protobuf type-specific conversion functions:
      - `to_uint64()` - for UInt64 type
      - `to_sint64()` - for SInt64 type (ZigZag decoding)
      - `to_uint32()` - for UInt32 type
      - `to_sint32()` - for SInt32 type (ZigZag decoding)
      - `to_bool()` - for Bool type
+   - **Does NOT support** Fixed32/Fixed64, SFixed32/SFixed64, Float/Double types
+     - These use different wire types (I32/I64) and fixed-width encoding
    - ZigZag encoding support for signed integers
    - `read_variant()` function for byte iterator reading
 
