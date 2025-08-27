@@ -50,16 +50,12 @@ impl FieldNumber {
     pub fn tag_encoded_size(self) -> usize {
         let max_tag_value = (self.0 << 3) | 7; // field_number << 3 + max wire_type (7)
 
-        if max_tag_value <= 0x7F {
-            1
-        } else if max_tag_value <= 0x3FFF {
-            2
-        } else if max_tag_value <= 0x1FFFFF {
-            3
-        } else if max_tag_value <= 0xFFFFFFF {
-            4
-        } else {
-            5
+        match max_tag_value {
+            0..=0x7F => 1,
+            0x80..=0x3FFF => 2,
+            0x4000..=0x1FFFFF => 3,
+            0x200000..=0xFFFFFFF => 4,
+            _ => 5,
         }
     }
 
@@ -67,16 +63,12 @@ impl FieldNumber {
     pub fn tag_size_with_wire_type(self, wire_type: crate::wire_format::WireType) -> usize {
         let tag_value = (self.0 << 3) | (wire_type as u32);
 
-        if tag_value <= 0x7F {
-            1
-        } else if tag_value <= 0x3FFF {
-            2
-        } else if tag_value <= 0x1FFFFF {
-            3
-        } else if tag_value <= 0xFFFFFFF {
-            4
-        } else {
-            5
+        match tag_value {
+            0..=0x7F => 1,
+            0x80..=0x3FFF => 2,
+            0x4000..=0x1FFFFF => 3,
+            0x200000..=0xFFFFFFF => 4,
+            _ => 5,
         }
     }
 
@@ -84,16 +76,12 @@ impl FieldNumber {
     ///
     /// Note: This is rarely useful in practice since field numbers are always encoded as part of a tag.
     pub fn encoded_size(self) -> usize {
-        if self.0 <= 0x7F {
-            1
-        } else if self.0 <= 0x3FFF {
-            2
-        } else if self.0 <= 0x1FFFFF {
-            3
-        } else if self.0 <= 0xFFFFFFF {
-            4
-        } else {
-            5
+        match self.0 {
+            0..=0x7F => 1,
+            0x80..=0x3FFF => 2,
+            0x4000..=0x1FFFFF => 3,
+            0x200000..=0xFFFFFFF => 4,
+            _ => 5,
         }
     }
 }
