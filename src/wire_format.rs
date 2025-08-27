@@ -25,23 +25,25 @@ pub enum WireType {
     I32 = 5,
 }
 
-impl WireType {
-    /// Get the numeric value of the wire type.
+impl From<WireType> for u8 {
     #[inline]
-    pub const fn as_u8(self) -> u8 {
-        self as u8
+    fn from(wire_type: WireType) -> Self {
+        wire_type as u8
     }
+}
 
-    /// Try to create a WireType from a numeric value.
-    pub const fn from_u8(value: u8) -> Option<Self> {
+impl TryFrom<u8> for WireType {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => Some(WireType::Varint),
-            1 => Some(WireType::I64),
-            2 => Some(WireType::Len),
-            3 => Some(WireType::SGroup),
-            4 => Some(WireType::EGroup),
-            5 => Some(WireType::I32),
-            _ => None,
+            0 => Ok(WireType::Varint),
+            1 => Ok(WireType::I64),
+            2 => Ok(WireType::Len),
+            3 => Ok(WireType::SGroup),
+            4 => Ok(WireType::EGroup),
+            5 => Ok(WireType::I32),
+            _ => Err(()),
         }
     }
 }
@@ -115,41 +117,39 @@ pub const VARINT_CONTINUATION_BIT: u8 = 0x80;
 pub const VARINT_PAYLOAD_MASK: u8 = 0x7F;
 
 /// Size of a 32-bit fixed-width value in bytes.
+///
+/// Used for fixed32, sfixed32, and float types.
 pub const FIXED32_SIZE: usize = 4;
 
 /// Size of a 64-bit fixed-width value in bytes.
+///
+/// Used for fixed64, sfixed64, and double types.
 pub const FIXED64_SIZE: usize = 8;
-
-/// Size of a float value in bytes.
-pub const FLOAT_SIZE: usize = 4;
-
-/// Size of a double value in bytes.
-pub const DOUBLE_SIZE: usize = 8;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_wire_type_values() {
-        assert_eq!(WireType::Varint.as_u8(), 0);
-        assert_eq!(WireType::I64.as_u8(), 1);
-        assert_eq!(WireType::Len.as_u8(), 2);
-        assert_eq!(WireType::SGroup.as_u8(), 3);
-        assert_eq!(WireType::EGroup.as_u8(), 4);
-        assert_eq!(WireType::I32.as_u8(), 5);
+    fn test_wire_type_from_trait() {
+        assert_eq!(u8::from(WireType::Varint), 0);
+        assert_eq!(u8::from(WireType::I64), 1);
+        assert_eq!(u8::from(WireType::Len), 2);
+        assert_eq!(u8::from(WireType::SGroup), 3);
+        assert_eq!(u8::from(WireType::EGroup), 4);
+        assert_eq!(u8::from(WireType::I32), 5);
     }
 
     #[test]
-    fn test_wire_type_from_u8() {
-        assert_eq!(WireType::from_u8(0), Some(WireType::Varint));
-        assert_eq!(WireType::from_u8(1), Some(WireType::I64));
-        assert_eq!(WireType::from_u8(2), Some(WireType::Len));
-        assert_eq!(WireType::from_u8(3), Some(WireType::SGroup));
-        assert_eq!(WireType::from_u8(4), Some(WireType::EGroup));
-        assert_eq!(WireType::from_u8(5), Some(WireType::I32));
-        assert_eq!(WireType::from_u8(6), None);
-        assert_eq!(WireType::from_u8(255), None);
+    fn test_wire_type_try_from_trait() {
+        assert_eq!(WireType::try_from(0), Ok(WireType::Varint));
+        assert_eq!(WireType::try_from(1), Ok(WireType::I64));
+        assert_eq!(WireType::try_from(2), Ok(WireType::Len));
+        assert_eq!(WireType::try_from(3), Ok(WireType::SGroup));
+        assert_eq!(WireType::try_from(4), Ok(WireType::EGroup));
+        assert_eq!(WireType::try_from(5), Ok(WireType::I32));
+        assert_eq!(WireType::try_from(6), Err(()));
+        assert_eq!(WireType::try_from(255), Err(()));
     }
 
     #[test]
@@ -175,5 +175,11 @@ mod tests {
         assert_eq!(MAX_7_BYTE_VARINT, 0x7F_FFFF_FFFF);
         assert_eq!(MAX_8_BYTE_VARINT, 0x7F_FFFF_FFFF_FF);
         assert_eq!(MAX_9_BYTE_VARINT, 0x7F_FFFF_FFFF_FFFF);
+    }
+
+    #[test]
+    fn test_fixed_size_constants() {
+        assert_eq!(FIXED32_SIZE, 4);
+        assert_eq!(FIXED64_SIZE, 8);
     }
 }
