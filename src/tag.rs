@@ -7,6 +7,7 @@ use crate::field_number::FieldNumber;
 use crate::wire_format::{
     WireType, FIELD_NUMBER_SHIFT, MAX_FIELD_NUMBER, MIN_FIELD_NUMBER, WIRE_TYPE_MASK,
 };
+use crate::ProtobufError;
 use std::convert::TryFrom;
 
 /// Build a tag from field number and wire type.
@@ -19,31 +20,29 @@ pub fn build_tag(field_number: FieldNumber, wire_type: WireType) -> u32 {
 /// Parse a tag into field number and wire type.
 ///
 /// Returns an error if the field number or wire type is invalid.
-pub fn parse_tag(tag: u32) -> Result<(FieldNumber, WireType), crate::ProtobufError> {
+pub fn parse_tag(tag: u32) -> Result<(FieldNumber, WireType), ProtobufError> {
     let field_number_value = tag >> FIELD_NUMBER_SHIFT;
     let wire_type_value = tag & WIRE_TYPE_MASK;
 
     // Check field number range
     if field_number_value < MIN_FIELD_NUMBER.get() || field_number_value > MAX_FIELD_NUMBER.get() {
-        return Err(crate::ProtobufError::MalformedTag {
+        return Err(ProtobufError::MalformedTag {
             field_number: field_number_value,
             wire_type: wire_type_value as u8,
         });
     }
 
     // Create field number (this should succeed since we already validated the range)
-    let field_number = FieldNumber::new(field_number_value).map_err(|_| {
-        crate::ProtobufError::FieldNumberOutOfRange {
+    let field_number =
+        FieldNumber::new(field_number_value).map_err(|_| ProtobufError::FieldNumberOutOfRange {
             value: field_number_value,
-        }
-    })?;
+        })?;
 
     // Parse wire type
-    let wire_type = WireType::try_from(wire_type_value as u8).map_err(|_| {
-        crate::ProtobufError::InvalidWireType {
+    let wire_type =
+        WireType::try_from(wire_type_value as u8).map_err(|_| ProtobufError::InvalidWireType {
             value: wire_type_value as u8,
-        }
-    })?;
+        })?;
 
     Ok((field_number, wire_type))
 }
@@ -53,7 +52,7 @@ pub fn parse_tag(tag: u32) -> Result<(FieldNumber, WireType), crate::ProtobufErr
 /// Returns the field number and wire type.
 /// Returns `Ok(None)` if no input is available.
 /// Returns `Err(ProtobufError)` if the tag is malformed.
-pub fn read_tag<I>(iter: &mut I) -> Result<Option<(FieldNumber, WireType)>, crate::ProtobufError>
+pub fn read_tag<I>(iter: &mut I) -> Result<Option<(FieldNumber, WireType)>, ProtobufError>
 where
     I: Iterator<Item = u8>,
 {
@@ -91,7 +90,7 @@ mod tests {
         let result = parse_tag(tag);
         assert!(result.is_err());
 
-        if let Err(crate::ProtobufError::MalformedTag {
+        if let Err(ProtobufError::MalformedTag {
             field_number,
             wire_type,
         }) = result
@@ -110,7 +109,7 @@ mod tests {
         let result = parse_tag(tag);
         assert!(result.is_err());
 
-        if let Err(crate::ProtobufError::InvalidWireType { value }) = result {
+        if let Err(ProtobufError::InvalidWireType { value }) = result {
             assert_eq!(value, 6);
         } else {
             panic!("Expected InvalidWireType error");
