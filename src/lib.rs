@@ -25,9 +25,9 @@ pub enum ProtobufError {
     #[error("Invalid wire type: {value} (must be between 0 and 5)")]
     InvalidWireType { value: u8 },
 
-    /// Variant value is out of the representable range.
+    /// Variant value is out of the representable range when downcasting.
     #[error("Variant value {value} is out of range for the target type: {target_type}")]
-    ValueOutOfRange {
+    VariantDowncastOutOfRange {
         value: u64,
         target_type: &'static str,
     },
