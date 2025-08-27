@@ -167,10 +167,7 @@ where
     }
 
     // Convert the decoded u64 value to 8-byte array (little-endian)
-    let mut result_bytes = [0u8; 8];
-    for i in 0..8 {
-        result_bytes[i] = ((decoded_value >> (i * 8)) & 0xFF) as u8;
-    }
+    let result_bytes = decoded_value.to_le_bytes();
 
     Ok(Some(VariantValue::new(result_bytes)))
 }
