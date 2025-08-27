@@ -83,21 +83,11 @@ impl VariantValue {
 
     /// Convert to protobuf UInt32 type (32-bit unsigned integer).
     ///
-    /// Protobuf UInt32 interprets the first 4 bytes as an unsigned 32-bit integer.
-    /// This conversion can fail if the upper 4 bytes contain non-zero values.
-    /// Returns None if the value exceeds 32-bit range.
+    /// This conversion can fail if the value exceeds u32::MAX.
+    /// Returns None if the value is too large.
     pub fn to_uint32(&self) -> Option<u32> {
-        // 最初の4バイトをu32として解釈（リトルエンディアン）
-        let mut bytes = [0u8; 4];
-        bytes.copy_from_slice(&self.0[..4]);
-        let value = u32::from_le_bytes(bytes);
-
-        // 上位4バイトが0でない場合、オーバーフロー
-        if self.0[4..].iter().any(|&b| b != 0) {
-            None
-        } else {
-            Some(value)
-        }
+        let value = self.to_uint64();
+        u32::try_from(value).ok()
     }
 
     /// Convert to protobuf Int32 type (32-bit signed integer, no encoding).
