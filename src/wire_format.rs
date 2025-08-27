@@ -80,34 +80,34 @@ pub const FIELD_NUMBER_SHIFT: u32 = 3;
 /// A varint can use anywhere between 1 and 10 bytes.
 pub const MAX_VARINT_SIZE: usize = 10;
 
-/// Maximum varint value that can be encoded in 9 bytes.
+/// Maximum variable-length integer value that can be encoded in 9 bytes.
 ///
-/// This is used for optimization in varint encoding/decoding.
-pub const MAX_9_BYTE_VARINT: u64 = 0x7FFF_FFFF_FFFF_FFFF;
+/// This is used for optimization in variable-length integer encoding/decoding.
+pub const MAX_9_BYTE_VL_INT: u64 = 0x7FFF_FFFF_FFFF_FFFF;
 
-/// Maximum varint value that can be encoded in 8 bytes.
-pub const MAX_8_BYTE_VARINT: u64 = 0xFFFF_FFFF_FFFF_FF;
+/// Maximum variable-length integer value that can be encoded in 8 bytes.
+pub const MAX_8_BYTE_VL_INT: u64 = 0xFFFF_FFFF_FFFF_FF;
 
-/// Maximum varint value that can be encoded in 7 bytes.
-pub const MAX_7_BYTE_VARINT: u64 = 0x1FFFF_FFFF_FFFF;
+/// Maximum variable-length integer value that can be encoded in 7 bytes.
+pub const MAX_7_BYTE_VL_INT: u64 = 0x1FFFF_FFFF_FFFF;
 
-/// Maximum varint value that can be encoded in 6 bytes.
-pub const MAX_6_BYTE_VARINT: u64 = 0x3FF_FFFF_FFFF;
+/// Maximum variable-length integer value that can be encoded in 6 bytes.
+pub const MAX_6_BYTE_VL_INT: u64 = 0x3FF_FFFF_FFFF;
 
-/// Maximum varint value that can be encoded in 5 bytes.
-pub const MAX_5_BYTE_VARINT: u64 = 0x7_FFFF_FFFF;
+/// Maximum variable-length integer value that can be encoded in 5 bytes.
+pub const MAX_5_BYTE_VL_INT: u64 = 0x7_FFFF_FFFF;
 
-/// Maximum varint value that can be encoded in 4 bytes.
-pub const MAX_4_BYTE_VARINT: u64 = 0xFFFFFFF;
+/// Maximum variable-length integer value that can be encoded in 4 bytes.
+pub const MAX_4_BYTE_VL_INT: u64 = 0xFFFFFFF;
 
-/// Maximum varint value that can be encoded in 3 bytes.
-pub const MAX_3_BYTE_VARINT: u64 = 0x1FFFFF;
+/// Maximum variable-length integer value that can be encoded in 3 bytes.
+pub const MAX_3_BYTE_VL_INT: u64 = 0x1FFFFF;
 
-/// Maximum varint value that can be encoded in 2 bytes.
-pub const MAX_2_BYTE_VARINT: u64 = 0x3FFF;
+/// Maximum variable-length integer value that can be encoded in 2 bytes.
+pub const MAX_2_BYTE_VL_INT: u64 = 0x3FFF;
 
-/// Maximum varint value that can be encoded in 1 byte.
-pub const MAX_1_BYTE_VARINT: u64 = 0x7F;
+/// Maximum variable-length integer value that can be encoded in 1 byte.
+pub const MAX_1_BYTE_VL_INT: u64 = 0x7F;
 
 /// Continuation bit mask for varint encoding.
 ///
@@ -169,15 +169,15 @@ mod tests {
 
     #[test]
     fn test_varint_size_constants() {
-        assert_eq!(MAX_1_BYTE_VARINT, 0x7F);
-        assert_eq!(MAX_2_BYTE_VARINT, 0x3FFF);
-        assert_eq!(MAX_3_BYTE_VARINT, 0x1FFFFF);
-        assert_eq!(MAX_4_BYTE_VARINT, 0xFFFFFFF);
-        assert_eq!(MAX_5_BYTE_VARINT, 0x7_FFFF_FFFF);
-        assert_eq!(MAX_6_BYTE_VARINT, 0x3FF_FFFF_FFFF);
-        assert_eq!(MAX_7_BYTE_VARINT, 0x1FFFF_FFFF_FFFF);
-        assert_eq!(MAX_8_BYTE_VARINT, 0xFFFF_FFFF_FFFF_FF);
-        assert_eq!(MAX_9_BYTE_VARINT, 0x7FFF_FFFF_FFFF_FFFF);
+        assert_eq!(MAX_1_BYTE_VL_INT, 0x7F);
+        assert_eq!(MAX_2_BYTE_VL_INT, 0x3FFF);
+        assert_eq!(MAX_3_BYTE_VL_INT, 0x1FFFFF);
+        assert_eq!(MAX_4_BYTE_VL_INT, 0xFFFFFFF);
+        assert_eq!(MAX_5_BYTE_VL_INT, 0x7_FFFF_FFFF);
+        assert_eq!(MAX_6_BYTE_VL_INT, 0x3FF_FFFF_FFFF);
+        assert_eq!(MAX_7_BYTE_VL_INT, 0x1FFFF_FFFF_FFFF);
+        assert_eq!(MAX_8_BYTE_VL_INT, 0xFFFF_FFFF_FFFF_FF);
+        assert_eq!(MAX_9_BYTE_VL_INT, 0x7FFF_FFFF_FFFF_FFFF);
     }
 
     #[test]
@@ -190,15 +190,15 @@ mod tests {
     fn test_varint_size_constants_mathematical() {
         // Each constant should be exactly 2^(7*N) - 1 where N is the number of bytes
         let constants = [
-            MAX_1_BYTE_VARINT,
-            MAX_2_BYTE_VARINT,
-            MAX_3_BYTE_VARINT,
-            MAX_4_BYTE_VARINT,
-            MAX_5_BYTE_VARINT,
-            MAX_6_BYTE_VARINT,
-            MAX_7_BYTE_VARINT,
-            MAX_8_BYTE_VARINT,
-            MAX_9_BYTE_VARINT,
+            MAX_1_BYTE_VL_INT,
+            MAX_2_BYTE_VL_INT,
+            MAX_3_BYTE_VL_INT,
+            MAX_4_BYTE_VL_INT,
+            MAX_5_BYTE_VL_INT,
+            MAX_6_BYTE_VL_INT,
+            MAX_7_BYTE_VL_INT,
+            MAX_8_BYTE_VL_INT,
+            MAX_9_BYTE_VL_INT,
         ];
 
         for (i, &constant) in constants.iter().enumerate() {
@@ -207,7 +207,7 @@ mod tests {
             assert_eq!(
                 constant,
                 expected_value,
-                "MAX_{}_BYTE_VARINT should be 2^{} - 1 = {}",
+                "MAX_{}_BYTE_VL_INT should be 2^{} - 1 = {}",
                 i + 1,
                 expected_bits,
                 expected_value
