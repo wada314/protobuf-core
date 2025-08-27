@@ -96,9 +96,9 @@ impl VariantValue {
     /// This conversion can fail if the upper 4 bytes contain non-zero values.
     /// Returns None if the value exceeds 32-bit range.
     pub fn to_int32(&self) -> Option<i32> {
-        // to_uint32で上位4バイトのチェックと値の取得を行う
+        // Use to_uint32 to check upper 4 bytes and get the value
         let uint32_value = self.to_uint32()?;
-        // u32からi32への変換（これは常に成功する）
+        // Convert from u32 to i32 (this always succeeds)
         Some(uint32_value as i32)
     }
 
@@ -107,7 +107,7 @@ impl VariantValue {
     /// Protobuf Int64 interprets all 8 bytes as a signed 64-bit integer.
     /// This conversion cannot fail as all 8 bytes are used.
     pub fn to_int64(&self) -> i64 {
-        // 8バイトをi64として解釈（リトルエンディアン）
+        // Interpret all 8 bytes as i64 (little-endian)
         i64::from_le_bytes(self.0)
     }
 
@@ -127,8 +127,12 @@ impl VariantValue {
     }
 
     /// Convert to protobuf Bool type.
-    pub fn to_bool(&self) -> bool {
-        self.to_uint64() != 0
+    ///
+    /// Any non-zero value is considered true, zero is false.
+    /// This conversion cannot fail, so it always returns Some(bool).
+    pub fn to_bool(&self) -> Option<bool> {
+        let value = self.to_uint64();
+        Some(value != 0)
     }
 }
 
@@ -217,7 +221,7 @@ mod tests {
         assert_eq!(variant.to_uint32(), Some(150));
         assert_eq!(variant.to_int64(), 150);
         assert_eq!(variant.to_int32(), Some(150));
-        assert_eq!(variant.to_bool(), true);
+        assert_eq!(variant.to_bool(), Some(true));
     }
 
     #[test]

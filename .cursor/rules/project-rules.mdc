@@ -1,0 +1,7 @@
+---
+description: Project-specific rules for protobuf-core
+globs: **/*.rs, AI_REFERENCES.md
+alwaysApply: true
+---
+
+- `AI_REFERENCES.md` contains our discussion history with AI. Please update it when you think you need to record something for future reference.
