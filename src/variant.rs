@@ -28,33 +28,18 @@
 use crate::wire_format::MAX_VARINT_SIZE;
 
 /// Error types that can occur during variant reading and conversion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum VariantError {
     /// Input exceeds MAX_VARINT_SIZE bytes
-    TooLong,
+    #[error("Variant input too long (exceeds {0} bytes)")]
+    TooLong(usize),
     /// Value exceeds target type range
+    #[error("Value exceeds target type range")]
     ValueOutOfRange,
     /// Invalid conversion (e.g., upper bytes non-zero for Int32)
+    #[error("Invalid conversion (upper bytes non-zero)")]
     InvalidConversion,
 }
-
-impl std::fmt::Display for VariantError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VariantError::TooLong => write!(
-                f,
-                "Variant input too long (exceeds {} bytes)",
-                MAX_VARINT_SIZE
-            ),
-            VariantError::ValueOutOfRange => write!(f, "Value exceeds target type range"),
-            VariantError::InvalidConversion => {
-                write!(f, "Invalid conversion (upper bytes non-zero)")
-            }
-        }
-    }
-}
-
-impl std::error::Error for VariantError {}
 
 /// A fixed-size array wrapper for variant values.
 ///
@@ -73,32 +58,9 @@ impl VariantValue {
         Self(bytes)
     }
 
-    /// Create a new VariantValue from a slice of bytes.
-    ///
-    /// If the slice is shorter than 8 bytes, the remaining bytes are filled with zeros.
-    /// If longer, only the first 8 bytes are used.
-    pub fn from_slice(bytes: &[u8]) -> Self {
-        let mut result = [0u8; 8];
-        let len = bytes.len().min(8);
-        result[..len].copy_from_slice(&bytes[..len]);
-        Self(result)
-    }
-
     /// Get the underlying byte array.
     pub fn as_bytes(&self) -> &[u8; 8] {
         &self.0
-    }
-
-    /// Get the actual length of the variant in bytes.
-    pub fn len(&self) -> usize {
-        let mut len = 0;
-        for &byte in &self.0 {
-            if byte & 0x80 == 0 {
-                break;
-            }
-            len += 1;
-        }
-        len + 1
     }
 
     /// Convert to protobuf UInt64 type (64-bit unsigned integer).
@@ -190,7 +152,7 @@ where
 
     for byte in iter {
         if bytes_read >= MAX_VARINT_SIZE {
-            return Err(VariantError::TooLong); // Variant too long
+            return Err(VariantError::TooLong(MAX_VARINT_SIZE)); // Variant too long
         }
 
         let value = (byte & 0x7F) as u64;
@@ -229,14 +191,14 @@ mod tests {
 
     #[test]
     fn test_variant_conversions() {
-        let bytes = [0x96, 0x01, 0, 0, 0, 0, 0, 0]; // 150
+        let bytes = [0x96, 0x01, 0, 0, 0, 0, 0, 0]; // 0x0196 = 406
         let variant = VariantValue::new(bytes);
 
         // Test all integer conversions
-        assert_eq!(variant.to_uint64(), 150);
-        assert_eq!(variant.to_uint32(), Ok(150));
-        assert_eq!(variant.to_int64(), 150);
-        assert_eq!(variant.to_int32(), Ok(150));
+        assert_eq!(variant.to_uint64(), 406);
+        assert_eq!(variant.to_uint32(), Ok(406));
+        assert_eq!(variant.to_int64(), 406);
+        assert_eq!(variant.to_int32(), Ok(406));
         assert_eq!(variant.to_bool(), Ok(true));
     }
 

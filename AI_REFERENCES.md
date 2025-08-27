@@ -31,7 +31,7 @@ This project aims to create a **language-neutral protobuf utility library** that
 - **Delivery format**: Rust library providing constants and trivial logic
 - **Protobuf version support**: All versions (proto2, proto3) and latest editions
 - **Relationship to existing implementations**: New base for new implementers (no compatibility concerns)
-- **External dependencies**: Minimize external dependencies
+- **External dependencies**: Minimize external dependencies, with exception for `thiserror` crate (de-facto standard for error handling)
 - **Performance approach**: Avoid performance optimizations, focus on constants and basic logic
 - **Performance considerations**: Only implement performance-critical features when absolutely necessary
 
