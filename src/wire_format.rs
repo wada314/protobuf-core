@@ -86,19 +86,19 @@ pub const MAX_VARINT_SIZE: usize = 10;
 pub const MAX_9_BYTE_VARINT: u64 = 0x7F_FFFF_FFFF_FFFF;
 
 /// Maximum varint value that can be encoded in 8 bytes.
-pub const MAX_8_BYTE_VARINT: u64 = 0x7F_FFFF_FFFF_FF;
+pub const MAX_8_BYTE_VARINT: u64 = 0xFFFF_FFFF_FFFF_FF;
 
 /// Maximum varint value that can be encoded in 7 bytes.
-pub const MAX_7_BYTE_VARINT: u64 = 0x7F_FFFF_FFFF;
+pub const MAX_7_BYTE_VARINT: u64 = 0x1FFFF_FFFF_FFFF;
 
 /// Maximum varint value that can be encoded in 6 bytes.
-pub const MAX_6_BYTE_VARINT: u64 = 0x7F_FFFF_FF;
+pub const MAX_6_BYTE_VARINT: u64 = 0x3FF_FFFF_FFFF;
 
 /// Maximum varint value that can be encoded in 5 bytes.
-pub const MAX_5_BYTE_VARINT: u64 = 0x7F_FFFF;
+pub const MAX_5_BYTE_VARINT: u64 = 0x7_FFFF_FFFF;
 
 /// Maximum varint value that can be encoded in 4 bytes.
-pub const MAX_4_BYTE_VARINT: u64 = 0x7F_FF;
+pub const MAX_4_BYTE_VARINT: u64 = 0xFFFFFFF;
 
 /// Maximum varint value that can be encoded in 3 bytes.
 pub const MAX_3_BYTE_VARINT: u64 = 0x1FFFFF;
@@ -172,11 +172,11 @@ mod tests {
         assert_eq!(MAX_1_BYTE_VARINT, 0x7F);
         assert_eq!(MAX_2_BYTE_VARINT, 0x3FFF);
         assert_eq!(MAX_3_BYTE_VARINT, 0x1FFFFF);
-        assert_eq!(MAX_4_BYTE_VARINT, 0x7F_FF);
-        assert_eq!(MAX_5_BYTE_VARINT, 0x7F_FFFF);
-        assert_eq!(MAX_6_BYTE_VARINT, 0x7F_FFFF_FF);
-        assert_eq!(MAX_7_BYTE_VARINT, 0x7F_FFFF_FFFF);
-        assert_eq!(MAX_8_BYTE_VARINT, 0x7F_FFFF_FFFF_FF);
+        assert_eq!(MAX_4_BYTE_VARINT, 0xFFFFFFF);
+        assert_eq!(MAX_5_BYTE_VARINT, 0x7_FFFF_FFFF);
+        assert_eq!(MAX_6_BYTE_VARINT, 0x3FF_FFFF_FFFF);
+        assert_eq!(MAX_7_BYTE_VARINT, 0x1FFFF_FFFF_FFFF);
+        assert_eq!(MAX_8_BYTE_VARINT, 0xFFFF_FFFF_FFFF_FF);
         assert_eq!(MAX_9_BYTE_VARINT, 0x7F_FFFF_FFFF_FFFF);
     }
 
