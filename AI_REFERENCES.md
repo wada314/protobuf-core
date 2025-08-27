@@ -47,9 +47,37 @@ This project aims to create a **language-neutral protobuf utility library** that
    - Size constants for fixed-width types (FIXED32_SIZE, FIXED64_SIZE, etc.)
    - Comprehensive test coverage
 
+2. **Variant Encoding/Decoding** (`src/variant.rs`)
+   - VariantValue type with fixed-size [u8; 8] array
+   - Protobuf type-specific conversion functions:
+     - `to_uint64()` - for UInt64 type
+     - `to_sint64()` - for SInt64 type (ZigZag decoding)
+     - `to_uint32()` - for UInt32 type
+     - `to_sint32()` - for SInt32 type (ZigZag decoding)
+     - `to_bool()` - for Bool type
+   - ZigZag encoding support for signed integers
+   - `read_variant()` function for byte iterator reading
+
+3. **Tag Operations** (`src/tag.rs`)
+   - `build_tag()` - construct tag from field number and wire type
+   - `parse_tag()` - parse tag into field number and wire type
+   - `read_tag()` - read tag from byte iterator
+
 ### 🔄 Next Steps
-2. **Integer (de)serialization logic** - Core encoding/decoding algorithms
-3. **Minimum error types** - Essential error handling for protobuf operations
+4. **Minimum error types** - Essential error handling for protobuf operations
+5. **Descriptor.proto and plugin.proto** - Minimal implementations for code generation support
+
+## Design Decisions
+
+### Type Naming Convention
+- **Rust types**: Standard Rust integer types (u32, i64, etc.)
+- **Protobuf types**: Explicit protobuf type names (UInt32, SInt64, etc.)
+- **Conversion functions**: Always use protobuf type names to avoid confusion
+
+### File Organization
+- `wire_format.rs` - Core constants and wire type definitions
+- `variant.rs` - Variant encoding/decoding logic (renamed from varint.rs)
+- `tag.rs` - Tag construction and parsing operations
 
 ## Official Protocol Buffer Documentation:
 https://protobuf.dev/

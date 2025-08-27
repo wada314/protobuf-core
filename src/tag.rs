@@ -38,9 +38,9 @@ pub fn read_tag<I>(iter: &mut I) -> Option<(u32, WireType, usize)>
 where
     I: Iterator<Item = u8>,
 {
-    use crate::varint::read_varint;
+    use crate::variant::read_variant;
 
-    let (tag_value, bytes_read) = read_varint(iter)?;
+    let (tag_value, bytes_read) = read_variant(iter)?;
     let (field_number, wire_type) = parse_tag(tag_value as u32)?;
     Some((field_number, wire_type, bytes_read))
 }
