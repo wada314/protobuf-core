@@ -27,6 +27,30 @@
 
 use crate::wire_format::MAX_VARINT_SIZE;
 
+/// Error types that can occur during variant reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VariantError {
+    /// Input exceeds MAX_VARINT_SIZE bytes
+    TooLong,
+    /// Malformed varint encoding
+    Malformed,
+}
+
+impl std::fmt::Display for VariantError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VariantError::TooLong => write!(
+                f,
+                "Variant input too long (exceeds {} bytes)",
+                MAX_VARINT_SIZE
+            ),
+            VariantError::Malformed => write!(f, "Malformed varint encoding"),
+        }
+    }
+}
+
+impl std::error::Error for VariantError {}
+
 /// A fixed-size array wrapper for variant values.
 ///
 /// This type represents the intermediate 8-byte value from serialized bytes
@@ -44,9 +68,32 @@ impl VariantValue {
         Self(bytes)
     }
 
+    /// Create a new VariantValue from a slice of bytes.
+    ///
+    /// If the slice is shorter than 8 bytes, the remaining bytes are filled with zeros.
+    /// If longer, only the first 8 bytes are used.
+    pub fn from_slice(bytes: &[u8]) -> Self {
+        let mut result = [0u8; 8];
+        let len = bytes.len().min(8);
+        result[..len].copy_from_slice(&bytes[..len]);
+        Self(result)
+    }
+
     /// Get the underlying byte array.
     pub fn as_bytes(&self) -> &[u8; 8] {
         &self.0
+    }
+
+    /// Get the actual length of the variant in bytes.
+    pub fn len(&self) -> usize {
+        let mut len = 0;
+        for &byte in &self.0 {
+            if byte & 0x80 == 0 {
+                break;
+            }
+            len += 1;
+        }
+        len + 1
     }
 
     /// Convert to protobuf UInt64 type (64-bit unsigned integer).
@@ -132,7 +179,7 @@ impl VariantValue {
 /// but this would make the API more complex and less ergonomic for most use cases.
 /// The current design maintains simplicity while providing enough information
 /// for error handling.
-pub fn read_variant<I>(iter: &mut I) -> Option<(VariantValue, usize)>
+pub fn read_variant<I>(iter: &mut I) -> Result<Option<(VariantValue, usize)>, VariantError>
 where
     I: Iterator<Item = u8>,
 {
@@ -142,7 +189,7 @@ where
 
     for byte in iter {
         if bytes_read >= MAX_VARINT_SIZE {
-            return None; // Variant too long
+            return Err(VariantError::TooLong); // Variant too long
         }
 
         let value = (byte & 0x7F) as u64;
@@ -156,7 +203,7 @@ where
     }
 
     if bytes_read == 0 {
-        return None; // No bytes read
+        return Ok(None); // No bytes read
     }
 
     // Convert the decoded u64 value to 8-byte array (little-endian)
@@ -165,7 +212,7 @@ where
         result_bytes[i] = ((decoded_value >> (i * 8)) & 0xFF) as u8;
     }
 
-    Some((VariantValue::new(result_bytes), bytes_read))
+    Ok(Some((VariantValue::new(result_bytes), bytes_read)))
 }
 
 #[cfg(test)]
@@ -215,7 +262,7 @@ mod tests {
     fn test_read_variant() {
         let input = [0x96, 0x01];
         let mut iter = input.iter().copied();
-        let (variant, bytes_read) = read_variant(&mut iter).unwrap();
+        let (variant, bytes_read) = read_variant(&mut iter).unwrap().unwrap();
 
         assert_eq!(variant.to_uint64(), 150);
         assert_eq!(bytes_read, 2);
