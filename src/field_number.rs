@@ -13,6 +13,18 @@ impl FieldNumber {
     /// Maximum allowed field number (2^29 - 1 = 536,870,911).
     pub const MAX: Self = Self(536_870_911);
 
+    /// Maximum field number that can be encoded as a single-byte tag (15).
+    /// Field numbers 1-15 result in tags that fit in 1 byte.
+    pub const MAX_SINGLE_BYTE_TAG: u32 = 15;
+
+    /// Start of reserved field number range (19000).
+    /// Protobuf reserves field numbers 19000-19999.
+    pub const RESERVED_RANGE_START: u32 = 19000;
+
+    /// End of reserved field number range (19999).
+    /// Protobuf reserves field numbers 19000-19999.
+    pub const RESERVED_RANGE_END: u32 = 19999;
+
     /// Creates a new field number, validating the range.
     pub fn new(value: u32) -> Result<Self, FieldNumberError> {
         if value < Self::MIN.0 || value > Self::MAX.0 {
@@ -29,13 +41,13 @@ impl FieldNumber {
     /// Checks if the field number can be encoded as a single-byte tag.
     /// Field numbers 1-15 result in tags that fit in 1 byte.
     pub fn is_tag_single_byte(self) -> bool {
-        self.0 <= 15
+        self.0 <= Self::MAX_SINGLE_BYTE_TAG
     }
 
     /// Checks if the field number is in a reserved range.
     /// Protobuf reserves field numbers 19000-19999.
     pub fn is_reserved(self) -> bool {
-        self.0 >= 19000 && self.0 <= 19999
+        self.0 >= Self::RESERVED_RANGE_START && self.0 <= Self::RESERVED_RANGE_END
     }
 
     /// Checks if the field number is in a specific range.
