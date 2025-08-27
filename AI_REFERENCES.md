@@ -70,16 +70,27 @@ This project aims to create a **language-neutral protobuf utility library** that
    - `FieldNumber` wrapper type for validated protobuf field numbers
    - Range validation: 1 to 2^29 - 1 (536,870,911)
    - Helper methods for common use cases:
-     - `is_small()` - checks if field number ≤ 16 (efficient encoding)
-     - `is_common()` - checks if field number ≤ 16 (most efficient)
+     - `is_tag_single_byte()` - checks if field number ≤ 15 (single-byte tag encoding)
      - `is_reserved()` - checks if in reserved range 19000-19999
-     - `is_in_range(min, max)` - custom range checking
      - `tag_encoded_size()` - calculates tag size considering 3-bit shift
-     - `tag_size_with_wire_type(wire_type)` - specific tag size calculation
      - `encoded_size()` - field number only size (reference)
    - Proper error handling with `FieldNumberError`
    - Integration with existing tag and wire_format modules
    - Comprehensive test coverage including edge cases
+
+5. **Unified Error Handling** (`src/lib.rs`)
+   - **Integrated error type**: `ProtobufError` enum with specific error variants:
+     - `FieldNumberOutOfRange` - field number out of valid range [1, 2^29 - 1]
+     - `InvalidWireType` - invalid wire type value (must be 0-5)
+     - `VariantDowncastOutOfRange` - variant value out of range when downcasting
+     - `MalformedTag` - tag contains invalid field number or wire type
+   - **Custom Result type**: `Result<T>` alias for `std::result::Result<T, ProtobufError>`
+   - **Benefits**:
+     - Eliminates individual error types per module
+     - Simplifies error handling code (no more `crate::ProtobufError`)
+     - Provides clear error messages with context (which value, which type)
+     - Enables consistent error handling across all protobuf operations
+     - Makes code more readable with `Result<T>` instead of `Result<T, ProtobufError>`
 
 ### 🔄 Next Steps
 5. **Minimum error types** - Essential error handling for protobuf operations
