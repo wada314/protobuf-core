@@ -32,7 +32,7 @@
 use crate::wire_format::MAX_VARINT_SIZE;
 
 /// Error types that can occur during variant reading and conversion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ::thiserror::Error)]
 pub enum VariantError {
     /// Input exceeds MAX_VARINT_SIZE bytes
     #[error("Variant input too long (exceeds {0} bytes)")]
@@ -216,11 +216,11 @@ where
 ///
 /// # Returns
 /// * `Ok(usize)` - Number of bytes written
-/// * `Err(std::io::Error)` - I/O error from the writer
+/// * `Err(::std::io::Error)` - I/O error from the writer
 ///
 /// # Example
 /// ```
-/// use std::io::Write;
+/// use ::std::io::Write;
 /// use protobuf_core::variant::{write_variant, VariantValue};
 ///
 /// let variant = VariantValue::new([150, 0, 0, 0, 0, 0, 0, 0]);
@@ -234,11 +234,11 @@ where
 /// then writes all bytes at once to the writer. This approach:
 /// - Avoids multiple write operations
 /// - Leverages the optimized encode_variant function
-/// - Maintains compatibility with std::io::Write trait
+/// - Maintains compatibility with ::std::io::Write trait
 /// - Provides type consistency with read_variant
-pub fn write_variant<W>(writer: &mut W, value: &VariantValue) -> std::io::Result<usize>
+pub fn write_variant<W>(writer: &mut W, value: &VariantValue) -> ::std::io::Result<usize>
 where
-    W: std::io::Write,
+    W: ::std::io::Write,
 {
     let u64_value = value.to_uint64();
     let (bytes, count) = encode_variant(u64_value);
