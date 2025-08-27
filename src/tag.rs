@@ -32,26 +32,24 @@ pub fn parse_tag(tag: u32) -> Option<(u32, WireType)> {
 
 /// Read a tag from a byte iterator.
 ///
-/// Returns the field number, wire type, and number of bytes consumed.
+/// Returns the field number and wire type.
 /// Returns `Ok(None)` if no input is available.
 /// Returns `Err(VariantError)` if the tag is malformed.
-pub fn read_tag<I>(
-    iter: &mut I,
-) -> Result<Option<(u32, WireType, usize)>, crate::variant::VariantError>
+pub fn read_tag<I>(iter: &mut I) -> Result<Option<(u32, WireType)>, crate::variant::VariantError>
 where
     I: Iterator<Item = u8>,
 {
     use crate::variant::read_variant;
 
     let variant_result = read_variant(iter)?;
-    let Some((variant, bytes_read)) = variant_result else {
+    let Some(variant) = variant_result else {
         return Ok(None);
     };
     let tag_value = variant.to_uint64() as u32;
     let (field_number, wire_type) = parse_tag(tag_value).ok_or(
         crate::variant::VariantError::ValueOutOfRange(tag_value as u64),
     )?;
-    Ok(Some((field_number, wire_type, bytes_read)))
+    Ok(Some((field_number, wire_type)))
 }
 
 #[cfg(test)]
@@ -74,9 +72,8 @@ mod tests {
     fn test_read_tag() {
         let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
         let mut iter = bytes.into_iter();
-        let (field_number, wire_type, bytes_read) = read_tag(&mut iter).unwrap().unwrap();
+        let (field_number, wire_type) = read_tag(&mut iter).unwrap().unwrap();
         assert_eq!(field_number, 1);
         assert_eq!(wire_type, WireType::Varint);
-        assert_eq!(bytes_read, 1);
     }
 }

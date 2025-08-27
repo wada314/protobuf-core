@@ -126,7 +126,7 @@ impl VariantValue {
 
 /// Read a variant from a byte iterator.
 ///
-/// Returns the VariantValue and the number of bytes consumed.
+/// Returns the VariantValue if successfully read.
 /// Returns `Ok(None)` if no input is available (empty iterator).
 /// Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
 ///
@@ -136,10 +136,10 @@ impl VariantValue {
 /// 2. **Input too long**: The variant exceeds MAX_VARINT_SIZE bytes → `Err(VariantError::TooLong)`
 ///
 /// The `Result<Option<T>, E>` pattern clearly distinguishes between:
-/// - Successful reads with data: `Ok(Some((VariantValue, usize)))`
+/// - Successful reads with data: `Ok(Some(VariantValue))`
 /// - No data available: `Ok(None)`
 /// - Error conditions: `Err(VariantError)`
-pub fn read_variant<I>(iter: &mut I) -> Result<Option<(VariantValue, usize)>, VariantError>
+pub fn read_variant<I>(iter: &mut I) -> Result<Option<VariantValue>, VariantError>
 where
     I: Iterator<Item = u8>,
 {
@@ -172,7 +172,7 @@ where
         result_bytes[i] = ((decoded_value >> (i * 8)) & 0xFF) as u8;
     }
 
-    Ok(Some((VariantValue::new(result_bytes), bytes_read)))
+    Ok(Some(VariantValue::new(result_bytes)))
 }
 
 #[cfg(test)]
@@ -213,9 +213,8 @@ mod tests {
     fn test_read_variant() {
         let input = [0x96, 0x01];
         let mut iter = input.iter().copied();
-        let (variant, bytes_read) = read_variant(&mut iter).unwrap().unwrap();
+        let variant = read_variant(&mut iter).unwrap().unwrap();
 
         assert_eq!(variant.to_uint64(), 150);
-        assert_eq!(bytes_read, 2);
     }
 }
