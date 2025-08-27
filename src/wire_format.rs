@@ -101,10 +101,10 @@ pub const MAX_5_BYTE_VARINT: u64 = 0x7F_FFFF;
 pub const MAX_4_BYTE_VARINT: u64 = 0x7F_FF;
 
 /// Maximum varint value that can be encoded in 3 bytes.
-pub const MAX_3_BYTE_VARINT: u64 = 0x7F;
+pub const MAX_3_BYTE_VARINT: u64 = 0x1FFFFF;
 
 /// Maximum varint value that can be encoded in 2 bytes.
-pub const MAX_2_BYTE_VARINT: u64 = 0x7F;
+pub const MAX_2_BYTE_VARINT: u64 = 0x3FFF;
 
 /// Maximum varint value that can be encoded in 1 byte.
 pub const MAX_1_BYTE_VARINT: u64 = 0x7F;
@@ -170,8 +170,8 @@ mod tests {
     #[test]
     fn test_varint_size_constants() {
         assert_eq!(MAX_1_BYTE_VARINT, 0x7F);
-        assert_eq!(MAX_2_BYTE_VARINT, 0x7F);
-        assert_eq!(MAX_3_BYTE_VARINT, 0x7F);
+        assert_eq!(MAX_2_BYTE_VARINT, 0x3FFF);
+        assert_eq!(MAX_3_BYTE_VARINT, 0x1FFFFF);
         assert_eq!(MAX_4_BYTE_VARINT, 0x7F_FF);
         assert_eq!(MAX_5_BYTE_VARINT, 0x7F_FFFF);
         assert_eq!(MAX_6_BYTE_VARINT, 0x7F_FFFF_FF);
