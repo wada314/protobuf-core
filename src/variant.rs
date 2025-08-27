@@ -34,11 +34,8 @@ pub enum VariantError {
     #[error("Variant input too long (exceeds {0} bytes)")]
     TooLong(usize),
     /// Value exceeds target type range
-    #[error("Value exceeds target type range")]
-    ValueOutOfRange,
-    /// Invalid conversion (e.g., upper bytes non-zero for Int32)
-    #[error("Invalid conversion (upper bytes non-zero)")]
-    InvalidConversion,
+    #[error("Value {0} exceeds target type range")]
+    ValueOutOfRange(u64),
 }
 
 /// A fixed-size array wrapper for variant values.
@@ -75,10 +72,10 @@ impl VariantValue {
     /// Convert to protobuf UInt32 type (32-bit unsigned integer).
     ///
     /// This conversion can fail if the value exceeds u32::MAX.
-    /// Returns Err(VariantError::ValueOutOfRange) if the value is too large.
+    /// Returns Err(VariantError::ValueOutOfRange(value)) if the value is too large.
     pub fn to_uint32(&self) -> Result<u32, VariantError> {
         let value = self.to_uint64();
-        u32::try_from(value).map_err(|_| VariantError::ValueOutOfRange)
+        u32::try_from(value).map_err(|_| VariantError::ValueOutOfRange(value))
     }
 
     /// Convert to protobuf Int32 type (32-bit signed integer, no encoding).
@@ -105,10 +102,10 @@ impl VariantValue {
     /// Convert to protobuf SInt32 type (32-bit signed integer with ZigZag decoding).
     ///
     /// This conversion can fail if the ZigZag decoded value exceeds i32::MAX.
-    /// Returns Err(VariantError::ValueOutOfRange) if the value is too large.
+    /// Returns Err(VariantError::ValueOutOfRange(value)) if the value is too large.
     pub fn to_sint32(&self) -> Result<i32, VariantError> {
         let sint64 = self.to_sint64();
-        i32::try_from(sint64).map_err(|_| VariantError::ValueOutOfRange)
+        i32::try_from(sint64).map_err(|_| VariantError::ValueOutOfRange(sint64 as u64))
     }
 
     /// Convert to protobuf SInt64 type (64-bit signed integer with ZigZag decoding).

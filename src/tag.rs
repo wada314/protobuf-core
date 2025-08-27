@@ -48,8 +48,9 @@ where
         return Ok(None);
     };
     let tag_value = variant.to_uint64() as u32;
-    let (field_number, wire_type) =
-        parse_tag(tag_value).ok_or(crate::variant::VariantError::InvalidConversion)?;
+    let (field_number, wire_type) = parse_tag(tag_value).ok_or(
+        crate::variant::VariantError::ValueOutOfRange(tag_value as u64),
+    )?;
     Ok(Some((field_number, wire_type, bytes_read)))
 }
 
