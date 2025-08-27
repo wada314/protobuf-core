@@ -49,18 +49,6 @@ impl VariantValue {
         &self.0
     }
 
-    /// Get the actual length of the variant in bytes.
-    pub fn len(&self) -> usize {
-        let mut len = 0;
-        for &byte in &self.0 {
-            if byte & 0x80 == 0 {
-                break;
-            }
-            len += 1;
-        }
-        len + 1
-    }
-
     /// Convert to protobuf UInt64 type (64-bit unsigned integer).
     ///
     /// Since the VariantValue contains the decoded value (not encoded varint),
