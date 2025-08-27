@@ -126,6 +126,28 @@ impl VariantValue {
         let value = self.to_uint64();
         Ok(value != 0)
     }
+
+    /// Create a VariantValue from a u64 value for debugging and testing purposes.
+    ///
+    /// This method is intended for creating test data and debugging scenarios.
+    /// It converts the u64 value to its little-endian byte representation.
+    ///
+    /// # Safety
+    /// This method is safe but should only be used in debug/test contexts.
+    /// For production code, use `read_variant` to decode actual varint data.
+    ///
+    /// # Example
+    /// ```
+    /// use protobuf_core::variant::VariantValue;
+    ///
+    /// let variant = VariantValue::debug_from_u64(150);
+    /// assert_eq!(variant.to_uint64(), 150);
+    /// ```
+    #[cfg(test)]
+    pub fn debug_from_u64(value: u64) -> Self {
+        let bytes = value.to_le_bytes();
+        Self(bytes)
+    }
 }
 
 /// Read a variant from a byte iterator.
@@ -314,34 +336,34 @@ mod tests {
     #[test]
     fn test_write_variant() {
         // Test encoding small values
-        let variant = VariantValue::new([150, 0, 0, 0, 0, 0, 0, 0]);
+        let variant = VariantValue::debug_from_u64(150);
         let mut buffer = Vec::new();
         let bytes_written = write_variant(&mut buffer, &variant).unwrap();
         assert_eq!(bytes_written, 2);
         assert_eq!(buffer, vec![0x96, 0x01]);
 
         // Test encoding single-byte values
-        let variant = VariantValue::new([127, 0, 0, 0, 0, 0, 0, 0]);
+        let variant = VariantValue::debug_from_u64(127);
         let mut buffer = Vec::new();
         let bytes_written = write_variant(&mut buffer, &variant).unwrap();
         assert_eq!(bytes_written, 1);
         assert_eq!(buffer, vec![0x7F]);
 
         // Test encoding zero
-        let variant = VariantValue::new([0, 0, 0, 0, 0, 0, 0, 0]);
+        let variant = VariantValue::debug_from_u64(0);
         let mut buffer = Vec::new();
         let bytes_written = write_variant(&mut buffer, &variant).unwrap();
         assert_eq!(bytes_written, 1);
         assert_eq!(buffer, vec![0x00]);
 
         // Test encoding large values
-        let variant = VariantValue::new([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]);
+        let variant = VariantValue::debug_from_u64(0x7FFFFFFFFFFFFFFF);
         let mut buffer = Vec::new();
         let bytes_written = write_variant(&mut buffer, &variant).unwrap();
         assert_eq!(bytes_written, 9); // 9-byte varint
 
         // Test encoding maximum varint (10 bytes)
-        let variant = VariantValue::new([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        let variant = VariantValue::debug_from_u64(0xFFFFFFFFFFFFFFFF);
         let mut buffer = Vec::new();
         let bytes_written = write_variant(&mut buffer, &variant).unwrap();
         assert_eq!(bytes_written, 10); // Maximum varint size
@@ -353,11 +375,7 @@ mod tests {
 
         for &value in &test_values {
             // Create VariantValue from the test value
-            let mut bytes = [0u8; 8];
-            for i in 0..8 {
-                bytes[i] = ((value >> (i * 8)) & 0xFF) as u8;
-            }
-            let variant = VariantValue::new(bytes);
+            let variant = VariantValue::debug_from_u64(value);
 
             let mut buffer = Vec::new();
             write_variant(&mut buffer, &variant).unwrap();
@@ -413,11 +431,7 @@ mod tests {
             let (array_bytes, array_count) = encode_variant(value);
 
             // Method 2: write_variant (std::io::Write)
-            let mut bytes = [0u8; 8];
-            for i in 0..8 {
-                bytes[i] = ((value >> (i * 8)) & 0xFF) as u8;
-            }
-            let variant = VariantValue::new(bytes);
+            let variant = VariantValue::debug_from_u64(value);
 
             let mut vec_buffer = Vec::new();
             let vec_count = write_variant(&mut vec_buffer, &variant).unwrap();
