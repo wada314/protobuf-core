@@ -59,19 +59,6 @@ impl FieldNumber {
         }
     }
 
-    /// Returns the encoded size of a tag with this field number and the given wire type.
-    pub fn tag_size_with_wire_type(self, wire_type: crate::wire_format::WireType) -> usize {
-        let tag_value = (self.0 << 3) | (wire_type as u32);
-
-        match tag_value {
-            0..=0x7F => 1,
-            0x80..=0x3FFF => 2,
-            0x4000..=0x1FFFFF => 3,
-            0x200000..=0xFFFFFFF => 4,
-            _ => 5,
-        }
-    }
-
     /// Returns the minimum number of bytes needed to encode this field number as a varint.
     ///
     /// Note: This is rarely useful in practice since field numbers are always encoded as part of a tag.
@@ -180,26 +167,6 @@ mod tests {
 
         // Field 100000000: (100000000 << 3) | 7 = 800000000 | 7 = 800000007 (5 bytes)
         assert_eq!(FieldNumber::new(100000000).unwrap().tag_encoded_size(), 5);
-    }
-
-    #[test]
-    fn test_tag_size_with_wire_type() {
-        use crate::wire_format::WireType;
-
-        let field_1 = FieldNumber::new(1).unwrap();
-        let field_16 = FieldNumber::new(16).unwrap();
-
-        // Field 1 with Varint (0): (1 << 3) | 0 = 8 (1 byte)
-        assert_eq!(field_1.tag_size_with_wire_type(WireType::Varint), 1);
-
-        // Field 1 with I64 (1): (1 << 3) | 1 = 9 (1 byte)
-        assert_eq!(field_1.tag_size_with_wire_type(WireType::I64), 1);
-
-        // Field 16 with Varint (0): (16 << 3) | 0 = 128 (2 bytes)
-        assert_eq!(field_16.tag_size_with_wire_type(WireType::Varint), 2);
-
-        // Field 16 with Len (2): (16 << 3) | 2 = 130 (2 bytes)
-        assert_eq!(field_16.tag_size_with_wire_type(WireType::Len), 2);
     }
 
     #[test]
