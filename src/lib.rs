@@ -36,3 +36,6 @@ pub enum ProtobufError {
     #[error("Malformed tag: field number {field_number} (out of range), wire type {wire_type}")]
     MalformedTag { field_number: u32, wire_type: u8 },
 }
+
+/// Type alias for Result with our fixed error type.
+pub type Result<T> = std::result::Result<T, ProtobufError>;
