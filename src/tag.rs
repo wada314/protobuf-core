@@ -37,7 +37,9 @@ pub fn parse_tag(tag: u32) -> Option<(FieldNumber, WireType)> {
 /// Returns the field number and wire type.
 /// Returns `Ok(None)` if no input is available.
 /// Returns `Err(VariantError)` if the tag is malformed.
-pub fn read_tag<I>(iter: &mut I) -> Result<Option<(FieldNumber, WireType)>, crate::variant::VariantError>
+pub fn read_tag<I>(
+    iter: &mut I,
+) -> Result<Option<(FieldNumber, WireType)>, crate::variant::VariantError>
 where
     I: Iterator<Item = u8>,
 {

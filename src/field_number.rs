@@ -26,10 +26,10 @@ impl FieldNumber {
         self.0
     }
 
-    /// Checks if the field number is in the range [1, 16].
+    /// Checks if the field number is in the range [1, 15].
     /// This is useful for determining encoded size.
     pub fn is_small(self) -> bool {
-        self.0 <= 16
+        self.0 <= 15
     }
 
     /// Checks if the field number is in a reserved range.
@@ -97,10 +97,10 @@ impl FieldNumber {
         }
     }
 
-    /// Checks if this field number is commonly used (1-16).
+    /// Checks if this field number is commonly used (1-15).
     /// These field numbers are most efficient to encode.
     pub fn is_common(self) -> bool {
-        self.0 <= 16
+        self.0 <= 15
     }
 }
 
@@ -161,21 +161,24 @@ mod tests {
         );
     }
 
-    #[test]
+        #[test]
     fn test_helper_methods() {
-        let small_field = FieldNumber::new(16).unwrap();
+        let small_field = FieldNumber::new(15).unwrap();
+        let medium_field = FieldNumber::new(16).unwrap();
         let large_field = FieldNumber::new(1000).unwrap();
         let reserved_field = FieldNumber::new(19500).unwrap();
-
+        
         assert!(small_field.is_small());
+        assert!(!medium_field.is_small());
         assert!(!large_field.is_small());
-
+        
         assert!(small_field.is_common());
+        assert!(!medium_field.is_common());
         assert!(!large_field.is_common());
-
+        
         assert!(reserved_field.is_reserved());
         assert!(!small_field.is_reserved());
-
+        
         assert!(small_field.is_in_range(1, 20));
         assert!(!small_field.is_in_range(20, 30));
     }
