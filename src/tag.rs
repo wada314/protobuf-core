@@ -18,41 +18,64 @@ pub fn build_tag(field_number: FieldNumber, wire_type: WireType) -> u32 {
 
 /// Parse a tag into field number and wire type.
 ///
-/// Returns None if the wire type is invalid.
-pub fn parse_tag(tag: u32) -> Option<(FieldNumber, WireType)> {
+/// Returns an error if the field number or wire type is invalid.
+pub fn parse_tag(tag: u32) -> Result<(FieldNumber, WireType), crate::ProtobufError> {
     let field_number_value = tag >> FIELD_NUMBER_SHIFT;
     let wire_type_value = tag & WIRE_TYPE_MASK;
 
+    // Check field number range
     if field_number_value < MIN_FIELD_NUMBER.get() || field_number_value > MAX_FIELD_NUMBER.get() {
-        return None;
+        return Err(crate::ProtobufError::MalformedTag {
+            field_number: field_number_value,
+            wire_type: wire_type_value as u8,
+        });
     }
 
-    let field_number = FieldNumber::new(field_number_value).ok()?;
-    let wire_type = WireType::try_from(wire_type_value as u8).ok()?;
-    Some((field_number, wire_type))
+    // Create field number (this should succeed since we already validated the range)
+    let field_number = FieldNumber::new(field_number_value).map_err(|_| {
+        crate::ProtobufError::FieldNumberOutOfRange {
+            value: field_number_value,
+        }
+    })?;
+
+    // Parse wire type
+    let wire_type = WireType::try_from(wire_type_value as u8).map_err(|_| {
+        crate::ProtobufError::InvalidWireType {
+            value: wire_type_value as u8,
+        }
+    })?;
+
+    Ok((field_number, wire_type))
 }
 
 /// Read a tag from a byte iterator.
 ///
 /// Returns the field number and wire type.
 /// Returns `Ok(None)` if no input is available.
-/// Returns `Err(VariantError)` if the tag is malformed.
-pub fn read_tag<I>(
-    iter: &mut I,
-) -> Result<Option<(FieldNumber, WireType)>, crate::variant::VariantError>
+/// Returns `Err(ProtobufError)` if the tag is malformed.
+pub fn read_tag<I>(iter: &mut I) -> Result<Option<(FieldNumber, WireType)>, crate::ProtobufError>
 where
     I: Iterator<Item = u8>,
 {
     use crate::variant::read_variant;
 
-    let variant_result = read_variant(iter)?;
+    let variant_result = read_variant(iter).map_err(|e| match e {
+        crate::variant::VariantError::ValueOutOfRange(value) => {
+            crate::ProtobufError::ValueOutOfRange {
+                value,
+                target_type: "tag",
+            }
+        }
+        crate::variant::VariantError::TooLong(_) => crate::ProtobufError::ValueOutOfRange {
+            value: 0,
+            target_type: "tag (too long)",
+        },
+    })?;
     let Some(variant) = variant_result else {
         return Ok(None);
     };
     let tag_value = variant.to_uint64() as u32;
-    let (field_number, wire_type) = parse_tag(tag_value).ok_or(
-        crate::variant::VariantError::ValueOutOfRange(tag_value as u64),
-    )?;
+    let (field_number, wire_type) = parse_tag(tag_value)?;
     Ok(Some((field_number, wire_type)))
 }
 
@@ -70,6 +93,39 @@ mod tests {
         let (parsed_field, parsed_wire_type) = parse_tag(tag).unwrap();
         assert_eq!(parsed_field, field_number);
         assert_eq!(parsed_wire_type, wire_type);
+    }
+
+    #[test]
+    fn test_parse_tag_invalid_field_number() {
+        // Test with field number 0 (invalid)
+        let tag = 0; // field_number = 0, wire_type = 0
+        let result = parse_tag(tag);
+        assert!(result.is_err());
+
+        if let Err(crate::ProtobufError::MalformedTag {
+            field_number,
+            wire_type,
+        }) = result
+        {
+            assert_eq!(field_number, 0);
+            assert_eq!(wire_type, 0);
+        } else {
+            panic!("Expected MalformedTag error");
+        }
+    }
+
+    #[test]
+    fn test_parse_tag_invalid_wire_type() {
+        // Test with invalid wire type 6
+        let tag = (1 << 3) | 6; // field_number = 1, wire_type = 6
+        let result = parse_tag(tag);
+        assert!(result.is_err());
+
+        if let Err(crate::ProtobufError::InvalidWireType { value }) = result {
+            assert_eq!(value, 6);
+        } else {
+            panic!("Expected InvalidWireType error");
+        }
     }
 
     #[test]
