@@ -310,8 +310,6 @@ mod tests {
 
     #[test]
     fn test_write_variant() {
-        
-
         // Test encoding small values
         let mut buffer = Vec::new();
         let bytes_written = write_variant(&mut buffer, 150).unwrap();
@@ -343,8 +341,6 @@ mod tests {
 
     #[test]
     fn test_write_variant_roundtrip() {
-        
-
         let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
 
         for &value in &test_values {
@@ -379,10 +375,18 @@ mod tests {
         // Test encoding large values
         let (bytes, count) = encode_variant(0x7FFFFFFFFFFFFFFF);
         assert_eq!(count, 9);
+        assert_eq!(
+            &bytes[..count],
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]
+        );
 
         // Test encoding maximum varint (10 bytes)
         let (bytes, count) = encode_variant(0xFFFFFFFFFFFFFFFF);
         assert_eq!(count, 10);
+        assert_eq!(
+            &bytes[..count],
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]
+        );
     }
 
     #[test]
