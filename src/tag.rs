@@ -124,4 +124,23 @@ mod tests {
         assert_eq!(field_number, FieldNumber::new(1).unwrap());
         assert_eq!(wire_type, WireType::Varint);
     }
+
+    #[test]
+    fn test_read_tag_u64_overflow() {
+        // Test case where the varint value exceeds u32::MAX
+        // This should trigger VariantDowncastOutOfRange error
+        // u32::MAX = 4,294,967,295 (0xFFFFFFFF)
+        // Use 0x100000000 (4,294,967,296) which exceeds u32::MAX
+        let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x10]; // Value: 0x100000000 (exceeds u32::MAX)
+        let mut iter = bytes.into_iter();
+        let result = read_tag(&mut iter);
+
+        assert!(result.is_err());
+        if let Err(ProtobufError::VariantDowncastOutOfRange { value, target_type }) = result {
+            assert_eq!(value, 0x100000000);
+            assert_eq!(target_type, "u32");
+        } else {
+            panic!("Expected VariantDowncastOutOfRange error");
+        }
+    }
 }
