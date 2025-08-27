@@ -31,16 +31,7 @@
 
 use crate::wire_format::MAX_VARINT_SIZE;
 
-/// Error types that can occur during variant reading and conversion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ::thiserror::Error)]
-pub enum VariantError {
-    /// Input exceeds MAX_VARINT_SIZE bytes
-    #[error("Variant input too long (exceeds {0} bytes)")]
-    TooLong(usize),
-    /// Value exceeds target type range
-    #[error("Value 0x{0:x} exceeds target type range")]
-    ValueOutOfRange(u64),
-}
+// Error types are now defined in the main lib.rs as ProtobufError
 
 /// A fixed-size array wrapper for variant values.
 ///
@@ -76,18 +67,21 @@ impl VariantValue {
     /// Convert to protobuf UInt32 type (32-bit unsigned integer).
     ///
     /// This conversion can fail if the value exceeds u32::MAX.
-    /// Returns Err(VariantError::ValueOutOfRange(value)) if the value is too large.
-    pub fn to_uint32(&self) -> Result<u32, VariantError> {
+    /// Returns Err(ProtobufError::VariantDowncastOutOfRange) if the value is too large.
+    pub fn to_uint32(&self) -> Result<u32, crate::ProtobufError> {
         let value = self.to_uint64();
-        u32::try_from(value).map_err(|_| VariantError::ValueOutOfRange(value))
+        u32::try_from(value).map_err(|_| crate::ProtobufError::VariantDowncastOutOfRange {
+            value,
+            target_type: "u32",
+        })
     }
 
     /// Convert to protobuf Int32 type (32-bit signed integer, no encoding).
     ///
     /// Protobuf Int32 interprets the first 4 bytes as a signed 32-bit integer.
     /// This conversion can fail if the upper 4 bytes contain non-zero values.
-    /// Returns Err(VariantError::InvalidConversion) if the value exceeds 32-bit range.
-    pub fn to_int32(&self) -> Result<i32, VariantError> {
+    /// Returns Err(ProtobufError::VariantDowncastOutOfRange) if the value exceeds 32-bit range.
+    pub fn to_int32(&self) -> Result<i32, crate::ProtobufError> {
         // Use to_uint32 to check upper 4 bytes and get the value
         let uint32_value = self.to_uint32()?;
         // Convert from u32 to i32 (this always succeeds)
@@ -106,10 +100,13 @@ impl VariantValue {
     /// Convert to protobuf SInt32 type (32-bit signed integer with ZigZag decoding).
     ///
     /// This conversion can fail if the ZigZag decoded value exceeds i32::MAX.
-    /// Returns Err(VariantError::ValueOutOfRange(value)) if the value is too large.
-    pub fn to_sint32(&self) -> Result<i32, VariantError> {
+    /// Returns Err(ProtobufError::VariantDowncastOutOfRange) if the value is too large.
+    pub fn to_sint32(&self) -> Result<i32, crate::ProtobufError> {
         let sint64 = self.to_sint64();
-        i32::try_from(sint64).map_err(|_| VariantError::ValueOutOfRange(sint64 as u64))
+        i32::try_from(sint64).map_err(|_| crate::ProtobufError::VariantDowncastOutOfRange {
+            value: sint64 as u64,
+            target_type: "i32",
+        })
     }
 
     /// Convert to protobuf SInt64 type (64-bit signed integer with ZigZag decoding).
@@ -122,7 +119,7 @@ impl VariantValue {
     ///
     /// Any non-zero value is considered true, zero is false.
     /// This conversion cannot fail, so it always returns Ok(bool).
-    pub fn to_bool(&self) -> Result<bool, VariantError> {
+    pub fn to_bool(&self) -> Result<bool, crate::ProtobufError> {
         let value = self.to_uint64();
         Ok(value != 0)
     }
@@ -165,7 +162,7 @@ impl VariantValue {
 /// - Successful reads with data: `Ok(Some(VariantValue))`
 /// - No data available: `Ok(None)`
 /// - Error conditions: `Err(VariantError)`
-pub fn read_variant<I>(iter: &mut I) -> Result<Option<VariantValue>, VariantError>
+pub fn read_variant<I>(iter: &mut I) -> Result<Option<VariantValue>, crate::ProtobufError>
 where
     I: Iterator<Item = u8>,
 {
@@ -175,7 +172,10 @@ where
 
     for byte in iter {
         if bytes_read >= MAX_VARINT_SIZE {
-            return Err(VariantError::TooLong(MAX_VARINT_SIZE)); // Variant too long
+            return Err(crate::ProtobufError::VariantDowncastOutOfRange {
+                value: 0,
+                target_type: "variant (too long)",
+            }); // Variant too long
         }
 
         let value = (byte & 0x7F) as u64;

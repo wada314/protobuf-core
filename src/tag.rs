@@ -59,20 +59,7 @@ where
 {
     use crate::variant::read_variant;
 
-    let variant_result = read_variant(iter).map_err(|e| match e {
-        crate::variant::VariantError::ValueOutOfRange(value) => {
-            crate::ProtobufError::VariantDowncastOutOfRange {
-                value,
-                target_type: "tag",
-            }
-        }
-        crate::variant::VariantError::TooLong(_) => {
-            crate::ProtobufError::VariantDowncastOutOfRange {
-                value: 0,
-                target_type: "tag (too long)",
-            }
-        }
-    })?;
+    let variant_result = read_variant(iter)?;
     let Some(variant) = variant_result else {
         return Ok(None);
     };
