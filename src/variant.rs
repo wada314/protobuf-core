@@ -2,6 +2,28 @@
 //!
 //! This module provides basic variant operations including encoding, decoding,
 //! and conversion to various protobuf integer types.
+//!
+//! # Design Decisions
+//!
+//! ## read_variant function
+//! The function returns both the VariantValue and the number of bytes consumed.
+//! While the iterator could theoretically track the number of .next() calls,
+//! returning the length provides several benefits:
+//! 1. Clear indication of how many bytes were actually consumed
+//! 2. Useful for callers who need to advance other buffers or track position
+//! 3. Makes the API more explicit and self-documenting
+//!
+//! ## Error Handling Strategy
+//! The read_variant function has two distinct failure cases:
+//! 1. No input available (empty iterator)
+//! 2. Input too long (exceeds MAX_VARINT_SIZE)
+//! These are distinguished by returning None in both cases, but the caller
+//! can check the iterator state to determine which case occurred.
+//!
+//! ## Conversion Method Design
+//! Conversion methods that can fail (e.g., when values exceed target type limits)
+//! return Option<T> to make error handling explicit. Methods that cannot fail
+//! (like to_uint64 and to_bool) return their values directly.
 
 use crate::wire_format::MAX_VARINT_SIZE;
 
@@ -69,23 +91,55 @@ impl VariantValue {
     }
 
     /// Convert to protobuf UInt32 type (32-bit unsigned integer).
-    pub fn to_uint32(&self) -> u32 {
-        self.to_uint64() as u32
+    ///
+    /// This conversion can fail if the value exceeds u32::MAX.
+    /// Returns None if the value is too large.
+    pub fn to_uint32(&self) -> Option<u32> {
+        let value = self.to_uint64();
+        if value > u32::MAX as u64 {
+            None
+        } else {
+            Some(value as u32)
+        }
     }
 
     /// Convert to protobuf Int32 type (32-bit signed integer, no encoding).
-    pub fn to_int32(&self) -> i32 {
-        self.to_uint64() as i32
+    ///
+    /// This conversion can fail if the value exceeds i32::MAX.
+    /// Returns None if the value is too large.
+    pub fn to_int32(&self) -> Option<i32> {
+        let value = self.to_uint64();
+        if value > i32::MAX as u64 {
+            None
+        } else {
+            Some(value as i32)
+        }
     }
 
     /// Convert to protobuf Int64 type (64-bit signed integer, no encoding).
-    pub fn to_int64(&self) -> i64 {
-        self.to_uint64() as i64
+    ///
+    /// This conversion can fail if the value exceeds i64::MAX.
+    /// Returns None if the value is too large.
+    pub fn to_int64(&self) -> Option<i64> {
+        let value = self.to_uint64();
+        if value > i64::MAX as u64 {
+            None
+        } else {
+            Some(value as i64)
+        }
     }
 
     /// Convert to protobuf SInt32 type (32-bit signed integer with ZigZag decoding).
-    pub fn to_sint32(&self) -> i32 {
-        self.to_sint64() as i32
+    ///
+    /// This conversion can fail if the ZigZag decoded value exceeds i32::MAX.
+    /// Returns None if the value is too large.
+    pub fn to_sint32(&self) -> Option<i32> {
+        let sint64 = self.to_sint64();
+        if sint64 >= i32::MIN as i64 && sint64 <= i32::MAX as i64 {
+            Some(sint64 as i32)
+        } else {
+            None
+        }
     }
 
     /// Convert to protobuf SInt64 type (64-bit signed integer with ZigZag decoding).
@@ -104,6 +158,21 @@ impl VariantValue {
 ///
 /// Returns the VariantValue and the number of bytes consumed.
 /// Returns None if the variant is malformed or exceeds MAX_VARINT_SIZE.
+///
+/// # Error Cases
+/// This function has two distinct failure scenarios:
+/// 1. **No input available**: The iterator is empty (no bytes to read)
+/// 2. **Input too long**: The variant exceeds MAX_VARINT_SIZE bytes
+///
+/// Both cases return None, but the caller can distinguish them by checking:
+/// - If the iterator is empty after the call, it was case 1
+/// - If the iterator has remaining items, it was case 2
+///
+/// # Alternative Design Considerations
+/// We could take the first byte as a separate argument to reduce error cases,
+/// but this would make the API more complex and less ergonomic for most use cases.
+/// The current design maintains simplicity while providing enough information
+/// for error handling.
 pub fn read_variant<I>(iter: &mut I) -> Option<(VariantValue, usize)>
 where
     I: Iterator<Item = u8>,
@@ -158,9 +227,9 @@ mod tests {
 
         // Test all integer conversions
         assert_eq!(variant.to_uint64(), 150);
-        assert_eq!(variant.to_uint32(), 150);
-        assert_eq!(variant.to_int64(), 150);
-        assert_eq!(variant.to_int32(), 150);
+        assert_eq!(variant.to_uint32(), Some(150));
+        assert_eq!(variant.to_int64(), Some(150));
+        assert_eq!(variant.to_int32(), Some(150));
         assert_eq!(variant.to_bool(), true);
     }
 
@@ -171,7 +240,7 @@ mod tests {
         let variant = VariantValue::new(bytes);
 
         assert_eq!(variant.to_sint64(), -1);
-        assert_eq!(variant.to_sint32(), -1);
+        assert_eq!(variant.to_sint32(), Some(-1));
     }
 
     #[test]
