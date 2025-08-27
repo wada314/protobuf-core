@@ -34,7 +34,7 @@ pub enum VariantError {
     #[error("Variant input too long (exceeds {0} bytes)")]
     TooLong(usize),
     /// Value exceeds target type range
-    #[error("Value {0} exceeds target type range")]
+    #[error("Value 0x{0:x} exceeds target type range")]
     ValueOutOfRange(u64),
 }
 
