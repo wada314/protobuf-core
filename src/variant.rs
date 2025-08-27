@@ -44,17 +44,6 @@ impl VariantValue {
         Self(bytes)
     }
 
-    /// Create a new VariantValue from a slice of bytes.
-    ///
-    /// If the slice is shorter than 8 bytes, the remaining bytes are filled with zeros.
-    /// If longer, only the first 8 bytes are used.
-    pub fn from_slice(bytes: &[u8]) -> Self {
-        let mut result = [0u8; 8];
-        let len = bytes.len().min(8);
-        result[..len].copy_from_slice(&bytes[..len]);
-        Self(result)
-    }
-
     /// Get the underlying byte array.
     pub fn as_bytes(&self) -> &[u8; 8] {
         &self.0
