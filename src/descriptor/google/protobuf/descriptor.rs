@@ -233,13 +233,45 @@ pub struct FeatureSetDefaults;
 pub struct SourceCodeInfo;
 pub struct GeneratedCodeInfo;
 
-// Nested message structures will be defined in separate modules
-pub mod descriptor_proto;
-pub mod enum_descriptor_proto;
+// Nested message structures (inlined from small submodules)
+/// Extension range within a message
+pub struct ExtensionRange;
+
+/// Reserved range within a message
+pub struct ReservedRange;
+
+/// Edition default value for a field
+pub struct EditionDefault;
+
+/// Feature support information for a field
+pub struct FeatureSupport;
+
+/// Range of reserved numeric values in an enum
+pub struct EnumReservedRange;
+
+/// Part of an uninterpreted option name
+pub struct NamePart;
+
+/// Default feature set for a specific edition
+pub struct FeatureSetEditionDefault;
+
+/// Location information in source code
+pub struct Location;
+
+/// Annotation connecting generated code to source
+pub struct Annotation;
+
+/// Semantic effect of an annotation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Semantic {
+    /// There is no effect or the effect is indescribable
+    None = 0,
+    /// The element is set or otherwise mutated
+    Set = 1,
+    /// An alias to the element is returned
+    Alias = 2,
+}
+
+// Remaining modules that are larger or have more complex structures
 pub mod extension_range_options;
 pub mod feature_set;
-pub mod feature_set_defaults;
-pub mod field_descriptor_proto;
-pub mod generated_code_info;
-pub mod source_code_info;
-pub mod uninterpreted_option;

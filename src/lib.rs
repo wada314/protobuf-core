@@ -3,11 +3,11 @@
 //! This library provides common definitions, constants, enums, and trivial logic
 //! for implementing Protocol Buffers in any programming language.
 
+pub mod descriptor;
 pub mod field_number;
 pub mod tag;
 pub mod variant;
 pub mod wire_format;
-pub mod descriptor;
 
 // Re-export commonly used items for convenience
 pub use self::field_number::FieldNumber;
