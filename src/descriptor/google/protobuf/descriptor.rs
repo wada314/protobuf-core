@@ -2,6 +2,8 @@
 //!
 //! This module contains the data structures and constants defined in descriptor.proto
 
+use crate::descriptor::DescriptorEnum;
+
 // Wrapped types for type safety
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,6 +41,20 @@ impl Edition {
 
     pub fn is_modern(&self) -> bool {
         matches!(self.0, 1000 | 1001)
+    }
+}
+
+impl DescriptorEnum for Edition {
+    fn value(&self) -> i32 {
+        self.0
+    }
+
+    fn from_value(value: i32) -> Self {
+        Self(value)
+    }
+
+    fn is_known(&self) -> bool {
+        self.is_known()
     }
 }
 

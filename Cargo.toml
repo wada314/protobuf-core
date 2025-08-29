@@ -5,3 +5,9 @@ edition = "2021"
 
 [dependencies]
 thiserror = "1.0"
+
+[features]
+default = []
+descriptor-encode = []
+descriptor-decode = []
+descriptor-full = ["descriptor-encode", "descriptor-decode"]
