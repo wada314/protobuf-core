@@ -8,7 +8,7 @@ use crate::wire_format::{
     WireType, FIELD_NUMBER_SHIFT, MAX_FIELD_NUMBER, MIN_FIELD_NUMBER, WIRE_TYPE_MASK,
 };
 use crate::{ProtobufError, Result};
-use std::convert::TryFrom;
+use ::std::convert::TryFrom;
 
 /// Build a tag from field number and wire type.
 ///

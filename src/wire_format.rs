@@ -5,7 +5,7 @@
 //! official wire format specification.
 
 use crate::field_number::FieldNumber;
-use std::convert::TryFrom;
+use ::std::convert::TryFrom;
 
 /// Wire types used in Protocol Buffers encoding.
 ///
