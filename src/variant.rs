@@ -15,7 +15,7 @@
 //! # Design Decisions
 //!
 //! ## read_variant function
-//! The function returns the VariantValue if successfully read.
+//! The function returns the Variant if successfully read.
 //! Returns `Ok(None)` if no input is available (empty iterator).
 //! Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
 //!
@@ -41,7 +41,7 @@ use crate::{ProtobufError, Result};
 pub struct Variant([u8; 8]);
 
 impl Variant {
-    /// Create a new VariantValue from raw bytes.
+    /// Create a new Variant from raw bytes.
     ///
     /// This constructor takes the raw bytes as they appear in the serialized data.
     /// The user must ensure the bytes represent a valid variant encoding.
@@ -56,7 +56,7 @@ impl Variant {
 
     /// Convert to protobuf UInt64 type (64-bit unsigned integer).
     ///
-    /// Since the VariantValue contains the decoded value (not encoded varint),
+    /// Since the Variant contains the decoded value (not encoded varint),
     /// this method simply converts the 8-byte array to u64 using little-endian interpretation.
     pub fn to_uint64(&self) -> u64 {
         // Use Rust's built-in method to convert bytes to u64
@@ -123,7 +123,7 @@ impl Variant {
         Ok(value != 0)
     }
 
-    /// Create a VariantValue from a u64 value for debugging and testing purposes.
+    /// Create a Variant from a u64 value for debugging and testing purposes.
     ///
     /// This method is intended for creating test data and debugging scenarios.
     /// It converts the u64 value to its little-endian byte representation.
@@ -134,9 +134,9 @@ impl Variant {
     ///
     /// # Example
     /// ```
-    /// use protobuf_core::variant::VariantValue;
+    /// use protobuf_core::variant::Variant;
     ///
-    /// let variant = VariantValue::debug_from_u64(150);
+    /// let variant = Variant::debug_from_u64(150);
     /// assert_eq!(variant.to_uint64(), 150);
     /// ```
     #[cfg(test)]
@@ -192,14 +192,7 @@ where
     }
 
     // Convert the decoded u64 value to 8-byte array (little-endian)
-    // This is a reference implementation - implementors may optimize this
-    // by using u64::to_le_bytes() or other platform-specific optimizations
-    let mut result_bytes = [0u8; 8];
-    for i in 0..8 {
-        // Extract each byte from the u64 value
-        // For little-endian: least significant byte first
-        result_bytes[i] = ((decoded_value >> (i * 8)) & 0xFF) as u8;
-    }
+    let result_bytes = decoded_value.to_le_bytes();
 
     Ok(Some(Variant::new(result_bytes)))
 }
