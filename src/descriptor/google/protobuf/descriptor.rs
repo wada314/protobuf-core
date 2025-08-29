@@ -3,6 +3,7 @@
 //! This module contains the data structures and constants defined in descriptor.proto
 
 // Wrapped types for type safety
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Edition(i32);
 
@@ -41,6 +42,7 @@ impl Edition {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FieldType(i32);
 
@@ -85,6 +87,7 @@ impl FieldType {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FieldLabel(i32);
 
@@ -106,6 +109,7 @@ impl FieldLabel {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OptimizeMode(i32);
 
@@ -127,6 +131,7 @@ impl OptimizeMode {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CType(i32);
 
@@ -148,6 +153,7 @@ impl CType {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct JSType(i32);
 
@@ -169,6 +175,7 @@ impl JSType {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OptionRetention(i32);
 
@@ -190,6 +197,7 @@ impl OptionRetention {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OptionTargetType(i32);
 
@@ -218,6 +226,7 @@ impl OptionTargetType {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SymbolVisibility(i32);
 
@@ -239,6 +248,7 @@ impl SymbolVisibility {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FieldPresence(i32);
 
@@ -261,6 +271,7 @@ impl FieldPresence {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EnumType(i32);
 
@@ -282,6 +293,7 @@ impl EnumType {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RepeatedFieldEncoding(i32);
 
@@ -303,6 +315,7 @@ impl RepeatedFieldEncoding {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Utf8Validation(i32);
 
@@ -324,6 +337,7 @@ impl Utf8Validation {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MessageEncoding(i32);
 
@@ -345,6 +359,7 @@ impl MessageEncoding {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct JsonFormat(i32);
 
@@ -366,6 +381,7 @@ impl JsonFormat {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EnforceNamingStyle(i32);
 
@@ -387,6 +403,7 @@ impl EnforceNamingStyle {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DefaultSymbolVisibility(i32);
 
@@ -410,6 +427,7 @@ impl DefaultSymbolVisibility {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IdempotencyLevel(i32);
 
@@ -417,6 +435,31 @@ impl IdempotencyLevel {
     pub const UNKNOWN: Self = Self(0);
     pub const NO_SIDE_EFFECTS: Self = Self(1);
     pub const IDEMPOTENT: Self = Self(2);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
+    }
+}
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Semantic(i32);
+
+impl Semantic {
+    /// There is no effect or the effect is indescribable
+    pub const NONE: Self = Self(0);
+    /// The element is set or otherwise mutated
+    pub const SET: Self = Self(1);
+    /// An alias to the element is returned
+    pub const ALIAS: Self = Self(2);
 
     pub fn new(value: i32) -> Self {
         Self(value)
@@ -483,17 +526,6 @@ pub struct Location;
 
 /// Annotation connecting generated code to source
 pub struct Annotation;
-
-/// Semantic effect of an annotation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Semantic {
-    /// There is no effect or the effect is indescribable
-    None = 0,
-    /// The element is set or otherwise mutated
-    Set = 1,
-    /// An alias to the element is returned
-    Alias = 2,
-}
 
 // Remaining modules that are larger or have more complex structures
 pub mod extension_range_options;
