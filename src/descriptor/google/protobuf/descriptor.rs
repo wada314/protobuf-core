@@ -4,7 +4,7 @@
 
 // Wrapped types for type safety
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Edition(i32);
 
 impl Edition {
@@ -42,8 +42,28 @@ impl Edition {
     }
 }
 
+impl std::fmt::Debug for Edition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Edition::UNKNOWN => write!(f, "Edition::UNKNOWN"),
+            Edition::LEGACY => write!(f, "Edition::LEGACY"),
+            Edition::PROTO2 => write!(f, "Edition::PROTO2"),
+            Edition::PROTO3 => write!(f, "Edition::PROTO3"),
+            Edition::EDITION_2023 => write!(f, "Edition::EDITION_2023"),
+            Edition::EDITION_2024 => write!(f, "Edition::EDITION_2024"),
+            Edition::EDITION_1_TEST_ONLY => write!(f, "Edition::EDITION_1_TEST_ONLY"),
+            Edition::EDITION_2_TEST_ONLY => write!(f, "Edition::EDITION_2_TEST_ONLY"),
+            Edition::EDITION_99997_TEST_ONLY => write!(f, "Edition::EDITION_99997_TEST_ONLY"),
+            Edition::EDITION_99998_TEST_ONLY => write!(f, "Edition::EDITION_99998_TEST_ONLY"),
+            Edition::EDITION_99999_TEST_ONLY => write!(f, "Edition::EDITION_99999_TEST_ONLY"),
+            Edition::EDITION_MAX => write!(f, "Edition::EDITION_MAX"),
+            _ => write!(f, "Edition({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FieldType(i32);
 
 impl FieldType {
@@ -87,8 +107,34 @@ impl FieldType {
     }
 }
 
+impl std::fmt::Debug for FieldType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            FieldType::DOUBLE => write!(f, "FieldType::DOUBLE"),
+            FieldType::FLOAT => write!(f, "FieldType::FLOAT"),
+            FieldType::INT64 => write!(f, "FieldType::INT64"),
+            FieldType::UINT64 => write!(f, "FieldType::UINT64"),
+            FieldType::INT32 => write!(f, "FieldType::INT32"),
+            FieldType::FIXED64 => write!(f, "FieldType::FIXED64"),
+            FieldType::FIXED32 => write!(f, "FieldType::FIXED32"),
+            FieldType::BOOL => write!(f, "FieldType::BOOL"),
+            FieldType::STRING => write!(f, "FieldType::STRING"),
+            FieldType::GROUP => write!(f, "FieldType::GROUP"),
+            FieldType::MESSAGE => write!(f, "FieldType::MESSAGE"),
+            FieldType::BYTES => write!(f, "FieldType::BYTES"),
+            FieldType::UINT32 => write!(f, "FieldType::UINT32"),
+            FieldType::ENUM => write!(f, "FieldType::ENUM"),
+            FieldType::SFIXED32 => write!(f, "FieldType::SFIXED32"),
+            FieldType::SFIXED64 => write!(f, "FieldType::SFIXED64"),
+            FieldType::SINT32 => write!(f, "FieldType::SINT32"),
+            FieldType::SINT64 => write!(f, "FieldType::SINT64"),
+            _ => write!(f, "FieldType({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FieldLabel(i32);
 
 impl FieldLabel {
@@ -109,8 +155,19 @@ impl FieldLabel {
     }
 }
 
+impl std::fmt::Debug for FieldLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            FieldLabel::OPTIONAL => write!(f, "FieldLabel::OPTIONAL"),
+            FieldLabel::REQUIRED => write!(f, "FieldLabel::REQUIRED"),
+            FieldLabel::REPEATED => write!(f, "FieldLabel::REPEATED"),
+            _ => write!(f, "FieldLabel({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OptimizeMode(i32);
 
 impl OptimizeMode {
@@ -131,8 +188,19 @@ impl OptimizeMode {
     }
 }
 
+impl std::fmt::Debug for OptimizeMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            OptimizeMode::SPEED => write!(f, "OptimizeMode::SPEED"),
+            OptimizeMode::CODE_SIZE => write!(f, "OptimizeMode::CODE_SIZE"),
+            OptimizeMode::LITE_RUNTIME => write!(f, "OptimizeMode::LITE_RUNTIME"),
+            _ => write!(f, "OptimizeMode({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CType(i32);
 
 impl CType {
@@ -153,8 +221,19 @@ impl CType {
     }
 }
 
+impl std::fmt::Debug for CType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            CType::STRING => write!(f, "CType::STRING"),
+            CType::CORD => write!(f, "CType::CORD"),
+            CType::STRING_PIECE => write!(f, "CType::STRING_PIECE"),
+            _ => write!(f, "CType({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct JSType(i32);
 
 impl JSType {
@@ -175,8 +254,19 @@ impl JSType {
     }
 }
 
+impl std::fmt::Debug for JSType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            JSType::NORMAL => write!(f, "JSType::NORMAL"),
+            JSType::STRING => write!(f, "JSType::STRING"),
+            JSType::NUMBER => write!(f, "JSType::NUMBER"),
+            _ => write!(f, "JSType({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OptionRetention(i32);
 
 impl OptionRetention {
@@ -197,8 +287,19 @@ impl OptionRetention {
     }
 }
 
+impl std::fmt::Debug for OptionRetention {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            OptionRetention::UNKNOWN => write!(f, "OptionRetention::UNKNOWN"),
+            OptionRetention::RUNTIME => write!(f, "OptionRetention::RUNTIME"),
+            OptionRetention::SOURCE => write!(f, "OptionRetention::SOURCE"),
+            _ => write!(f, "OptionRetention({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OptionTargetType(i32);
 
 impl OptionTargetType {
@@ -226,8 +327,26 @@ impl OptionTargetType {
     }
 }
 
+impl std::fmt::Debug for OptionTargetType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            OptionTargetType::UNKNOWN => write!(f, "OptionTargetType::UNKNOWN"),
+            OptionTargetType::FILE => write!(f, "OptionTargetType::FILE"),
+            OptionTargetType::EXTENSION_RANGE => write!(f, "OptionTargetType::EXTENSION_RANGE"),
+            OptionTargetType::MESSAGE => write!(f, "OptionTargetType::MESSAGE"),
+            OptionTargetType::FIELD => write!(f, "OptionTargetType::FIELD"),
+            OptionTargetType::ONEOF => write!(f, "OptionTargetType::ONEOF"),
+            OptionTargetType::ENUM => write!(f, "OptionTargetType::ENUM"),
+            OptionTargetType::ENUM_ENTRY => write!(f, "OptionTargetType::ENUM_ENTRY"),
+            OptionTargetType::SERVICE => write!(f, "OptionTargetType::SERVICE"),
+            OptionTargetType::METHOD => write!(f, "OptionTargetType::METHOD"),
+            _ => write!(f, "OptionTargetType({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SymbolVisibility(i32);
 
 impl SymbolVisibility {
@@ -248,8 +367,19 @@ impl SymbolVisibility {
     }
 }
 
+impl std::fmt::Debug for SymbolVisibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            SymbolVisibility::UNSET => write!(f, "SymbolVisibility::UNSET"),
+            SymbolVisibility::LOCAL => write!(f, "SymbolVisibility::LOCAL"),
+            SymbolVisibility::EXPORT => write!(f, "SymbolVisibility::EXPORT"),
+            _ => write!(f, "SymbolVisibility({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FieldPresence(i32);
 
 impl FieldPresence {
@@ -271,8 +401,20 @@ impl FieldPresence {
     }
 }
 
+impl std::fmt::Debug for FieldPresence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            FieldPresence::UNKNOWN => write!(f, "FieldPresence::UNKNOWN"),
+            FieldPresence::EXPLICIT => write!(f, "FieldPresence::EXPLICIT"),
+            FieldPresence::IMPLICIT => write!(f, "FieldPresence::IMPLICIT"),
+            FieldPresence::LEGACY_REQUIRED => write!(f, "FieldPresence::LEGACY_REQUIRED"),
+            _ => write!(f, "FieldPresence({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EnumType(i32);
 
 impl EnumType {
@@ -293,8 +435,19 @@ impl EnumType {
     }
 }
 
+impl std::fmt::Debug for EnumType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            EnumType::UNKNOWN => write!(f, "EnumType::UNKNOWN"),
+            EnumType::OPEN => write!(f, "EnumType::OPEN"),
+            EnumType::CLOSED => write!(f, "EnumType::CLOSED"),
+            _ => write!(f, "EnumType({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RepeatedFieldEncoding(i32);
 
 impl RepeatedFieldEncoding {
@@ -315,8 +468,19 @@ impl RepeatedFieldEncoding {
     }
 }
 
+impl std::fmt::Debug for RepeatedFieldEncoding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            RepeatedFieldEncoding::UNKNOWN => write!(f, "RepeatedFieldEncoding::UNKNOWN"),
+            RepeatedFieldEncoding::PACKED => write!(f, "RepeatedFieldEncoding::PACKED"),
+            RepeatedFieldEncoding::EXPANDED => write!(f, "RepeatedFieldEncoding::EXPANDED"),
+            _ => write!(f, "RepeatedFieldEncoding({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Utf8Validation(i32);
 
 impl Utf8Validation {
@@ -337,8 +501,19 @@ impl Utf8Validation {
     }
 }
 
+impl std::fmt::Debug for Utf8Validation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Utf8Validation::UNKNOWN => write!(f, "Utf8Validation::UNKNOWN"),
+            Utf8Validation::VERIFY => write!(f, "Utf8Validation::VERIFY"),
+            Utf8Validation::NONE => write!(f, "Utf8Validation::NONE"),
+            _ => write!(f, "Utf8Validation({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MessageEncoding(i32);
 
 impl MessageEncoding {
@@ -359,8 +534,19 @@ impl MessageEncoding {
     }
 }
 
+impl std::fmt::Debug for MessageEncoding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            MessageEncoding::UNKNOWN => write!(f, "MessageEncoding::UNKNOWN"),
+            MessageEncoding::LENGTH_PREFIXED => write!(f, "MessageEncoding::LENGTH_PREFIXED"),
+            MessageEncoding::DELIMITED => write!(f, "MessageEncoding::DELIMITED"),
+            _ => write!(f, "MessageEncoding({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct JsonFormat(i32);
 
 impl JsonFormat {
@@ -381,8 +567,19 @@ impl JsonFormat {
     }
 }
 
+impl std::fmt::Debug for JsonFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            JsonFormat::UNKNOWN => write!(f, "JsonFormat::UNKNOWN"),
+            JsonFormat::ALLOW => write!(f, "JsonFormat::ALLOW"),
+            JsonFormat::LEGACY_BEST_EFFORT => write!(f, "JsonFormat::LEGACY_BEST_EFFORT"),
+            _ => write!(f, "JsonFormat({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EnforceNamingStyle(i32);
 
 impl EnforceNamingStyle {
@@ -403,8 +600,19 @@ impl EnforceNamingStyle {
     }
 }
 
+impl std::fmt::Debug for EnforceNamingStyle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            EnforceNamingStyle::UNKNOWN => write!(f, "EnforceNamingStyle::UNKNOWN"),
+            EnforceNamingStyle::STYLE_2024 => write!(f, "EnforceNamingStyle::STYLE_2024"),
+            EnforceNamingStyle::STYLE_LEGACY => write!(f, "EnforceNamingStyle::STYLE_LEGACY"),
+            _ => write!(f, "EnforceNamingStyle({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DefaultSymbolVisibility(i32);
 
 impl DefaultSymbolVisibility {
@@ -427,8 +635,23 @@ impl DefaultSymbolVisibility {
     }
 }
 
+impl std::fmt::Debug for DefaultSymbolVisibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            DefaultSymbolVisibility::UNKNOWN => write!(f, "DefaultSymbolVisibility::UNKNOWN"),
+            DefaultSymbolVisibility::EXPORT_ALL => write!(f, "DefaultSymbolVisibility::EXPORT_ALL"),
+            DefaultSymbolVisibility::EXPORT_TOP_LEVEL => {
+                write!(f, "DefaultSymbolVisibility::EXPORT_TOP_LEVEL")
+            }
+            DefaultSymbolVisibility::LOCAL_ALL => write!(f, "DefaultSymbolVisibility::LOCAL_ALL"),
+            DefaultSymbolVisibility::STRICT => write!(f, "DefaultSymbolVisibility::STRICT"),
+            _ => write!(f, "DefaultSymbolVisibility({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IdempotencyLevel(i32);
 
 impl IdempotencyLevel {
@@ -449,8 +672,19 @@ impl IdempotencyLevel {
     }
 }
 
+impl std::fmt::Debug for IdempotencyLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            IdempotencyLevel::UNKNOWN => write!(f, "IdempotencyLevel::UNKNOWN"),
+            IdempotencyLevel::NO_SIDE_EFFECTS => write!(f, "IdempotencyLevel::NO_SIDE_EFFECTS"),
+            IdempotencyLevel::IDEMPOTENT => write!(f, "IdempotencyLevel::IDEMPOTENT"),
+            _ => write!(f, "IdempotencyLevel({})", self.0),
+        }
+    }
+}
+
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Semantic(i32);
 
 impl Semantic {
@@ -471,6 +705,17 @@ impl Semantic {
 
     pub fn is_known(&self) -> bool {
         matches!(self.0, 0 | 1 | 2)
+    }
+}
+
+impl std::fmt::Debug for Semantic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Semantic::NONE => write!(f, "Semantic::NONE"),
+            Semantic::SET => write!(f, "Semantic::SET"),
+            Semantic::ALIAS => write!(f, "Semantic::ALIAS"),
+            _ => write!(f, "Semantic({})", self.0),
+        }
     }
 }
 
