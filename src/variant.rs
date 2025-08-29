@@ -295,15 +295,25 @@ mod tests {
 
     #[test]
     fn test_variant_conversions() {
-        let bytes = [0x96, 0x01, 0, 0, 0, 0, 0, 0]; // 0x0196 = 406
+        // 406 in little-endian: 0x96, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        let bytes = [0x96, 0x01, 0, 0, 0, 0, 0, 0];
         let variant = Variant::new(bytes);
 
         // Test all integer conversions
         assert_eq!(variant.to_uint64(), 406);
-        assert_eq!(variant.to_uint32(), Ok(406));
+        match variant.to_uint32() {
+            Ok(value) => assert_eq!(value, 406),
+            Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
+        }
         assert_eq!(variant.to_int64(), 406);
-        assert_eq!(variant.to_int32(), Ok(406));
-        assert_eq!(variant.to_bool(), Ok(true));
+        match variant.to_int32() {
+            Ok(value) => assert_eq!(value, 406),
+            Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
+        }
+        match variant.to_bool() {
+            Ok(value) => assert_eq!(value, true),
+            Err(e) => panic!("Expected Ok(true), got error: {:?}", e),
+        }
     }
 
     #[test]
@@ -313,7 +323,10 @@ mod tests {
         let variant = Variant::new(bytes);
 
         assert_eq!(variant.to_sint64(), -1);
-        assert_eq!(variant.to_sint32(), Ok(-1));
+        match variant.to_sint32() {
+            Ok(value) => assert_eq!(value, -1),
+            Err(e) => panic!("Expected Ok(-1), got error: {:?}", e),
+        }
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! This module contains the data structures and constants defined in descriptor.proto
 //! and plugin.proto, along with basic encoding/decoding capabilities.
 
-use crate::Result;
+use crate::{ProtobufError, Result};
 use std::io::{Read, Write};
 
 /// Basic trait for descriptor messages that can be encoded/decoded
@@ -41,17 +41,32 @@ pub mod encode {
     pub fn encode_varint(writer: &mut impl Write, value: u64) -> Result<()> {
         let mut val = value;
         while val >= 0x80 {
-            writer.write_all(&[((val & 0x7F) | 0x80) as u8])?;
+            writer
+                .write_all(&[((val & 0x7F) | 0x80) as u8])
+                .map_err(|_e| ProtobufError::VariantDowncastOutOfRange {
+                    value: 0,
+                    target_type: "varint encoding",
+                })?;
             val >>= 7;
         }
-        writer.write_all(&[val as u8])?;
+        writer
+            .write_all(&[val as u8])
+            .map_err(|_e| ProtobufError::VariantDowncastOutOfRange {
+                value: 0,
+                target_type: "varint encoding",
+            })?;
         Ok(())
     }
 
     /// Encode a length-delimited field
     pub fn encode_length_delimited(writer: &mut impl Write, data: &[u8]) -> Result<()> {
         encode_varint(writer, data.len() as u64)?;
-        writer.write_all(data)?;
+        writer
+            .write_all(data)
+            .map_err(|_e| ProtobufError::VariantDowncastOutOfRange {
+                value: 0,
+                target_type: "length-delimited encoding",
+            })?;
         Ok(())
     }
 
@@ -102,7 +117,12 @@ pub mod decode {
 
         loop {
             let mut byte = [0u8; 1];
-            reader.read_exact(&mut byte)?;
+            reader.read_exact(&mut byte).map_err(|_e| {
+                ProtobufError::VariantDowncastOutOfRange {
+                    value: 0,
+                    target_type: "varint decoding",
+                }
+            })?;
             let b = byte[0];
 
             result |= ((b & 0x7F) as u64) << shift;
@@ -111,7 +131,10 @@ pub mod decode {
             }
             shift += 7;
             if shift >= 64 {
-                return Err(crate::ProtobufError::VariantDowncastOutOfRange);
+                return Err(ProtobufError::VariantDowncastOutOfRange {
+                    value: result,
+                    target_type: "varint (too long)",
+                });
             }
         }
 
@@ -122,7 +145,12 @@ pub mod decode {
     pub fn decode_length_delimited(reader: &mut impl Read) -> Result<Vec<u8>> {
         let length = decode_varint(reader)? as usize;
         let mut data = vec![0u8; length];
-        reader.read_exact(&mut data)?;
+        reader
+            .read_exact(&mut data)
+            .map_err(|_e| ProtobufError::VariantDowncastOutOfRange {
+                value: 0,
+                target_type: "length-delimited decoding",
+            })?;
         Ok(data)
     }
 
@@ -137,14 +165,20 @@ pub mod decode {
     /// Decode a string field
     pub fn decode_string(reader: &mut impl Read) -> Result<String> {
         let data = decode_length_delimited(reader)?;
-        String::from_utf8(data).map_err(|_| crate::ProtobufError::VariantDowncastOutOfRange)
+        String::from_utf8(data).map_err(|_| ProtobufError::VariantDowncastOutOfRange {
+            value: 0,
+            target_type: "string (invalid UTF-8)",
+        })
     }
 
     /// Decode an int32 field
     pub fn decode_int32(reader: &mut impl Read) -> Result<i32> {
         let value = decode_varint(reader)?;
         if value > i32::MAX as u64 {
-            return Err(crate::ProtobufError::VariantDowncastOutOfRange);
+            return Err(ProtobufError::VariantDowncastOutOfRange {
+                value,
+                target_type: "i32",
+            });
         }
         Ok(value as i32)
     }
@@ -155,7 +189,10 @@ pub mod decode {
         match value {
             0 => Ok(false),
             1 => Ok(true),
-            _ => Err(crate::ProtobufError::VariantDowncastOutOfRange),
+            _ => Err(ProtobufError::VariantDowncastOutOfRange {
+                value,
+                target_type: "bool",
+            }),
         }
     }
 }

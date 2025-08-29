@@ -18,7 +18,7 @@ pub use wire_format::{WireType, MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NU
 use thiserror::Error;
 
 /// Unified error type for all protobuf operations
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 pub enum ProtobufError {
     #[error("Field number {value} is out of valid range [1, {}]", 2u32.pow(29) - 1)]
     FieldNumberOutOfRange { value: u32 },
