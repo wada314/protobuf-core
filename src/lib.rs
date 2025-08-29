@@ -7,6 +7,7 @@ pub mod field_number;
 pub mod tag;
 pub mod variant;
 pub mod wire_format;
+pub mod descriptor;
 
 // Re-export commonly used items for convenience
 pub use self::field_number::FieldNumber;
