@@ -92,9 +92,19 @@ This project aims to create a **language-neutral protobuf utility library** that
      - Enables consistent error handling across all protobuf operations
      - Makes code more readable with `Result<T>` instead of `Result<T, ProtobufError>`
 
+6. **Protobuf Descriptor Structures** (`src/descriptor/`)
+   - **Module structure**: Organized following protobuf package hierarchy
+     - `google.protobuf` - Core descriptor definitions
+     - `google.protobuf.compiler` - Plugin-related structures
+   - **Implementation approach**: Constant-based wrapped i32 types (see design decisions below)
+   - **Coverage**: Basic structure outlines for descriptor.proto and plugin.proto
+   - **Status**: Skeleton structures completed, field implementation pending
+
 ### 🔄 Next Steps
-5. **Minimum error types** - Essential error handling for protobuf operations
-6. **Descriptor.proto and plugin.proto** - Minimal implementations for code generation support
+7. **Implement constant-based wrapped i32 types** for protobuf enums
+8. **Add fields to descriptor structures** 
+9. **Minimum error types** - Essential error handling for protobuf operations
+10. **Descriptor.proto and plugin.proto** - Complete implementations for code generation support
 
 ## Design Decisions
 
@@ -107,6 +117,50 @@ This project aims to create a **language-neutral protobuf utility library** that
 - `wire_format.rs` - Core constants and wire type definitions
 - `variant.rs` - Variant encoding/decoding logic (renamed from varint.rs)
 - `tag.rs` - Tag construction and parsing operations
+
+### Protobuf Enum Implementation Strategy
+**Decision**: Use constant-based wrapped i32 types instead of Rust enums
+
+**Analysis of approaches considered**:
+
+1. **Rust enums (original approach)**
+   - ❌ Cannot handle unknown protobuf values
+   - ❌ Breaks protobuf's dynamic nature
+   - ❌ Requires library updates for new protobuf versions
+   - ✅ Type safety and pattern matching
+
+2. **`#[non_exhaustive]` enums**
+   - ❌ Still requires library updates for new values
+   - ❌ Users must wait for library updates
+   - ✅ Type safety and pattern matching
+   - ✅ Handles unknown values
+
+3. **Constant-based wrapped i32 types (chosen approach)**
+   - ✅ Immediate compatibility with new protobuf values
+   - ✅ No dependency on library updates
+   - ✅ Protobuf specification compliance
+   - ✅ Supports match-case syntax (though not exhaustive)
+   - ✅ Backward compatibility
+   - ✅ Follows Google's official Rust implementation
+
+**Key insight**: Protobuf's dynamic nature means new enum values can be added without library updates. The constant-based approach allows users to use new values immediately, while wrapped types provide some type safety and match-case capability.
+
+**Implementation pattern**:
+```rust
+pub const EDITION_UNKNOWN: i32 = 0;
+pub const EDITION_PROTO2: i32 = 998;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Edition(i32);
+
+impl Edition {
+    pub const UNKNOWN: Self = Self(EDITION_UNKNOWN);
+    pub const PROTO2: Self = Self(EDITION_PROTO2);
+    
+    pub fn new(value: i32) -> Self { Self(value) }
+    pub fn value(&self) -> i32 { self.0 }
+}
+```
 
 ## Official Protocol Buffer Documentation:
 https://protobuf.dev/
