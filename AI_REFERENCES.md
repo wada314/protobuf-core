@@ -100,11 +100,45 @@ This project aims to create a **language-neutral protobuf utility library** that
    - **Coverage**: Basic structure outlines for descriptor.proto and plugin.proto
    - **Status**: Skeleton structures completed, field implementation pending
 
+7. **Enum to Constant-Based Wrapped i32 Types Conversion** (`src/descriptor/`)
+   - **Complete conversion**: All protobuf enums converted from Rust enums to constant-based wrapped i32 types
+   - **Files updated**:
+     - `descriptor.rs`: 18 enum types converted (Edition, FieldType, FieldLabel, OptimizeMode, CType, JSType, OptionRetention, OptionTargetType, SymbolVisibility, FieldPresence, EnumType, RepeatedFieldEncoding, Utf8Validation, MessageEncoding, JsonFormat, EnforceNamingStyle, DefaultSymbolVisibility, IdempotencyLevel, Semantic)
+     - `plugin.rs`: Feature enum converted
+     - `feature_set.rs`: DefaultSymbolVisibility enum converted
+     - `extension_range_options.rs`: VerificationState enum converted
+   - **Implementation pattern**:
+     ```rust
+     #[repr(transparent)]
+     #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+     pub struct TypeName(i32);
+     
+     impl TypeName {
+         pub const VARIANT: Self = Self(value);
+         // ... other constants
+         
+         pub fn new(value: i32) -> Self { Self(value) }
+         pub fn value(&self) -> i32 { self.0 }
+         pub fn is_known(&self) -> bool { matches!(self.0, value1 | value2 | ...) }
+     }
+     ```
+
+8. **Manual Debug Implementation for All Wrapped Types**
+   - **Custom Debug output**: Provides readable constant names instead of raw i32 values
+   - **Pattern matching approach**: Uses `match *self` for correct pattern matching behavior
+   - **Output format**: `TypeName::VARIANT` for known values, `TypeName(value)` for unknown values
+   - **Example output**:
+     - Known: `Edition::EDITION_2023` instead of `Edition(1000)`
+     - Unknown: `Edition(9999)` for unrecognized values
+   - **Benefits**:
+     - Eliminates dependency on `derive_more` crate
+     - Provides consistent, readable debug output across all types
+     - Maintains zero-cost abstraction with `#[repr(transparent)]`
+
 ### 🔄 Next Steps
-7. **Implement constant-based wrapped i32 types** for protobuf enums
-8. **Add fields to descriptor structures** 
-9. **Minimum error types** - Essential error handling for protobuf operations
-10. **Descriptor.proto and plugin.proto** - Complete implementations for code generation support
+9. **Add fields to descriptor structures** 
+10. **Minimum error types** - Essential error handling for protobuf operations
+11. **Descriptor.proto and plugin.proto** - Complete implementations for code generation support
 
 ## Design Decisions
 
@@ -147,20 +181,42 @@ This project aims to create a **language-neutral protobuf utility library** that
 
 **Implementation pattern**:
 ```rust
-pub const EDITION_UNKNOWN: i32 = 0;
-pub const EDITION_PROTO2: i32 = 998;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Edition(i32);
 
 impl Edition {
-    pub const UNKNOWN: Self = Self(EDITION_UNKNOWN);
-    pub const PROTO2: Self = Self(EDITION_PROTO2);
+    pub const UNKNOWN: Self = Self(0);
+    pub const PROTO2: Self = Self(998);
+    pub const PROTO3: Self = Self(999);
     
     pub fn new(value: i32) -> Self { Self(value) }
     pub fn value(&self) -> i32 { self.0 }
+    pub fn is_known(&self) -> bool { matches!(self.0, 0 | 998 | 999) }
+}
+
+impl std::fmt::Debug for Edition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Edition::UNKNOWN => write!(f, "Edition::UNKNOWN"),
+            Edition::PROTO2 => write!(f, "Edition::PROTO2"),
+            Edition::PROTO3 => write!(f, "Edition::PROTO3"),
+            _ => write!(f, "Edition({})", self.0),
+        }
+    }
 }
 ```
+
+### Debug Implementation Strategy
+**Decision**: Manual Debug implementation instead of derive_more dependency
+
+**Benefits**:
+- **Dependency reduction**: Avoids external crate dependency
+- **Custom output**: Provides readable constant names instead of raw values
+- **Consistency**: All types follow the same debug output pattern
+- **Maintainability**: Clear, explicit implementation without magic
+
+**Pattern matching approach**: Uses `match *self` instead of `match self` for correct behavior with wrapped types
 
 ## Official Protocol Buffer Documentation:
 https://protobuf.dev/
