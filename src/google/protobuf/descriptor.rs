@@ -2,7 +2,7 @@
 //!
 //! This module contains the data structures and constants defined in descriptor.proto
 
-use crate::descriptor_utils::DescriptorEnum;
+use crate::descriptor::DescriptorEnum;
 
 // Wrapped types for type safety
 #[repr(transparent)]
