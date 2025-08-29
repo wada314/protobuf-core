@@ -2,140 +2,23 @@
 //!
 //! This module contains the data structures and constants defined in descriptor.proto
 
-// Edition constants
-pub const EDITION_UNKNOWN: i32 = 0;
-pub const EDITION_LEGACY: i32 = 900;
-pub const EDITION_PROTO2: i32 = 998;
-pub const EDITION_PROTO3: i32 = 999;
-pub const EDITION_2023: i32 = 1000;
-pub const EDITION_2024: i32 = 1001;
-pub const EDITION_1_TEST_ONLY: i32 = 1;
-pub const EDITION_2_TEST_ONLY: i32 = 2;
-pub const EDITION_99997_TEST_ONLY: i32 = 99997;
-pub const EDITION_99998_TEST_ONLY: i32 = 99998;
-pub const EDITION_99999_TEST_ONLY: i32 = 99999;
-pub const EDITION_MAX: i32 = 0x7FFFFFFF;
-
-// Field type constants
-pub const TYPE_DOUBLE: i32 = 1;
-pub const TYPE_FLOAT: i32 = 2;
-pub const TYPE_INT64: i32 = 3;
-pub const TYPE_UINT64: i32 = 4;
-pub const TYPE_INT32: i32 = 5;
-pub const TYPE_FIXED64: i32 = 6;
-pub const TYPE_FIXED32: i32 = 7;
-pub const TYPE_BOOL: i32 = 8;
-pub const TYPE_STRING: i32 = 9;
-pub const TYPE_GROUP: i32 = 10;
-pub const TYPE_MESSAGE: i32 = 11;
-pub const TYPE_BYTES: i32 = 12;
-pub const TYPE_UINT32: i32 = 13;
-pub const TYPE_ENUM: i32 = 14;
-pub const TYPE_SFIXED32: i32 = 15;
-pub const TYPE_SFIXED64: i32 = 16;
-pub const TYPE_SINT32: i32 = 17;
-pub const TYPE_SINT64: i32 = 18;
-
-// Field label constants
-pub const LABEL_OPTIONAL: i32 = 1;
-pub const LABEL_REQUIRED: i32 = 2;
-pub const LABEL_REPEATED: i32 = 3;
-
-// Optimize mode constants
-pub const OPTIMIZE_MODE_SPEED: i32 = 1;
-pub const OPTIMIZE_MODE_CODE_SIZE: i32 = 2;
-pub const OPTIMIZE_MODE_LITE_RUNTIME: i32 = 3;
-
-// CType constants
-pub const CTYPE_STRING: i32 = 0;
-pub const CTYPE_CORD: i32 = 1;
-pub const CTYPE_STRING_PIECE: i32 = 2;
-
-// JSType constants
-pub const JSTYPE_NORMAL: i32 = 0;
-pub const JSTYPE_STRING: i32 = 1;
-pub const JSTYPE_NUMBER: i32 = 2;
-
-// Option retention constants
-pub const RETENTION_UNKNOWN: i32 = 0;
-pub const RETENTION_RUNTIME: i32 = 1;
-pub const RETENTION_SOURCE: i32 = 2;
-
-// Option target type constants
-pub const TARGET_TYPE_UNKNOWN: i32 = 0;
-pub const TARGET_TYPE_FILE: i32 = 1;
-pub const TARGET_TYPE_EXTENSION_RANGE: i32 = 2;
-pub const TARGET_TYPE_MESSAGE: i32 = 3;
-pub const TARGET_TYPE_FIELD: i32 = 4;
-pub const TARGET_TYPE_ONEOF: i32 = 5;
-pub const TARGET_TYPE_ENUM: i32 = 6;
-pub const TARGET_TYPE_ENUM_ENTRY: i32 = 7;
-pub const TARGET_TYPE_SERVICE: i32 = 8;
-pub const TARGET_TYPE_METHOD: i32 = 9;
-
-// Symbol visibility constants
-pub const VISIBILITY_UNSET: i32 = 0;
-pub const VISIBILITY_LOCAL: i32 = 1;
-pub const VISIBILITY_EXPORT: i32 = 2;
-
-// Feature constants
-pub const FIELD_PRESENCE_UNKNOWN: i32 = 0;
-pub const FIELD_PRESENCE_EXPLICIT: i32 = 1;
-pub const FIELD_PRESENCE_IMPLICIT: i32 = 2;
-pub const FIELD_PRESENCE_LEGACY_REQUIRED: i32 = 3;
-
-pub const ENUM_TYPE_UNKNOWN: i32 = 0;
-pub const ENUM_TYPE_OPEN: i32 = 1;
-pub const ENUM_TYPE_CLOSED: i32 = 2;
-
-pub const REPEATED_FIELD_ENCODING_UNKNOWN: i32 = 0;
-pub const REPEATED_FIELD_ENCODING_PACKED: i32 = 1;
-pub const REPEATED_FIELD_ENCODING_EXPANDED: i32 = 2;
-
-pub const UTF8_VALIDATION_UNKNOWN: i32 = 0;
-pub const UTF8_VALIDATION_VERIFY: i32 = 2;
-pub const UTF8_VALIDATION_NONE: i32 = 3;
-
-pub const MESSAGE_ENCODING_UNKNOWN: i32 = 0;
-pub const MESSAGE_ENCODING_LENGTH_PREFIXED: i32 = 1;
-pub const MESSAGE_ENCODING_DELIMITED: i32 = 2;
-
-pub const JSON_FORMAT_UNKNOWN: i32 = 0;
-pub const JSON_FORMAT_ALLOW: i32 = 1;
-pub const JSON_FORMAT_LEGACY_BEST_EFFORT: i32 = 2;
-
-pub const ENFORCE_NAMING_STYLE_UNKNOWN: i32 = 0;
-pub const ENFORCE_NAMING_STYLE_2024: i32 = 1;
-pub const ENFORCE_NAMING_STYLE_LEGACY: i32 = 2;
-
-pub const DEFAULT_SYMBOL_VISIBILITY_UNKNOWN: i32 = 0;
-pub const DEFAULT_SYMBOL_VISIBILITY_EXPORT_ALL: i32 = 1;
-pub const DEFAULT_SYMBOL_VISIBILITY_EXPORT_TOP_LEVEL: i32 = 2;
-pub const DEFAULT_SYMBOL_VISIBILITY_LOCAL_ALL: i32 = 3;
-pub const DEFAULT_SYMBOL_VISIBILITY_STRICT: i32 = 4;
-
-// Idempotency level constants
-pub const IDEMPOTENCY_UNKNOWN: i32 = 0;
-pub const IDEMPOTENCY_NO_SIDE_EFFECTS: i32 = 1;
-pub const IDEMPOTENCY_IDEMPOTENT: i32 = 2;
-
 // Wrapped types for type safety
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Edition(i32);
 
 impl Edition {
-    pub const UNKNOWN: Self = Self(EDITION_UNKNOWN);
-    pub const LEGACY: Self = Self(EDITION_LEGACY);
-    pub const PROTO2: Self = Self(EDITION_PROTO2);
-    pub const PROTO3: Self = Self(EDITION_PROTO3);
-    pub const EDITION_2023: Self = Self(EDITION_2023);
-    pub const EDITION_2024: Self = Self(EDITION_2024);
-    pub const EDITION_1_TEST_ONLY: Self = Self(EDITION_1_TEST_ONLY);
-    pub const EDITION_2_TEST_ONLY: Self = Self(EDITION_2_TEST_ONLY);
-    pub const EDITION_99997_TEST_ONLY: Self = Self(EDITION_99997_TEST_ONLY);
-    pub const EDITION_99998_TEST_ONLY: Self = Self(EDITION_99998_TEST_ONLY);
-    pub const EDITION_99999_TEST_ONLY: Self = Self(EDITION_99999_TEST_ONLY);
-    pub const EDITION_MAX: Self = Self(EDITION_MAX);
+    pub const UNKNOWN: Self = Self(0);
+    pub const LEGACY: Self = Self(900);
+    pub const PROTO2: Self = Self(998);
+    pub const PROTO3: Self = Self(999);
+    pub const EDITION_2023: Self = Self(1000);
+    pub const EDITION_2024: Self = Self(1001);
+    pub const EDITION_1_TEST_ONLY: Self = Self(1);
+    pub const EDITION_2_TEST_ONLY: Self = Self(2);
+    pub const EDITION_99997_TEST_ONLY: Self = Self(99997);
+    pub const EDITION_99998_TEST_ONLY: Self = Self(99998);
+    pub const EDITION_99999_TEST_ONLY: Self = Self(99999);
+    pub const EDITION_MAX: Self = Self(0x7FFFFFFF);
 
     pub fn new(value: i32) -> Self {
         Self(value)
@@ -146,23 +29,15 @@ impl Edition {
     }
 
     pub fn is_known(&self) -> bool {
-        matches!(
-            self.0,
-            EDITION_UNKNOWN
-                | EDITION_LEGACY
-                | EDITION_PROTO2
-                | EDITION_PROTO3
-                | EDITION_2023
-                | EDITION_2024
-        )
+        matches!(self.0, 0 | 900 | 998 | 999 | 1000 | 1001)
     }
 
     pub fn is_legacy(&self) -> bool {
-        matches!(self.0, EDITION_PROTO2 | EDITION_PROTO3)
+        matches!(self.0, 998 | 999)
     }
 
     pub fn is_modern(&self) -> bool {
-        matches!(self.0, EDITION_2023 | EDITION_2024)
+        matches!(self.0, 1000 | 1001)
     }
 }
 
@@ -170,24 +45,24 @@ impl Edition {
 pub struct FieldType(i32);
 
 impl FieldType {
-    pub const DOUBLE: Self = Self(TYPE_DOUBLE);
-    pub const FLOAT: Self = Self(TYPE_FLOAT);
-    pub const INT64: Self = Self(TYPE_INT64);
-    pub const UINT64: Self = Self(TYPE_UINT64);
-    pub const INT32: Self = Self(TYPE_INT32);
-    pub const FIXED64: Self = Self(TYPE_FIXED64);
-    pub const FIXED32: Self = Self(TYPE_FIXED32);
-    pub const BOOL: Self = Self(TYPE_BOOL);
-    pub const STRING: Self = Self(TYPE_STRING);
-    pub const GROUP: Self = Self(TYPE_GROUP);
-    pub const MESSAGE: Self = Self(TYPE_MESSAGE);
-    pub const BYTES: Self = Self(TYPE_BYTES);
-    pub const UINT32: Self = Self(TYPE_UINT32);
-    pub const ENUM: Self = Self(TYPE_ENUM);
-    pub const SFIXED32: Self = Self(TYPE_SFIXED32);
-    pub const SFIXED64: Self = Self(TYPE_SFIXED64);
-    pub const SINT32: Self = Self(TYPE_SINT32);
-    pub const SINT64: Self = Self(TYPE_SINT64);
+    pub const DOUBLE: Self = Self(1);
+    pub const FLOAT: Self = Self(2);
+    pub const INT64: Self = Self(3);
+    pub const UINT64: Self = Self(4);
+    pub const INT32: Self = Self(5);
+    pub const FIXED64: Self = Self(6);
+    pub const FIXED32: Self = Self(7);
+    pub const BOOL: Self = Self(8);
+    pub const STRING: Self = Self(9);
+    pub const GROUP: Self = Self(10);
+    pub const MESSAGE: Self = Self(11);
+    pub const BYTES: Self = Self(12);
+    pub const UINT32: Self = Self(13);
+    pub const ENUM: Self = Self(14);
+    pub const SFIXED32: Self = Self(15);
+    pub const SFIXED64: Self = Self(16);
+    pub const SINT32: Self = Self(17);
+    pub const SINT64: Self = Self(18);
 
     pub fn new(value: i32) -> Self {
         Self(value)
@@ -202,17 +77,11 @@ impl FieldType {
     }
 
     pub fn is_integer(&self) -> bool {
-        matches!(
-            self.0,
-            TYPE_INT32 | TYPE_INT64 | TYPE_UINT32 | TYPE_UINT64 | TYPE_SINT32 | TYPE_SINT64
-        )
+        matches!(self.0, 3 | 4 | 5 | 13 | 17 | 18)
     }
 
     pub fn is_fixed(&self) -> bool {
-        matches!(
-            self.0,
-            TYPE_FIXED32 | TYPE_FIXED64 | TYPE_SFIXED32 | TYPE_SFIXED64
-        )
+        matches!(self.0, 6 | 7 | 15 | 16)
     }
 }
 
@@ -220,9 +89,9 @@ impl FieldType {
 pub struct FieldLabel(i32);
 
 impl FieldLabel {
-    pub const OPTIONAL: Self = Self(LABEL_OPTIONAL);
-    pub const REQUIRED: Self = Self(LABEL_REQUIRED);
-    pub const REPEATED: Self = Self(LABEL_REPEATED);
+    pub const OPTIONAL: Self = Self(1);
+    pub const REQUIRED: Self = Self(2);
+    pub const REPEATED: Self = Self(3);
 
     pub fn new(value: i32) -> Self {
         Self(value)
@@ -233,7 +102,332 @@ impl FieldLabel {
     }
 
     pub fn is_known(&self) -> bool {
-        matches!(self.0, LABEL_OPTIONAL | LABEL_REQUIRED | LABEL_REPEATED)
+        matches!(self.0, 1 | 2 | 3)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OptimizeMode(i32);
+
+impl OptimizeMode {
+    pub const SPEED: Self = Self(1);
+    pub const CODE_SIZE: Self = Self(2);
+    pub const LITE_RUNTIME: Self = Self(3);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 1 | 2 | 3)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CType(i32);
+
+impl CType {
+    pub const STRING: Self = Self(0);
+    pub const CORD: Self = Self(1);
+    pub const STRING_PIECE: Self = Self(2);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct JSType(i32);
+
+impl JSType {
+    pub const NORMAL: Self = Self(0);
+    pub const STRING: Self = Self(1);
+    pub const NUMBER: Self = Self(2);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OptionRetention(i32);
+
+impl OptionRetention {
+    pub const UNKNOWN: Self = Self(0);
+    pub const RUNTIME: Self = Self(1);
+    pub const SOURCE: Self = Self(2);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OptionTargetType(i32);
+
+impl OptionTargetType {
+    pub const UNKNOWN: Self = Self(0);
+    pub const FILE: Self = Self(1);
+    pub const EXTENSION_RANGE: Self = Self(2);
+    pub const MESSAGE: Self = Self(3);
+    pub const FIELD: Self = Self(4);
+    pub const ONEOF: Self = Self(5);
+    pub const ENUM: Self = Self(6);
+    pub const ENUM_ENTRY: Self = Self(7);
+    pub const SERVICE: Self = Self(8);
+    pub const METHOD: Self = Self(9);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        (0..=9).contains(&self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SymbolVisibility(i32);
+
+impl SymbolVisibility {
+    pub const UNSET: Self = Self(0);
+    pub const LOCAL: Self = Self(1);
+    pub const EXPORT: Self = Self(2);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FieldPresence(i32);
+
+impl FieldPresence {
+    pub const UNKNOWN: Self = Self(0);
+    pub const EXPLICIT: Self = Self(1);
+    pub const IMPLICIT: Self = Self(2);
+    pub const LEGACY_REQUIRED: Self = Self(3);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2 | 3)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EnumType(i32);
+
+impl EnumType {
+    pub const UNKNOWN: Self = Self(0);
+    pub const OPEN: Self = Self(1);
+    pub const CLOSED: Self = Self(2);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RepeatedFieldEncoding(i32);
+
+impl RepeatedFieldEncoding {
+    pub const UNKNOWN: Self = Self(0);
+    pub const PACKED: Self = Self(1);
+    pub const EXPANDED: Self = Self(2);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Utf8Validation(i32);
+
+impl Utf8Validation {
+    pub const UNKNOWN: Self = Self(0);
+    pub const VERIFY: Self = Self(2);
+    pub const NONE: Self = Self(3);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 2 | 3)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MessageEncoding(i32);
+
+impl MessageEncoding {
+    pub const UNKNOWN: Self = Self(0);
+    pub const LENGTH_PREFIXED: Self = Self(1);
+    pub const DELIMITED: Self = Self(2);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct JsonFormat(i32);
+
+impl JsonFormat {
+    pub const UNKNOWN: Self = Self(0);
+    pub const ALLOW: Self = Self(1);
+    pub const LEGACY_BEST_EFFORT: Self = Self(2);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EnforceNamingStyle(i32);
+
+impl EnforceNamingStyle {
+    pub const UNKNOWN: Self = Self(0);
+    pub const STYLE_2024: Self = Self(1);
+    pub const STYLE_LEGACY: Self = Self(2);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DefaultSymbolVisibility(i32);
+
+impl DefaultSymbolVisibility {
+    pub const UNKNOWN: Self = Self(0);
+    pub const EXPORT_ALL: Self = Self(1);
+    pub const EXPORT_TOP_LEVEL: Self = Self(2);
+    pub const LOCAL_ALL: Self = Self(3);
+    pub const STRICT: Self = Self(4);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2 | 3 | 4)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IdempotencyLevel(i32);
+
+impl IdempotencyLevel {
+    pub const UNKNOWN: Self = Self(0);
+    pub const NO_SIDE_EFFECTS: Self = Self(1);
+    pub const IDEMPOTENT: Self = Self(2);
+
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_known(&self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
     }
 }
 
