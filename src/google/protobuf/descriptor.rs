@@ -952,7 +952,7 @@ impl UninterpretedOption {
 
     // Optional field getters with defaults
     pub fn identifier_value(&self) -> &str {
-        self.identifier_value.as_deref().unwrap_or("")
+        self.identifier_value.as_deref().unwrap_or_default()
     }
     pub fn positive_int_value(&self) -> u64 {
         self.positive_int_value.unwrap_or_default()
@@ -964,10 +964,10 @@ impl UninterpretedOption {
         self.double_value.unwrap_or_default()
     }
     pub fn string_value(&self) -> &[u8] {
-        self.string_value.as_deref().unwrap_or(&[])
+        self.string_value.as_deref().unwrap_or_default()
     }
     pub fn aggregate_value(&self) -> &str {
-        self.aggregate_value.as_deref().unwrap_or("")
+        self.aggregate_value.as_deref().unwrap_or_default()
     }
 
     // Has methods for optional fields
