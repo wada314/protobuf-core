@@ -51,6 +51,10 @@ pub struct FieldMetadata {
     pub field_type: FieldType,
     pub value_type: ValueType,
     pub default_value: DefaultValue,
+    /// Closure to get a reference to the field value from a message
+    pub getter: fn(&dyn std::any::Any) -> &dyn std::any::Any,
+    /// Closure to get a mutable reference to the field value from a message
+    pub setter: fn(&mut dyn std::any::Any) -> &mut dyn std::any::Any,
 }
 
 /// Metadata for a protobuf message
