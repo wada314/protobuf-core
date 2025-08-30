@@ -253,3 +253,169 @@ pub mod decode {
         }
     }
 }
+
+// Helper macros for field metadata generation
+macro_rules! get_wire_type {
+    (String) => {
+        crate::wire_format::WireType::Len
+    };
+    (bool) => {
+        crate::wire_format::WireType::Varint
+    };
+    (u64) => {
+        crate::wire_format::WireType::Varint
+    };
+    (i64) => {
+        crate::wire_format::WireType::Varint
+    };
+    (f64) => {
+        crate::wire_format::WireType::I64
+    };
+    (Vec<u8>) => {
+        crate::wire_format::WireType::Len
+    };
+    (Vec<NamePart>) => {
+        crate::wire_format::WireType::Len
+    };
+    ($t:ty) => {
+        compile_error!(concat!("Unsupported type: ", stringify!($t)))
+    };
+}
+
+macro_rules! get_value_type {
+    (String) => {
+        crate::descriptor::ValueType::String
+    };
+    (bool) => {
+        crate::descriptor::ValueType::Bool
+    };
+    (u64) => {
+        crate::descriptor::ValueType::UInt64
+    };
+    (i64) => {
+        crate::descriptor::ValueType::Int64
+    };
+    (f64) => {
+        crate::descriptor::ValueType::Double
+    };
+    (Vec<u8>) => {
+        crate::descriptor::ValueType::Bytes
+    };
+    (Vec<NamePart>) => {
+        crate::descriptor::ValueType::Message("NamePart".to_string())
+    };
+    ($t:ty) => {
+        compile_error!(concat!("Unsupported type: ", stringify!($t)))
+    };
+}
+
+macro_rules! get_default_value {
+    // repeated フィールド
+    (repeated, $t:ty, _) => {
+        crate::descriptor::DefaultValue::EmptyVec
+    };
+
+    // optional フィールド（明示的なデフォルト値なし）
+    (optional, String, None) => {
+        crate::descriptor::DefaultValue::String(String::new())
+    };
+    (optional, u64, None) => {
+        crate::descriptor::DefaultValue::UInt64(0)
+    };
+    (optional, i64, None) => {
+        crate::descriptor::DefaultValue::Int64(0)
+    };
+    (optional, f64, None) => {
+        crate::descriptor::DefaultValue::Double(0.0)
+    };
+    (optional, bool, None) => {
+        crate::descriptor::DefaultValue::Bool(false)
+    };
+    (optional, Vec<u8>, None) => {
+        crate::descriptor::DefaultValue::EmptyVec
+    };
+    (optional, $t:ty, None) => {
+        crate::descriptor::DefaultValue::None
+    };
+
+    // 明示的なデフォルト値あり
+    (_, bool, $val:expr) => {
+        crate::descriptor::DefaultValue::Bool($val)
+    };
+    (_, u64, $val:expr) => {
+        crate::descriptor::ValueType::UInt64($val)
+    };
+    (_, i64, $val:expr) => {
+        crate::descriptor::ValueType::Int64($val)
+    };
+    (_, f64, $val:expr) => {
+        crate::descriptor::DefaultValue::Double($val)
+    };
+    (_, String, $val:expr) => {
+        crate::descriptor::DefaultValue::String($val.to_string())
+    };
+
+    // required フィールド
+    (required, $t:ty, _) => {
+        crate::descriptor::DefaultValue::None
+    };
+
+    // その他のケース
+    ($field_type:ident, $t:ty, $default:expr) => {
+        compile_error!(concat!(
+            "Unsupported combination: ",
+            stringify!($field_type),
+            ", ",
+            stringify!($t)
+        ))
+    };
+}
+
+/// Macro to define protobuf field metadata
+macro_rules! define_metadata {
+    (
+        $(
+            $field_type:ident $field_name:ident: $rust_type:ty = $field_number:expr
+            $(; default = $default_value:expr)?
+        );*
+    ) => {
+        pub fn metadata() -> crate::descriptor::MessageMetadata {
+            crate::descriptor::MessageMetadata {
+                fields: vec![
+                    $(
+                        crate::descriptor::FieldMetadata {
+                            number: $field_number,
+                            wire_type: get_wire_type!($rust_type),
+                            field_type: match stringify!($field_type) {
+                                "required" => crate::descriptor::FieldType::Required,
+                                "optional" => crate::descriptor::FieldType::Optional,
+                                "repeated" => crate::descriptor::FieldType::Repeated,
+                                _ => panic!("Unknown field type: {}", stringify!($field_type)),
+                            },
+                            value_type: get_value_type!($rust_type),
+                            default_value: get_default_value!(
+                                stringify!($field_type),
+                                $rust_type,
+                                $($default_value)?
+                            ),
+                            getter: |msg: &dyn std::any::Any| {
+                                if let Some(this) = msg.downcast_ref::<Self>() {
+                                    &this.$field_name as &dyn std::any::Any
+                                } else {
+                                    panic!("Invalid message type")
+                                }
+                            },
+                            setter: |msg: &mut dyn std::any::Any| {
+                                if let Some(this) = msg.downcast_mut::<Self>() {
+                                    &mut this.$field_name as &mut dyn std::any::Any
+                                } else {
+                                    panic!("Invalid message type")
+                                }
+                            },
+                        }
+                    ),*
+                ],
+            }
+        }
+    };
+}
