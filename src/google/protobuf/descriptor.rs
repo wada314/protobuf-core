@@ -754,7 +754,7 @@ pub struct EnumOptions;
 pub struct EnumValueOptions;
 pub struct ServiceOptions;
 pub struct MethodOptions;
-pub struct UninterpretedOption;
+
 pub struct FeatureSet;
 pub struct FeatureSetDefaults;
 pub struct SourceCodeInfo;
@@ -777,7 +777,49 @@ pub struct FeatureSupport;
 pub struct EnumReservedRange;
 
 /// Part of an uninterpreted option name
-pub struct NamePart;
+pub struct NamePart {
+    name_part: String,  // required
+    is_extension: bool, // required
+}
+
+impl NamePart {
+    pub fn new(name_part: String, is_extension: bool) -> Self {
+        Self {
+            name_part,
+            is_extension,
+        }
+    }
+
+    // Getters only (required fields don't need defaults)
+    pub fn name_part(&self) -> &str {
+        &self.name_part
+    }
+    pub fn is_extension(&self) -> bool {
+        self.is_extension
+    }
+
+    // Metadata function
+    pub fn metadata() -> crate::descriptor::MessageMetadata {
+        crate::descriptor::MessageMetadata {
+            fields: vec![
+                crate::descriptor::FieldMetadata {
+                    number: 1,
+                    wire_type: crate::wire_format::WireType::Len,
+                    field_type: crate::descriptor::FieldType::Required,
+                    value_type: crate::descriptor::ValueType::String,
+                    default_value: crate::descriptor::DefaultValue::None,
+                },
+                crate::descriptor::FieldMetadata {
+                    number: 2,
+                    wire_type: crate::wire_format::WireType::Varint,
+                    field_type: crate::descriptor::FieldType::Required,
+                    value_type: crate::descriptor::ValueType::Bool,
+                    default_value: crate::descriptor::DefaultValue::None,
+                },
+            ],
+        }
+    }
+}
 
 /// Default feature set for a specific edition
 pub struct FeatureSetEditionDefault;
@@ -788,6 +830,179 @@ pub struct Location;
 /// Annotation connecting generated code to source
 pub struct Annotation;
 
+/// UninterpretedOption message
+/// Represents an option the parser does not recognize
+pub struct UninterpretedOption {
+    name: Vec<NamePart>,              // repeated
+    identifier_value: Option<String>, // optional
+    positive_int_value: Option<u64>,  // optional
+    negative_int_value: Option<i64>,  // optional
+    double_value: Option<f64>,        // optional
+    string_value: Option<Vec<u8>>,    // optional (bytes)
+    aggregate_value: Option<String>,  // optional
+}
+
+impl UninterpretedOption {
+    pub fn new() -> Self {
+        Self {
+            name: Vec::new(),
+            identifier_value: None,
+            positive_int_value: None,
+            negative_int_value: None,
+            double_value: None,
+            string_value: None,
+            aggregate_value: None,
+        }
+    }
+
+    // Repeated field methods (read-only)
+    pub fn name(&self) -> &[NamePart] {
+        &self.name
+    }
+
+    // Optional field getters with defaults
+    pub fn identifier_value(&self) -> String {
+        self.identifier_value.clone().unwrap_or_default()
+    }
+    pub fn positive_int_value(&self) -> u64 {
+        self.positive_int_value.unwrap_or(0)
+    }
+    pub fn negative_int_value(&self) -> i64 {
+        self.negative_int_value.unwrap_or(0)
+    }
+    pub fn double_value(&self) -> f64 {
+        self.double_value.unwrap_or(0.0)
+    }
+    pub fn string_value(&self) -> Vec<u8> {
+        self.string_value.clone().unwrap_or_default()
+    }
+    pub fn aggregate_value(&self) -> String {
+        self.aggregate_value.clone().unwrap_or_default()
+    }
+
+    // Has methods for optional fields
+    pub fn has_identifier_value(&self) -> bool {
+        self.identifier_value.is_some()
+    }
+    pub fn has_positive_int_value(&self) -> bool {
+        self.positive_int_value.is_some()
+    }
+    pub fn has_negative_int_value(&self) -> bool {
+        self.negative_int_value.is_some()
+    }
+    pub fn has_double_value(&self) -> bool {
+        self.double_value.is_some()
+    }
+    pub fn has_string_value(&self) -> bool {
+        self.string_value.is_some()
+    }
+    pub fn has_aggregate_value(&self) -> bool {
+        self.aggregate_value.is_some()
+    }
+
+    // Metadata function
+    pub fn metadata() -> crate::descriptor::MessageMetadata {
+        crate::descriptor::MessageMetadata {
+            fields: vec![
+                crate::descriptor::FieldMetadata {
+                    number: 2,
+                    wire_type: crate::wire_format::WireType::Len,
+                    field_type: crate::descriptor::FieldType::Repeated,
+                    value_type: crate::descriptor::ValueType::Message("NamePart".to_string()),
+                    default_value: crate::descriptor::DefaultValue::EmptyVec,
+                },
+                crate::descriptor::FieldMetadata {
+                    number: 3,
+                    wire_type: crate::wire_format::WireType::Len,
+                    field_type: crate::descriptor::FieldType::Optional,
+                    value_type: crate::descriptor::ValueType::String,
+                    default_value: crate::descriptor::DefaultValue::String(String::new()),
+                },
+                crate::descriptor::FieldMetadata {
+                    number: 4,
+                    wire_type: crate::wire_format::WireType::Varint,
+                    field_type: crate::descriptor::FieldType::Optional,
+                    value_type: crate::descriptor::ValueType::UInt64,
+                    default_value: crate::descriptor::DefaultValue::UInt64(0),
+                },
+                crate::descriptor::FieldMetadata {
+                    number: 5,
+                    wire_type: crate::wire_format::WireType::Varint,
+                    field_type: crate::descriptor::FieldType::Optional,
+                    value_type: crate::descriptor::ValueType::Int64,
+                    default_value: crate::descriptor::DefaultValue::None,
+                },
+                crate::descriptor::FieldMetadata {
+                    number: 6,
+                    wire_type: crate::wire_format::WireType::I64,
+                    field_type: crate::descriptor::FieldType::Optional,
+                    value_type: crate::descriptor::ValueType::Double,
+                    default_value: crate::descriptor::DefaultValue::Double(0.0),
+                },
+                crate::descriptor::FieldMetadata {
+                    number: 7,
+                    wire_type: crate::wire_format::WireType::Len,
+                    field_type: crate::descriptor::FieldType::Optional,
+                    value_type: crate::descriptor::ValueType::Bytes,
+                    default_value: crate::descriptor::DefaultValue::EmptyVec,
+                },
+                crate::descriptor::FieldMetadata {
+                    number: 8,
+                    wire_type: crate::wire_format::WireType::Len,
+                    field_type: crate::descriptor::FieldType::Optional,
+                    value_type: crate::descriptor::ValueType::String,
+                    default_value: crate::descriptor::DefaultValue::String(String::new()),
+                },
+            ],
+        }
+    }
+}
+
 // Remaining modules that are larger or have more complex structures
 pub mod extension_range_options;
 pub mod feature_set;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_name_part() {
+        let name_part = NamePart::new("test_name".to_string(), true);
+        assert_eq!(name_part.name_part(), "test_name");
+        assert_eq!(name_part.is_extension(), true);
+
+        let metadata = NamePart::metadata();
+        assert_eq!(metadata.fields.len(), 2);
+        assert_eq!(metadata.fields[0].number, 1);
+        assert_eq!(metadata.fields[1].number, 2);
+    }
+
+    #[test]
+    fn test_uninterpreted_option() {
+        let option = UninterpretedOption::new();
+
+        // Test default values
+        assert_eq!(option.name().len(), 0);
+        assert_eq!(option.identifier_value(), "");
+        assert_eq!(option.positive_int_value(), 0);
+        assert_eq!(option.negative_int_value(), 0);
+        assert_eq!(option.double_value(), 0.0);
+        assert_eq!(option.string_value().len(), 0);
+        assert_eq!(option.aggregate_value(), "");
+
+        // Test has methods
+        assert!(!option.has_identifier_value());
+        assert!(!option.has_positive_int_value());
+        assert!(!option.has_negative_int_value());
+        assert!(!option.has_double_value());
+        assert!(!option.has_string_value());
+        assert!(!option.has_aggregate_value());
+
+        // Test metadata
+        let metadata = UninterpretedOption::metadata();
+        assert_eq!(metadata.fields.len(), 7);
+        assert_eq!(metadata.fields[0].number, 2); // name field
+        assert_eq!(metadata.fields[1].number, 3); // identifier_value field
+    }
+}

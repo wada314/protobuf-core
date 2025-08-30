@@ -6,6 +6,59 @@
 use crate::{ProtobufError, Result};
 use std::io::{Read, Write};
 
+/// Field types for protobuf fields
+#[derive(Debug, Clone)]
+pub enum FieldType {
+    Optional,
+    Repeated,
+    Required,
+}
+
+/// Value types for protobuf fields
+#[derive(Debug, Clone)]
+pub enum ValueType {
+    Int32,
+    Int64,
+    UInt32,
+    UInt64,
+    Bool,
+    String,
+    Bytes,
+    Double,
+    Enum(String),
+    Message(String),
+}
+
+/// Default values for protobuf fields
+#[derive(Debug, Clone)]
+pub enum DefaultValue {
+    None,
+    Bool(bool),
+    Int32(i32),
+    Int64(i64),
+    UInt32(u32),
+    UInt64(u64),
+    String(String),
+    EmptyVec,
+    Double(f64),
+}
+
+/// Metadata for a protobuf field
+#[derive(Debug, Clone)]
+pub struct FieldMetadata {
+    pub number: u32,
+    pub wire_type: crate::wire_format::WireType,
+    pub field_type: FieldType,
+    pub value_type: ValueType,
+    pub default_value: DefaultValue,
+}
+
+/// Metadata for a protobuf message
+#[derive(Debug, Clone)]
+pub struct MessageMetadata {
+    pub fields: Vec<FieldMetadata>,
+}
+
 /// Basic trait for descriptor messages that can be encoded/decoded
 pub trait DescriptorMessage {
     /// Calculate the encoded size of this message in bytes
