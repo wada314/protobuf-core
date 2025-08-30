@@ -955,13 +955,13 @@ impl UninterpretedOption {
         self.identifier_value.as_deref().unwrap_or("")
     }
     pub fn positive_int_value(&self) -> u64 {
-        self.positive_int_value.unwrap_or(0)
+        self.positive_int_value.unwrap_or_default()
     }
     pub fn negative_int_value(&self) -> i64 {
-        self.negative_int_value.unwrap_or(0)
+        self.negative_int_value.unwrap_or_default()
     }
     pub fn double_value(&self) -> f64 {
-        self.double_value.unwrap_or(0.0)
+        self.double_value.unwrap_or_default()
     }
     pub fn string_value(&self) -> &[u8] {
         self.string_value.as_deref().unwrap_or(&[])
