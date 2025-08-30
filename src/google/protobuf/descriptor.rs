@@ -846,6 +846,13 @@ pub struct FeatureSupport;
 pub struct EnumReservedRange;
 
 /// Part of an uninterpreted option name
+/// Each string represents a segment in a dot-separated name
+///
+/// Source definition from descriptor.proto:
+/// message NamePart {
+///   required string name_part = 1;
+///   required bool is_extension = 2;
+/// }
 pub struct NamePart {
     name_part: String,  // required
     is_extension: bool, // required
@@ -904,6 +911,17 @@ pub struct Annotation;
 
 /// UninterpretedOption message
 /// Represents an option the parser does not recognize
+///
+/// Source definition from descriptor.proto:
+/// message UninterpretedOption {
+///   repeated NamePart name = 2;
+///   optional string identifier_value = 3;
+///   optional uint64 positive_int_value = 4;
+///   optional int64 negative_int_value = 5;
+///   optional double double_value = 6;
+///   optional bytes string_value = 7;
+///   optional string aggregate_value = 8;
+/// }
 pub struct UninterpretedOption {
     name: Vec<NamePart>,              // repeated
     identifier_value: Option<String>, // optional
