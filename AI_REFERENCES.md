@@ -135,10 +135,29 @@ This project aims to create a **language-neutral protobuf utility library** that
      - Provides consistent, readable debug output across all types
      - Maintains zero-cost abstraction with `#[repr(transparent)]`
 
+9. **Module Structure Refactoring**
+   - **Transition from mod.rs**: Stopped using legacy `mod.rs` files, adopted modern `<module-name>.rs` approach
+   - **Google namespace reorganization**: Moved `google/` directory to root level for better logical structure
+   - **File organization**: 
+     - `src/descriptor.rs` - descriptor traits and utilities
+     - `src/google/protobuf/` - protobuf package structures
+     - `src/google/protobuf/compiler/` - plugin-related structures
+   - **Benefits**: Clearer namespace hierarchy, better maintainability, follows modern Rust practices
+
+10. **Feature Flag Implementation**
+    - **Conditional compilation**: Added feature flags for descriptor serialization/deserialization
+    - **Feature structure**:
+      - `descriptor-encode` - Basic encoding utilities
+      - `descriptor-decode` - Basic decoding utilities  
+      - `descriptor-full` - Combines both features
+    - **Default features**: Enabled `descriptor-encode` and `descriptor-decode` by default
+    - **Benefits**: Users get basic functionality without additional configuration, while maintaining optional advanced features
+
 ### 🔄 Next Steps
-9. **Add fields to descriptor structures** 
-10. **Minimum error types** - Essential error handling for protobuf operations
-11. **Descriptor.proto and plugin.proto** - Complete implementations for code generation support
+11. **Protobuf Message Implementation Design** - Design and implement message structures with proper encapsulation
+12. **Add fields to descriptor structures** 
+13. **Minimum error types** - Essential error handling for protobuf operations
+14. **Descriptor.proto and plugin.proto** - Complete implementations for code generation support
 
 ## Design Decisions
 
@@ -217,6 +236,126 @@ impl std::fmt::Debug for Edition {
 - **Maintainability**: Clear, explicit implementation without magic
 
 **Pattern matching approach**: Uses `match *self` instead of `match self` for correct behavior with wrapped types
+
+### Protobuf Message Implementation Strategy
+**Decision**: Encapsulated approach with getter/setter methods instead of public fields
+
+**Analysis of approaches considered**:
+
+1. **Open structs (public fields)**
+   - ❌ API stability issues - field changes break public API
+   - ❌ No validation or business logic control
+   - ❌ Difficult to implement protobuf defaults correctly
+   - ✅ Simpler implementation
+   - ✅ Direct field access
+
+2. **Encapsulated classes (getter/setter methods) - CHOSEN APPROACH**
+   - ✅ API stability - internal changes don't affect public interface
+   - ✅ Validation and business logic control
+   - ✅ Proper protobuf default value handling
+   - ✅ Future extensibility
+   - ✅ Follows protobuf "message" concept naturally
+
+**Implementation pattern**:
+```rust
+pub struct FileDescriptorProto {
+    name: Option<String>,
+    package: Option<String>,
+    dependency: Vec<String>,
+    // ... other fields
+}
+
+impl FileDescriptorProto {
+    // Constructor
+    pub fn new() -> Self { /* ... */ }
+    
+    // Getter with default values
+    pub fn name(&self) -> String {
+        self.name.clone().unwrap_or_default()
+    }
+    
+    // Setter
+    pub fn set_name(&mut self, name: String) {
+        self.name = Some(name);
+    }
+    
+    // Clear method
+    pub fn clear_name(&mut self) {
+        self.name = None;
+    }
+    
+    // Has method for optional fields
+    pub fn has_name(&self) -> bool {
+        self.name.is_some()
+    }
+}
+```
+
+### Getter Return Type Strategy
+**Decision**: Return `T` directly instead of `Option<T>` to properly handle protobuf default values
+
+**Key insight**: Many protobuf fields have non-zero default values (e.g., `cc_enable_arenas = true`, `optimize_for = SPEED`). Using `Option<T>` would make it impossible to distinguish between "unset" and "explicitly set to default value".
+
+**Implementation approach**:
+```rust
+// Instead of returning Option<T>
+pub fn java_multiple_files(&self) -> Option<bool> { /* ... */ }
+
+// Return T with proper default handling
+pub fn java_multiple_files(&self) -> bool {
+    self.java_multiple_files.unwrap_or(false)
+}
+
+pub fn cc_enable_arenas(&self) -> bool {
+    self.cc_enable_arenas.unwrap_or(true)
+}
+```
+
+### Setter vs Builder Pattern Decision
+**Decision**: Simple setter methods instead of Builder pattern
+
+**Rationale**: 
+- **Primary use case**: protoc plugin development where users mainly read descriptor messages
+- **Modification needs**: Limited to `CodeGeneratorResponse` construction
+- **Complexity trade-off**: Builder pattern adds unnecessary complexity for the target use case
+- **Performance**: No significant performance benefit for the expected usage patterns
+
+**Implementation approach**: Provide basic setter methods for essential operations, focus on read-only access for descriptor messages.
+
+### Backend Architecture Strategy
+**Decision**: Type-based predefined serialization/deserialization instead of custom closures per field
+
+**Approach**: Create a common backend that handles serialization/deserialization based on field type information rather than custom closures for each field.
+
+**Key components**:
+```rust
+pub struct FieldDescriptor {
+    pub number: u32,
+    pub wire_type: WireType,
+    pub field_type: FieldType,      // Optional/Repeated/Required
+    pub value_type: ValueType,      // Int32/String/Message/etc.
+    pub default_value: DefaultValue,
+}
+
+pub enum ValueType {
+    Int32, Int64, Bool, String, Bytes, 
+    Enum(String), Message(String),
+}
+
+pub enum DefaultValue {
+    None, Bool(bool), Int32(i32), String(String), EmptyVec,
+}
+```
+
+**Benefits**:
+- **Efficiency**: No custom closures per field
+- **Maintainability**: Type-specific logic centralized
+- **Consistency**: Same type uses same serialization logic
+- **Extensibility**: Easy to add new types
+- **Debugging**: Clear type information for troubleshooting
+
+**Alternative considered**: Custom closures per field with `std::any::Any` for dynamic access
+- **Rejected**: Performance overhead and complexity outweigh benefits for the target use case
 
 ## Official Protocol Buffer Documentation:
 https://protobuf.dev/
