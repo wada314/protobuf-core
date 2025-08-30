@@ -3,6 +3,8 @@
 //! This module contains the data structures and constants defined in descriptor.proto
 
 use crate::descriptor::DescriptorEnum;
+use crate::Result;
+use std::io::{Read, Write};
 
 // Wrapped types for type safety
 #[repr(transparent)]
@@ -897,6 +899,23 @@ impl NamePart {
     }
 }
 
+impl crate::descriptor::DescriptorMessage for NamePart {
+    fn encoded_size(&self) -> usize {
+        // TODO: Implement encoded size calculation
+        todo!("Implement encoded_size for NamePart")
+    }
+
+    fn encode(&self, _writer: &mut impl Write) -> Result<()> {
+        // TODO: Implement encoding
+        todo!("Implement encode for NamePart")
+    }
+
+    fn decode(_reader: &mut impl Read) -> Result<Self> {
+        // TODO: Implement decoding
+        todo!("Implement decode for NamePart")
+    }
+}
+
 /// TODO: Implement FeatureSetEditionDefault message
 /// Default feature set for a specific edition
 pub struct FeatureSetEditionDefault;
@@ -1045,6 +1064,23 @@ impl UninterpretedOption {
                 },
             ],
         }
+    }
+}
+
+impl crate::descriptor::DescriptorMessage for UninterpretedOption {
+    fn encoded_size(&self) -> usize {
+        // TODO: Implement encoded size calculation
+        todo!("Implement encoded_size for UninterpretedOption")
+    }
+
+    fn encode(&self, _writer: &mut impl Write) -> Result<()> {
+        // TODO: Implement encoding
+        todo!("Implement encode for UninterpretedOption")
+    }
+
+    fn decode(_reader: &mut impl Read) -> Result<Self> {
+        // TODO: Implement decoding
+        todo!("Implement decode for UninterpretedOption")
     }
 }
 
