@@ -736,43 +736,112 @@ impl std::fmt::Debug for Semantic {
 }
 
 // Main message structures (outlines only)
+/// TODO: Implement FileDescriptorSet message
+/// Contains a set of file descriptors
 pub struct FileDescriptorSet;
+
+/// TODO: Implement FileDescriptorProto message
+/// Contains the complete definition of a .proto file
 pub struct FileDescriptorProto;
+
+/// TODO: Implement DescriptorProto message
+/// Describes a message type
 pub struct DescriptorProto;
+
+/// TODO: Implement ExtensionRangeOptions message
+/// Options for extension ranges
 pub struct ExtensionRangeOptions;
+
+/// TODO: Implement FieldDescriptorProto message
+/// Describes a field within a message
 pub struct FieldDescriptorProto;
+
+/// TODO: Implement OneofDescriptorProto message
+/// Describes a oneof field group
 pub struct OneofDescriptorProto;
+
+/// TODO: Implement EnumDescriptorProto message
+/// Describes an enum type
 pub struct EnumDescriptorProto;
+
+/// TODO: Implement EnumValueDescriptorProto message
+/// Describes a value within an enum
 pub struct EnumValueDescriptorProto;
+
+/// TODO: Implement ServiceDescriptorProto message
+/// Describes a service
 pub struct ServiceDescriptorProto;
+
+/// TODO: Implement MethodDescriptorProto message
+/// Describes a method within a service
 pub struct MethodDescriptorProto;
+
+/// TODO: Implement FileOptions message
+/// Options for .proto files
 pub struct FileOptions;
+
+/// TODO: Implement MessageOptions message
+/// Options for message types
 pub struct MessageOptions;
+
+/// TODO: Implement FieldOptions message
+/// Options for fields
 pub struct FieldOptions;
+
+/// TODO: Implement OneofOptions message
+/// Options for oneof fields
 pub struct OneofOptions;
+
+/// TODO: Implement EnumOptions message
+/// Options for enum types
 pub struct EnumOptions;
+
+/// TODO: Implement EnumValueOptions message
+/// Options for enum values
 pub struct EnumValueOptions;
+
+/// TODO: Implement ServiceOptions message
+/// Options for services
 pub struct ServiceOptions;
+
+/// TODO: Implement MethodOptions message
+/// Options for methods
 pub struct MethodOptions;
 
+/// TODO: Implement FeatureSet message
+/// Defines a set of protobuf features
 pub struct FeatureSet;
+
+/// TODO: Implement FeatureSetDefaults message
+/// Default feature sets for different editions
 pub struct FeatureSetDefaults;
+
+/// TODO: Implement SourceCodeInfo message
+/// Contains information about the original source code
 pub struct SourceCodeInfo;
+
+/// TODO: Implement GeneratedCodeInfo message
+/// Contains information about generated code
 pub struct GeneratedCodeInfo;
 
 // Nested message structures (inlined from small submodules)
+/// TODO: Implement ExtensionRange message
 /// Extension range within a message
 pub struct ExtensionRange;
 
+/// TODO: Implement ReservedRange message
 /// Reserved range within a message
 pub struct ReservedRange;
 
+/// TODO: Implement EditionDefault message
 /// Edition default value for a field
 pub struct EditionDefault;
 
+/// TODO: Implement FeatureSupport message
 /// Feature support information for a field
 pub struct FeatureSupport;
 
+/// TODO: Implement EnumReservedRange message
 /// Range of reserved numeric values in an enum
 pub struct EnumReservedRange;
 
@@ -821,12 +890,15 @@ impl NamePart {
     }
 }
 
+/// TODO: Implement FeatureSetEditionDefault message
 /// Default feature set for a specific edition
 pub struct FeatureSetEditionDefault;
 
+/// TODO: Implement Location message
 /// Location information in source code
 pub struct Location;
 
+/// TODO: Implement Annotation message
 /// Annotation connecting generated code to source
 pub struct Annotation;
 
