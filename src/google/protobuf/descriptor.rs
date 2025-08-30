@@ -951,8 +951,8 @@ impl UninterpretedOption {
     }
 
     // Optional field getters with defaults
-    pub fn identifier_value(&self) -> String {
-        self.identifier_value.clone().unwrap_or_default()
+    pub fn identifier_value(&self) -> &str {
+        self.identifier_value.as_deref().unwrap_or("")
     }
     pub fn positive_int_value(&self) -> u64 {
         self.positive_int_value.unwrap_or(0)
@@ -963,11 +963,11 @@ impl UninterpretedOption {
     pub fn double_value(&self) -> f64 {
         self.double_value.unwrap_or(0.0)
     }
-    pub fn string_value(&self) -> Vec<u8> {
-        self.string_value.clone().unwrap_or_default()
+    pub fn string_value(&self) -> &[u8] {
+        self.string_value.as_deref().unwrap_or(&[])
     }
-    pub fn aggregate_value(&self) -> String {
-        self.aggregate_value.clone().unwrap_or_default()
+    pub fn aggregate_value(&self) -> &str {
+        self.aggregate_value.as_deref().unwrap_or("")
     }
 
     // Has methods for optional fields
