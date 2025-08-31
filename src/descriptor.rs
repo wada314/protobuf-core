@@ -480,40 +480,39 @@ macro_rules! define_metadata {
     };
 }
 
-// Temporarily comment out tests until macro is working
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//
-//     // Test struct for macro testing
-//     struct TestMessage {
-//         field1: String,
-//         field2: bool,
-//     }
-//
-//     impl TestMessage {
-//         // Test the define_metadata macro
-//         define_metadata! {
-//             required field1: String = 1;
-//             required field2: bool = 2;
-//         }
-//     }
-//
-//     #[test]
-//     fn test_define_metadata_macro() {
-//         let metadata = TestMessage::metadata();
-//         assert_eq!(metadata.fields.len(), 2);
-//
-//         // Check first field
-//         let field1 = &metadata.fields[0];
-//         assert_eq!(field1.number, 1);
-//         assert_eq!(field1.field_type, FieldType::Required);
-//         assert_eq!(field1.value_type, ValueType::String);
-//
-//         // Check second field
-//         let field2 = &metadata.fields[1];
-//         assert_eq!(field2.number, 2);
-//         assert_eq!(field2.field_type, FieldType::Required);
-//         assert_eq!(field2.value_type, ValueType::Bool);
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Test struct for macro testing
+    struct TestMessage {
+        field1: String,
+        field2: bool,
+    }
+
+    impl TestMessage {
+        // Test the define_metadata macro
+        define_metadata! {
+            required field1: String = 1;
+            required field2: bool = 2;
+        }
+    }
+
+    #[test]
+    fn test_define_metadata_macro() {
+        let metadata = TestMessage::metadata();
+        assert_eq!(metadata.fields.len(), 2);
+
+        // Check first field
+        let field1 = &metadata.fields[0];
+        assert_eq!(field1.number, 1);
+        assert_eq!(field1.field_label, FieldLabel::Required);
+        assert_eq!(field1.value_type, ValueType::String);
+
+        // Check second field
+        let field2 = &metadata.fields[1];
+        assert_eq!(field2.number, 2);
+        assert_eq!(field2.field_label, FieldLabel::Required);
+        assert_eq!(field2.value_type, ValueType::Bool);
+    }
+}
