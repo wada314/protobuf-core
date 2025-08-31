@@ -45,6 +45,21 @@ pub enum DefaultValue {
     Double(f64),
 }
 
+/// Field value types for safe access
+pub enum FieldValue<'a> {
+    Int32(i32),
+    Int64(i64),
+    UInt32(u32),
+    UInt64(u64),
+    Bool(bool),
+    String(&'a str),
+    Bytes(&'a [u8]),
+    Float(f32),
+    Double(f64),
+    Message(&'a dyn DescriptorMessage),
+    MessageVec(&'a [Box<dyn DescriptorMessage>]),
+}
+
 /// Metadata for a protobuf field
 #[derive(Debug, Clone)]
 pub struct FieldMetadata {
@@ -53,8 +68,8 @@ pub struct FieldMetadata {
     pub field_label: FieldLabel,
     pub value_type: ValueType,
     pub default_value: DefaultValue,
-    /// Closure to get a reference to the field value from a message
-    pub getter: fn(&dyn std::any::Any) -> &dyn std::any::Any,
+    /// Closure to get a field value from a message
+    pub getter: fn(&dyn std::any::Any) -> FieldValue,
     /// Closure to get a mutable reference to the field value from a message
     pub setter: fn(&mut dyn std::any::Any) -> &mut dyn std::any::Any,
 }
@@ -71,25 +86,40 @@ pub trait DescriptorMessage {
     fn encoded_size(&self) -> usize;
 
     /// Encode this message to the given writer
-    fn encode(&self, writer: &mut impl Write) -> Result<()>;
+    fn encode(&self, writer: &mut dyn Write) -> Result<usize>;
 
     /// Decode a message from the given reader
-    fn decode(reader: &mut impl Read) -> Result<Self>
-    where
-        Self: Sized;
+    fn decode(&mut self, reader: &mut dyn Read) -> Result<usize>;
 }
 
 // Common implementation for all types that have metadata
 impl<T: HasMetadata> DescriptorMessage for T {
     fn encoded_size(&self) -> usize {
-        todo!("Implement encoded_size using metadata")
+        let metadata = Self::metadata();
+        let mut total_size = 0;
+
+        for field in &metadata.fields {
+            // Get the field value using the getter closure
+            let field_value = (field.getter)(self as &dyn std::any::Any);
+
+            // Calculate tag size (field number + wire type)
+            let tag = (field.number << 3) | field.wire_type as u32;
+            let tag_size = varint_size(tag as u64);
+            total_size += tag_size;
+
+            // Calculate value size based on wire type and actual value
+            let value_size = calculate_field_size_from_value(&field_value);
+            total_size += value_size;
+        }
+
+        total_size
     }
 
-    fn encode(&self, writer: &mut impl Write) -> Result<()> {
+    fn encode(&self, writer: &mut dyn Write) -> Result<usize> {
         todo!("Implement encode using metadata")
     }
 
-    fn decode(reader: &mut impl Read) -> Result<Self> {
+    fn decode(&mut self, reader: &mut dyn Read) -> Result<usize> {
         todo!("Implement decode using metadata")
     }
 }
@@ -107,8 +137,121 @@ pub trait DescriptorEnum {
 }
 
 /// Private trait that provides metadata for protobuf messages
-pub(crate) trait HasMetadata {
+pub(crate) trait HasMetadata: 'static {
     fn metadata() -> crate::descriptor::MessageMetadata;
+}
+
+/// Calculate the size of a varint value in bytes
+fn varint_size(mut value: u64) -> usize {
+    let mut size = 1;
+    while value >= 0x80 {
+        value >>= 7;
+        size += 1;
+    }
+    size
+}
+
+/// Calculate the size of a field value based on its actual value
+fn calculate_field_size_from_value(field_value: &FieldValue) -> usize {
+    match field_value {
+        FieldValue::Int32(value) => varint_size(*value as u64),
+        FieldValue::Int64(value) => varint_size(*value as u64),
+        FieldValue::UInt32(value) => varint_size(*value as u64),
+        FieldValue::UInt64(value) => varint_size(*value),
+        FieldValue::Bool(_) => 1, // bool is always 1 byte
+        FieldValue::String(value) => {
+            let str_len = value.len();
+            varint_size(str_len as u64) + str_len
+        }
+        FieldValue::Bytes(value) => {
+            let bytes_len = value.len();
+            varint_size(bytes_len as u64) + bytes_len
+        }
+        FieldValue::Float(_) => 4,  // Fixed 4 bytes for f32
+        FieldValue::Double(_) => 8, // Fixed 8 bytes for f64
+        FieldValue::Message(message) => {
+            // For message types, we can now call encoded_size() directly
+            let message_size = message.encoded_size();
+            varint_size(message_size as u64) + message_size
+        }
+        FieldValue::MessageVec(messages) => {
+            // For message arrays, calculate total size
+            let mut total_size = 0;
+            for message in *messages {
+                let message_size = message.encoded_size();
+                total_size += varint_size(message_size as u64) + message_size;
+            }
+            total_size
+        }
+    }
+}
+
+/// Calculate the size of a field value based on its wire type and actual value
+fn calculate_field_size(field: &FieldMetadata, field_value: &dyn std::any::Any) -> usize {
+    match field.wire_type {
+        crate::wire_format::WireType::Varint => {
+            // For varint fields, we need to determine the actual value size
+            match field.value_type {
+                ValueType::Bool => 1, // bool is always 1 byte
+                ValueType::Int32 | ValueType::UInt32 => {
+                    if let Some(value) = field_value.downcast_ref::<i32>() {
+                        varint_size(*value as u64)
+                    } else if let Some(value) = field_value.downcast_ref::<u32>() {
+                        varint_size(*value as u64)
+                    } else {
+                        1 // fallback
+                    }
+                }
+                ValueType::Int64 | ValueType::UInt64 => {
+                    if let Some(value) = field_value.downcast_ref::<i64>() {
+                        varint_size(*value as u64)
+                    } else if let Some(value) = field_value.downcast_ref::<u64>() {
+                        varint_size(*value)
+                    } else {
+                        1 // fallback
+                    }
+                }
+                _ => 1, // fallback for other varint types
+            }
+        }
+        crate::wire_format::WireType::I64 => 8, // Fixed 8 bytes for f64
+        crate::wire_format::WireType::Len => {
+            // For length-delimited fields, calculate actual length + length prefix
+            match field.value_type {
+                ValueType::String => {
+                    if let Some(value) = field_value.downcast_ref::<String>() {
+                        let str_len = value.len();
+                        varint_size(str_len as u64) + str_len
+                    } else {
+                        1 // fallback
+                    }
+                }
+                ValueType::Bytes => {
+                    if let Some(value) = field_value.downcast_ref::<Vec<u8>>() {
+                        let bytes_len = value.len();
+                        varint_size(bytes_len as u64) + bytes_len
+                    } else {
+                        1 // fallback
+                    }
+                }
+                ValueType::Message(_) => {
+                    // For message types, we need to handle this differently
+                    // Since we can't easily call encoded_size() from Any, we'll use a fallback
+                    if let Some(bytes) = field_value.downcast_ref::<Vec<u8>>() {
+                        // If it's already encoded bytes
+                        let bytes_len = bytes.len();
+                        varint_size(bytes_len as u64) + bytes_len
+                    } else {
+                        // For now, we'll use a conservative estimate
+                        // This will be improved when we implement proper message encoding
+                        1 // fallback
+                    }
+                }
+                _ => 1, // fallback for other length-delimited types
+            }
+        }
+        _ => 1, // fallback for unknown wire types
+    }
 }
 
 /// Basic encoding utilities for descriptor messages
@@ -117,7 +260,7 @@ pub mod encode {
     use super::*;
 
     /// Encode a varint value
-    pub fn encode_varint(writer: &mut impl Write, value: u64) -> Result<()> {
+    pub fn encode_varint(writer: &mut dyn Write, value: u64) -> Result<()> {
         let mut val = value;
         while val >= 0x80 {
             writer
@@ -138,7 +281,7 @@ pub mod encode {
     }
 
     /// Encode a length-delimited field
-    pub fn encode_length_delimited(writer: &mut impl Write, data: &[u8]) -> Result<()> {
+    pub fn encode_length_delimited(writer: &mut dyn Write, data: &[u8]) -> Result<()> {
         encode_varint(writer, data.len() as u64)?;
         writer
             .write_all(data)
@@ -150,32 +293,32 @@ pub mod encode {
     }
 
     /// Encode a protobuf tag (field number + wire type)
-    pub fn encode_tag(writer: &mut impl Write, field_number: u32, wire_type: u8) -> Result<()> {
+    pub fn encode_tag(writer: &mut dyn Write, field_number: u32, wire_type: u8) -> Result<()> {
         let tag = (field_number << 3) | (wire_type as u32);
         encode_varint(writer, tag as u64)
     }
 
     /// Encode a string field
-    pub fn encode_string(writer: &mut impl Write, field_number: u32, value: &str) -> Result<()> {
+    pub fn encode_string(writer: &mut dyn Write, field_number: u32, value: &str) -> Result<()> {
         encode_tag(writer, field_number, 2)?; // Wire type 2 = Length-delimited
         encode_length_delimited(writer, value.as_bytes())
     }
 
     /// Encode an int32 field
-    pub fn encode_int32(writer: &mut impl Write, field_number: u32, value: i32) -> Result<()> {
+    pub fn encode_int32(writer: &mut dyn Write, field_number: u32, value: i32) -> Result<()> {
         encode_tag(writer, field_number, 0)?; // Wire type 0 = Varint
         encode_varint(writer, value as u64)
     }
 
     /// Encode a bool field
-    pub fn encode_bool(writer: &mut impl Write, field_number: u32, value: bool) -> Result<()> {
+    pub fn encode_bool(writer: &mut dyn Write, field_number: u32, value: bool) -> Result<()> {
         encode_tag(writer, field_number, 0)?; // Wire type 0 = Varint
         encode_varint(writer, if value { 1 } else { 0 })
     }
 
     /// Encode an enum field
     pub fn encode_enum(
-        writer: &mut impl Write,
+        writer: &mut dyn Write,
         field_number: u32,
         value: &impl DescriptorEnum,
     ) -> Result<()> {
@@ -190,7 +333,7 @@ pub mod decode {
     use super::*;
 
     /// Decode a varint value
-    pub fn decode_varint(reader: &mut impl Read) -> Result<u64> {
+    pub fn decode_varint(reader: &mut dyn Read) -> Result<u64> {
         let mut result = 0u64;
         let mut shift = 0u32;
 
@@ -221,7 +364,7 @@ pub mod decode {
     }
 
     /// Decode a length-delimited field
-    pub fn decode_length_delimited(reader: &mut impl Read) -> Result<Vec<u8>> {
+    pub fn decode_length_delimited(reader: &mut dyn Read) -> Result<Vec<u8>> {
         let length = decode_varint(reader)? as usize;
         let mut data = vec![0u8; length];
         reader
@@ -234,7 +377,7 @@ pub mod decode {
     }
 
     /// Decode a protobuf tag
-    pub fn decode_tag(reader: &mut impl Read) -> Result<(u32, u8)> {
+    pub fn decode_tag(reader: &mut dyn Read) -> Result<(u32, u8)> {
         let tag = decode_varint(reader)?;
         let field_number = (tag >> 3) as u32;
         let wire_type = (tag & 0x07) as u8;
@@ -242,7 +385,7 @@ pub mod decode {
     }
 
     /// Decode a string field
-    pub fn decode_string(reader: &mut impl Read) -> Result<String> {
+    pub fn decode_string(reader: &mut dyn Read) -> Result<String> {
         let data = decode_length_delimited(reader)?;
         String::from_utf8(data).map_err(|_| ProtobufError::VariantDowncastOutOfRange {
             value: 0,
@@ -251,7 +394,7 @@ pub mod decode {
     }
 
     /// Decode an int32 field
-    pub fn decode_int32(reader: &mut impl Read) -> Result<i32> {
+    pub fn decode_int32(reader: &mut dyn Read) -> Result<i32> {
         let value = decode_varint(reader)?;
         if value > i32::MAX as u64 {
             return Err(ProtobufError::VariantDowncastOutOfRange {
@@ -263,7 +406,7 @@ pub mod decode {
     }
 
     /// Decode a bool field
-    pub fn decode_bool(reader: &mut impl Read) -> Result<bool> {
+    pub fn decode_bool(reader: &mut dyn Read) -> Result<bool> {
         let value = decode_varint(reader)?;
         match value {
             0 => Ok(false),
@@ -478,13 +621,15 @@ macro_rules! define_metadata {
                                 "required" => crate::descriptor::DefaultValue::None,
                                 _ => panic!("Unknown field type: {}", stringify!($field_type)),
                             },
-                            getter: |msg: &dyn std::any::Any| {
-                                if let Some(this) = msg.downcast_ref::<Self>() {
-                                    &this.$field_name as &dyn std::any::Any
-                                } else {
-                                    panic!("Invalid message type")
-                                }
-                            },
+                                                         getter: |msg: &dyn std::any::Any| {
+                                 if let Some(this) = msg.downcast_ref::<Self>() {
+                                     // For now, we'll use a simple approach that returns the field value
+                                     // This will be improved in the next iteration
+                                     panic!("FieldValue getter not yet implemented for {}", stringify!($rust_type))
+                                 } else {
+                                     panic!("Invalid message type")
+                                 }
+                             },
                             setter: |msg: &mut dyn std::any::Any| {
                                 if let Some(this) = msg.downcast_mut::<Self>() {
                                     &mut this.$field_name as &mut dyn std::any::Any
