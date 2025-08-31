@@ -855,6 +855,7 @@ pub struct EnumReservedRange;
 ///   required string name_part = 1;
 ///   required bool is_extension = 2;
 /// }
+#[derive(Default)]
 pub struct NamePart {
     name_part: String,  // required
     is_extension: bool, // required
@@ -875,30 +876,17 @@ impl NamePart {
     pub fn is_extension(&self) -> bool {
         self.is_extension
     }
+}
 
-    // Metadata function using macro
+// Implement HasMetadata trait for NamePart using macro
+impl crate::descriptor::HasMetadata for NamePart {
     define_metadata! {
         required name_part: String = 1;
         required is_extension: bool = 2;
     }
 }
 
-impl crate::descriptor::DescriptorMessage for NamePart {
-    fn encoded_size(&self) -> usize {
-        // TODO: Implement encoded size calculation
-        todo!("Implement encoded_size for NamePart")
-    }
-
-    fn encode(&self, _writer: &mut impl Write) -> Result<()> {
-        // TODO: Implement encoding
-        todo!("Implement encode for NamePart")
-    }
-
-    fn decode(_reader: &mut impl Read) -> Result<Self> {
-        // TODO: Implement decoding
-        todo!("Implement decode for NamePart")
-    }
-}
+// DescriptorMessage is automatically implemented via HasMetadata trait
 
 /// TODO: Implement FeatureSetEditionDefault message
 /// Default feature set for a specific edition
@@ -925,6 +913,7 @@ pub struct Annotation;
 ///   optional bytes string_value = 7;
 ///   optional string aggregate_value = 8;
 /// }
+#[derive(Default)]
 pub struct UninterpretedOption {
     name: Vec<NamePart>,              // repeated
     identifier_value: Option<String>, // optional
@@ -936,17 +925,8 @@ pub struct UninterpretedOption {
 }
 
 impl UninterpretedOption {
-    pub fn new() -> Self {
-        Self {
-            name: Vec::new(),
-            identifier_value: None,
-            positive_int_value: None,
-            negative_int_value: None,
-            double_value: None,
-            string_value: None,
-            aggregate_value: None,
-        }
-    }
+    // Default implementation provides empty values
+    // pub fn new() -> Self { Self::default() } // This is now redundant
 
     // Repeated field methods (read-only)
     pub fn name(&self) -> &[NamePart] {
@@ -992,8 +972,10 @@ impl UninterpretedOption {
     pub fn has_aggregate_value(&self) -> bool {
         self.aggregate_value.is_some()
     }
+}
 
-    // Metadata function using macro
+// Implement HasMetadata trait for UninterpretedOption using macro
+impl crate::descriptor::HasMetadata for UninterpretedOption {
     define_metadata! {
         repeated name: Vec<NamePart> = 2;
         optional identifier_value: String = 3;
@@ -1005,22 +987,7 @@ impl UninterpretedOption {
     }
 }
 
-impl crate::descriptor::DescriptorMessage for UninterpretedOption {
-    fn encoded_size(&self) -> usize {
-        // TODO: Implement encoded size calculation
-        todo!("Implement encoded_size for UninterpretedOption")
-    }
-
-    fn encode(&self, _writer: &mut impl Write) -> Result<()> {
-        // TODO: Implement encoding
-        todo!("Implement encode for UninterpretedOption")
-    }
-
-    fn decode(_reader: &mut impl Read) -> Result<Self> {
-        // TODO: Implement decoding
-        todo!("Implement decode for UninterpretedOption")
-    }
-}
+// DescriptorMessage is automatically implemented via HasMetadata trait
 
 // Remaining modules that are larger or have more complex structures
 pub mod extension_range_options;
@@ -1029,6 +996,7 @@ pub mod feature_set;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::descriptor::HasMetadata;
 
     #[test]
     fn test_name_part() {
@@ -1044,7 +1012,7 @@ mod tests {
 
     #[test]
     fn test_uninterpreted_option() {
-        let option = UninterpretedOption::new();
+        let option = UninterpretedOption::default();
 
         // Test default values
         assert_eq!(option.name().len(), 0);

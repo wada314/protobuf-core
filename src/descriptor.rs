@@ -79,6 +79,21 @@ pub trait DescriptorMessage {
         Self: Sized;
 }
 
+// Common implementation for all types that have metadata
+impl<T: HasMetadata> DescriptorMessage for T {
+    fn encoded_size(&self) -> usize {
+        todo!("Implement encoded_size using metadata")
+    }
+
+    fn encode(&self, writer: &mut impl Write) -> Result<()> {
+        todo!("Implement encode using metadata")
+    }
+
+    fn decode(reader: &mut impl Read) -> Result<Self> {
+        todo!("Implement decode using metadata")
+    }
+}
+
 /// Trait for enum-like values that can be encoded/decoded
 pub trait DescriptorEnum {
     /// Get the numeric value of this enum
@@ -89,6 +104,11 @@ pub trait DescriptorEnum {
 
     /// Check if this value is known (has a defined constant)
     fn is_known(&self) -> bool;
+}
+
+/// Private trait that provides metadata for protobuf messages
+pub(crate) trait HasMetadata {
+    fn metadata() -> crate::descriptor::MessageMetadata;
 }
 
 /// Basic encoding utilities for descriptor messages
@@ -387,7 +407,7 @@ macro_rules! define_metadata {
             $field_type:ident $field_name:ident: $rust_type:ty = $field_number:literal;
         )*
     ) => {
-        pub fn metadata() -> crate::descriptor::MessageMetadata {
+        fn metadata() -> crate::descriptor::MessageMetadata {
             crate::descriptor::MessageMetadata {
                 fields: vec![
                     $(
