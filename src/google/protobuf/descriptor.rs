@@ -3,7 +3,7 @@
 //! This module contains the data structures and constants defined in descriptor.proto
 
 use crate::descriptor::DescriptorEnum;
-use crate::Result;
+use crate::{define_metadata, Result};
 use std::io::{Read, Write};
 
 // Wrapped types for type safety
@@ -876,54 +876,10 @@ impl NamePart {
         self.is_extension
     }
 
-    // Metadata function
-    pub fn metadata() -> crate::descriptor::MessageMetadata {
-        crate::descriptor::MessageMetadata {
-            fields: vec![
-                crate::descriptor::FieldMetadata {
-                    number: 1,
-                    wire_type: crate::wire_format::WireType::Len,
-                    field_type: crate::descriptor::FieldType::Required,
-                    value_type: crate::descriptor::ValueType::String,
-                    default_value: crate::descriptor::DefaultValue::None,
-                    getter: |msg: &dyn std::any::Any| {
-                        if let Some(name_part) = msg.downcast_ref::<NamePart>() {
-                            &name_part.name_part as &dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                    setter: |msg: &mut dyn std::any::Any| {
-                        if let Some(name_part) = msg.downcast_mut::<NamePart>() {
-                            &mut name_part.name_part as &mut dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                },
-                crate::descriptor::FieldMetadata {
-                    number: 2,
-                    wire_type: crate::wire_format::WireType::Varint,
-                    field_type: crate::descriptor::FieldType::Required,
-                    value_type: crate::descriptor::ValueType::Bool,
-                    default_value: crate::descriptor::DefaultValue::None,
-                    getter: |msg: &dyn std::any::Any| {
-                        if let Some(name_part) = msg.downcast_ref::<NamePart>() {
-                            &name_part.is_extension as &dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                    setter: |msg: &mut dyn std::any::Any| {
-                        if let Some(name_part) = msg.downcast_mut::<NamePart>() {
-                            &mut name_part.is_extension as &mut dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                },
-            ],
-        }
+    // Metadata function using macro
+    define_metadata! {
+        required name_part: String = 1;
+        required is_extension: bool = 2;
     }
 }
 
@@ -1037,159 +993,15 @@ impl UninterpretedOption {
         self.aggregate_value.is_some()
     }
 
-    // Metadata function
-    pub fn metadata() -> crate::descriptor::MessageMetadata {
-        crate::descriptor::MessageMetadata {
-            fields: vec![
-                crate::descriptor::FieldMetadata {
-                    number: 2,
-                    wire_type: crate::wire_format::WireType::Len,
-                    field_type: crate::descriptor::FieldType::Repeated,
-                    value_type: crate::descriptor::ValueType::Message("NamePart".to_string()),
-                    default_value: crate::descriptor::DefaultValue::EmptyVec,
-                    getter: |msg: &dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_ref::<UninterpretedOption>() {
-                            &option.name as &dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                    setter: |msg: &mut dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_mut::<UninterpretedOption>() {
-                            &mut option.name as &mut dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                },
-                crate::descriptor::FieldMetadata {
-                    number: 3,
-                    wire_type: crate::wire_format::WireType::Len,
-                    field_type: crate::descriptor::FieldType::Optional,
-                    value_type: crate::descriptor::ValueType::String,
-                    default_value: crate::descriptor::DefaultValue::String(String::new()),
-                    getter: |msg: &dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_ref::<UninterpretedOption>() {
-                            &option.identifier_value as &dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                    setter: |msg: &mut dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_mut::<UninterpretedOption>() {
-                            &mut option.identifier_value as &mut dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                },
-                crate::descriptor::FieldMetadata {
-                    number: 4,
-                    wire_type: crate::wire_format::WireType::Varint,
-                    field_type: crate::descriptor::FieldType::Optional,
-                    value_type: crate::descriptor::ValueType::UInt64,
-                    default_value: crate::descriptor::DefaultValue::UInt64(0),
-                    getter: |msg: &dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_ref::<UninterpretedOption>() {
-                            &option.positive_int_value as &dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                    setter: |msg: &mut dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_mut::<UninterpretedOption>() {
-                            &mut option.positive_int_value as &mut dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                },
-                crate::descriptor::FieldMetadata {
-                    number: 5,
-                    wire_type: crate::wire_format::WireType::Varint,
-                    field_type: crate::descriptor::FieldType::Optional,
-                    value_type: crate::descriptor::ValueType::Int64,
-                    default_value: crate::descriptor::DefaultValue::None,
-                    getter: |msg: &dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_ref::<UninterpretedOption>() {
-                            &option.negative_int_value as &dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                    setter: |msg: &mut dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_mut::<UninterpretedOption>() {
-                            &mut option.negative_int_value as &mut dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                },
-                crate::descriptor::FieldMetadata {
-                    number: 6,
-                    wire_type: crate::wire_format::WireType::I64,
-                    field_type: crate::descriptor::FieldType::Optional,
-                    value_type: crate::descriptor::ValueType::Double,
-                    default_value: crate::descriptor::DefaultValue::Double(0.0),
-                    getter: |msg: &dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_ref::<UninterpretedOption>() {
-                            &option.double_value as &dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                    setter: |msg: &mut dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_mut::<UninterpretedOption>() {
-                            &mut option.double_value as &mut dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                },
-                crate::descriptor::FieldMetadata {
-                    number: 7,
-                    wire_type: crate::wire_format::WireType::Len,
-                    field_type: crate::descriptor::FieldType::Optional,
-                    value_type: crate::descriptor::ValueType::Bytes,
-                    default_value: crate::descriptor::DefaultValue::EmptyVec,
-                    getter: |msg: &dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_ref::<UninterpretedOption>() {
-                            &option.string_value as &dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                    setter: |msg: &mut dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_mut::<UninterpretedOption>() {
-                            &mut option.string_value as &mut dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                },
-                crate::descriptor::FieldMetadata {
-                    number: 8,
-                    wire_type: crate::wire_format::WireType::Len,
-                    field_type: crate::descriptor::FieldType::Optional,
-                    value_type: crate::descriptor::ValueType::String,
-                    default_value: crate::descriptor::DefaultValue::String(String::new()),
-                    getter: |msg: &dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_ref::<UninterpretedOption>() {
-                            &option.aggregate_value as &dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                    setter: |msg: &mut dyn std::any::Any| {
-                        if let Some(option) = msg.downcast_mut::<UninterpretedOption>() {
-                            &mut option.aggregate_value as &mut dyn std::any::Any
-                        } else {
-                            panic!("Invalid message type")
-                        }
-                    },
-                },
-            ],
-        }
+    // Metadata function using macro
+    define_metadata! {
+        repeated name: Vec<NamePart> = 2;
+        optional identifier_value: String = 3;
+        optional positive_int_value: u64 = 4;
+        optional negative_int_value: i64 = 5;
+        optional double_value: f64 = 6;
+        optional string_value: Vec<u8> = 7;
+        optional aggregate_value: String = 8;
     }
 }
 
