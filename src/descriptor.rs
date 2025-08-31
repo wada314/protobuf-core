@@ -393,36 +393,26 @@ macro_rules! define_metadata {
                     $(
                         crate::descriptor::FieldMetadata {
                             number: $field_number,
-                            wire_type: {
+                                                        wire_type: {
                                 let type_str = stringify!($rust_type);
-                                let base_type = if type_str.starts_with("Vec<") && type_str.ends_with(">") {
-                                    &type_str[4..type_str.len()-1]
-                                } else {
-                                    type_str
-                                };
-
-                                match (type_str, base_type) {
+                                match type_str {
                                     // Numeric types (Varint)
-                                    ("bool", _) | ("u32", _) | ("u64", _) | ("i32", _) | ("i64", _) => {
+                                    "bool" | "u32" | "u64" | "i32" | "i64" => {
                                         crate::wire_format::WireType::Varint
                                     }
                                     // Floating point types (I64)
-                                    ("f32", _) | ("f64", _) => {
+                                    "f32" | "f64" => {
                                         crate::wire_format::WireType::I64
                                     }
                                     // String and byte types (Len)
-                                    ("String", _) | ("Vec<u8>", _) => {
+                                    "String" | "Vec<u8>" => {
                                         crate::wire_format::WireType::Len
                                     }
-                                    // Known message types (Len)
-                                    (_, "NamePart") | (_, "UninterpretedOption") | (_, "FileDescriptorProto") => {
+                                    // Any Vec type (Len)
+                                    vec_type if vec_type.starts_with("Vec<") => {
                                         crate::wire_format::WireType::Len
                                     }
-                                    // Other Vec types (Len)
-                                    (vec_type, _) if vec_type.starts_with("Vec<") => {
-                                        crate::wire_format::WireType::Len
-                                    }
-                                    _ => panic!("Unsupported type: {} (base: {})", type_str, base_type)
+                                    _ => panic!("Unsupported type: {}", type_str)
                                 }
                             },
                             field_label: match stringify!($field_type) {
@@ -431,35 +421,27 @@ macro_rules! define_metadata {
                                 "repeated" => crate::descriptor::FieldLabel::Repeated,
                                 _ => panic!("Unknown field label: {}", stringify!($field_type)),
                             },
-                            value_type: {
+                                                        value_type: {
                                 let type_str = stringify!($rust_type);
-                                let base_type = if type_str.starts_with("Vec<") && type_str.ends_with(">") {
-                                    &type_str[4..type_str.len()-1]
-                                } else {
-                                    type_str
-                                };
-
-                                match (type_str, base_type) {
+                                match type_str {
                                     // Primitive types
-                                    ("String", _) => crate::descriptor::ValueType::String,
-                                    ("bool", _) => crate::descriptor::ValueType::Bool,
-                                    ("u32", _) => crate::descriptor::ValueType::UInt32,
-                                    ("u64", _) => crate::descriptor::ValueType::UInt64,
-                                    ("i32", _) => crate::descriptor::ValueType::Int32,
-                                    ("i64", _) => crate::descriptor::ValueType::Int64,
-                                    ("f32", _) => crate::descriptor::ValueType::Float,
-                                    ("f64", _) => crate::descriptor::ValueType::Double,
+                                    "String" => crate::descriptor::ValueType::String,
+                                    "bool" => crate::descriptor::ValueType::Bool,
+                                    "u32" => crate::descriptor::ValueType::UInt32,
+                                    "u64" => crate::descriptor::ValueType::UInt64,
+                                    "i32" => crate::descriptor::ValueType::Int32,
+                                    "i64" => crate::descriptor::ValueType::Int64,
+                                    "f32" => crate::descriptor::ValueType::Float,
+                                    "f64" => crate::descriptor::ValueType::Double,
                                     // Byte array
-                                    ("Vec<u8>", _) => crate::descriptor::ValueType::Bytes,
-                                    // Known message types
-                                    (_, "NamePart") => crate::descriptor::ValueType::Message("NamePart".to_string()),
-                                    (_, "UninterpretedOption") => crate::descriptor::ValueType::Message("UninterpretedOption".to_string()),
-                                    (_, "FileDescriptorProto") => crate::descriptor::ValueType::Message("FileDescriptorProto".to_string()),
-                                    // Other Vec types (treated as message arrays)
-                                    (vec_type, base) if vec_type.starts_with("Vec<") => {
-                                        crate::descriptor::ValueType::Message(base.to_string())
+                                    "Vec<u8>" => crate::descriptor::ValueType::Bytes,
+                                    // Any Vec type (treated as message arrays)
+                                    vec_type if vec_type.starts_with("Vec<") => {
+                                        // Extract the message type name from Vec<MessageType>
+                                        let message_type = &vec_type[4..vec_type.len()-1];
+                                        crate::descriptor::ValueType::Message(message_type.to_string())
                                     }
-                                    _ => panic!("Unsupported type: {} (base: {})", type_str, base_type)
+                                    _ => panic!("Unsupported type: {}", type_str)
                                 }
                             },
                             default_value: match stringify!($field_type) {
