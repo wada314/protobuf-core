@@ -329,12 +329,18 @@ pub fn cc_enable_arenas(&self) -> bool {
 
 **Key components**:
 ```rust
-pub struct FieldDescriptor {
+pub struct FieldMetadata {
     pub number: u32,
     pub wire_type: WireType,
-    pub field_type: FieldType,      // Optional/Repeated/Required
+    pub field_label: FieldLabel,    // Optional/Repeated/Required
     pub value_type: ValueType,      // Int32/String/Message/etc.
     pub default_value: DefaultValue,
+    pub getter: fn(&dyn std::any::Any) -> &dyn std::any::Any,
+    pub setter: fn(&mut dyn std::any::Any) -> &mut dyn std::any::Any,
+}
+
+pub enum FieldLabel {
+    Optional, Repeated, Required,
 }
 
 pub enum ValueType {
@@ -356,6 +362,91 @@ pub enum DefaultValue {
 
 **Alternative considered**: Custom closures per field with `std::any::Any` for dynamic access
 - **Rejected**: Performance overhead and complexity outweigh benefits for the target use case
+
+### Field Metadata Macro Implementation Strategy
+**Decision**: Flat macro structure instead of nested helper macros due to Rust's macro expansion order
+
+**Key insight**: Rust's nested macro expansion order is "unnatural" - inner macros expand first, making helper macro approach problematic for type recognition.
+
+**Implementation approach**: Single `define_metadata!` macro with inline logic instead of separate helper macros:
+```rust
+#[macro_export]
+macro_rules! define_metadata {
+    (
+        $(
+            $field_type:ident $field_name:ident: $rust_type:ty = $field_number:literal;
+        )*
+    ) => {
+        pub fn metadata() -> crate::descriptor::MessageMetadata {
+            crate::descriptor::MessageMetadata {
+                fields: vec![
+                    $(
+                        crate::descriptor::FieldMetadata {
+                            number: $field_number,
+                            wire_type: match stringify!($rust_type) {
+                                "String" => crate::wire_format::WireType::Len,
+                                "bool" => crate::wire_format::WireType::Varint,
+                                // ... other type mappings
+                            },
+                            field_label: match stringify!($field_type) {
+                                "required" => crate::descriptor::FieldLabel::Required,
+                                "optional" => crate::descriptor::FieldLabel::Optional,
+                                "repeated" => crate::descriptor::FieldLabel::Repeated,
+                            },
+                            // ... other field metadata
+                        }
+                    ),*
+                ],
+            }
+        }
+    };
+}
+```
+
+**Benefits**:
+- **Type recognition**: Works correctly with Rust's macro system
+- **Maintainability**: Single macro definition, easier to understand and modify
+- **Performance**: No nested macro expansion overhead
+- **Debugging**: Clearer error messages and easier troubleshooting
+
+**Usage example**:
+```rust
+impl NamePart {
+    define_metadata! {
+        required name_part: String = 1;
+        required is_extension: bool = 2;
+    }
+}
+```
+
+### Field Label Terminology Correction
+**Decision**: Use `FieldLabel` instead of `FieldType` to align with official Protocol Buffers terminology
+
+**Official reference**: [Protocol Buffers Language Guide](https://protobuf.dev/programming-guides/editions/) and [descriptor.proto](https://protobuf.dev/programming-guides/editions/) use "label" for field cardinality.
+
+**Terminology mapping**:
+- **Before**: `FieldType` enum (confusing with value types)
+- **After**: `FieldLabel` enum (clear cardinality meaning)
+- **Field name**: `field_type` → `field_label`
+
+**Official protobuf definition**:
+```protobuf
+message FieldDescriptorProto {
+  enum Label {
+    LABEL_OPTIONAL = 1;
+    LABEL_REPEATED = 3;
+    LABEL_REQUIRED = 2;
+  }
+  
+  optional Label label = 4;
+}
+```
+
+**Benefits**:
+- **Clarity**: Eliminates confusion between field labels and value types
+- **Standards compliance**: Matches official protobuf terminology
+- **Documentation alignment**: Consistent with official guides and examples
+- **Developer experience**: More intuitive for protobuf developers
 
 ## Official Protocol Buffer Documentation:
 https://protobuf.dev/
