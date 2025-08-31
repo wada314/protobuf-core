@@ -375,8 +375,8 @@ macro_rules! get_default_value {
 macro_rules! define_metadata {
     (
         $(
-            $field_type:ident $field_name:ident: $rust_type:ty = $field_number:expr
-            $(; default = $default_value:expr)?
+            $field_type:ident $field_name:ident: $rust_type:ty = $field_number:literal
+            $([default = $default_value:expr])?
         );*
     ) => {
         pub fn metadata() -> crate::descriptor::MessageMetadata {
