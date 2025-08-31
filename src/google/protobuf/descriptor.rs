@@ -3,8 +3,8 @@
 //! This module contains the data structures and constants defined in descriptor.proto
 
 use crate::descriptor::DescriptorEnum;
-use crate::{define_metadata, Result};
-use std::io::{Read, Write};
+use crate::define_metadata;
+use std::io::Write;
 
 // Wrapped types for type safety
 #[repr(transparent)]
