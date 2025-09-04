@@ -113,23 +113,6 @@ pub enum DefaultValue {
 /// Note: SInt32 and SInt64 are ZigZag encoded but stored as regular i32/i64 in Rust.
 /// The encoding/decoding is handled by the wire format layer.
 
-/// Field value types for safe access
-pub enum FieldValue<'a> {
-    Int32(PbInt32),
-    Int64(PbInt64),
-    UInt32(PbUInt32),
-    UInt64(PbUInt64),
-    SInt32(PbSInt32),
-    SInt64(PbSInt64),
-    Bool(bool),
-    String(&'a str),
-    Bytes(&'a [u8]),
-    Float(f32),
-    Double(f64),
-    Message(&'a dyn DescriptorMessage),
-    MessageVec(&'a [Box<dyn DescriptorMessage>]),
-}
-
 /// Metadata for a protobuf field
 #[derive(Debug, Clone)]
 pub struct FieldMetadata {
@@ -139,7 +122,7 @@ pub struct FieldMetadata {
     pub value_type: ValueType,
     pub default_value: DefaultValue,
     /// Closure to get a field value from a message
-    pub getter: fn(&dyn std::any::Any) -> FieldValue,
+    pub getter: fn(&dyn std::any::Any) -> &dyn std::any::Any,
     /// Closure to get a mutable reference to the field value from a message
     pub setter: fn(&mut dyn std::any::Any) -> &mut dyn std::any::Any,
 }
@@ -153,7 +136,7 @@ pub struct MessageMetadata {
 /// Basic trait for descriptor messages that can be encoded/decoded
 pub trait DescriptorMessage {
     /// Calculate the encoded size of this message in bytes
-    fn encoded_size(&self) -> usize;
+    fn encoded_size(&self) -> Result<usize, ProtobufError>;
 
     /// Encode this message to the given writer
     fn encode(&self, writer: &mut dyn Write) -> Result<usize>;
@@ -164,7 +147,7 @@ pub trait DescriptorMessage {
 
 // Common implementation for all types that have metadata
 impl<T: HasMetadata> DescriptorMessage for T {
-    fn encoded_size(&self) -> usize {
+    fn encoded_size(&self) -> Result<usize, ProtobufError> {
         let metadata = Self::metadata();
         let mut total_size = 0;
 
@@ -177,12 +160,17 @@ impl<T: HasMetadata> DescriptorMessage for T {
             let tag_size = varint_size(tag as u64);
             total_size += tag_size;
 
-            // Calculate value size based on wire type and actual value
-            let value_size = calculate_field_size_from_value(&field_value);
+            // Calculate value size based on field metadata and actual value
+            let value_size = calculate_field_size(
+                &field.field_label,
+                &field.value_type,
+                &field.wire_type,
+                field_value,
+            )?;
             total_size += value_size;
         }
 
-        total_size
+        Ok(total_size)
     }
 
     fn encode(&self, writer: &mut dyn Write) -> Result<usize> {
@@ -221,62 +209,282 @@ fn varint_size(mut value: u64) -> usize {
     size
 }
 
-/// Calculate the size of a field value based on its actual value
-fn calculate_field_size_from_value(field_value: &FieldValue) -> usize {
+/// Calculate the size of a field value based on its metadata and actual value
+fn calculate_field_size(
+    field_label: &FieldLabel,
+    value_type: &ValueType,
+    wire_type: &crate::wire_format::WireType,
+    value: &dyn std::any::Any,
+) -> Result<usize, ProtobufError> {
     use crate::variant::Variant;
 
-    match field_value {
-        FieldValue::Int32(value) => {
-            let variant: Variant = (*value).into();
-            variant.varint_size()
-        }
-        FieldValue::Int64(value) => {
-            let variant: Variant = (*value).into();
-            variant.varint_size()
-        }
-        FieldValue::UInt32(value) => {
-            let variant: Variant = (*value).into();
-            variant.varint_size()
-        }
-        FieldValue::UInt64(value) => {
-            let variant: Variant = (*value).into();
-            variant.varint_size()
-        }
-        FieldValue::SInt32(value) => {
-            let variant: Variant = (*value).into();
-            variant.varint_size()
-        }
-        FieldValue::SInt64(value) => {
-            let variant: Variant = (*value).into();
-            variant.varint_size()
-        }
-        FieldValue::Bool(value) => {
-            let variant: Variant = (*value).into();
-            variant.varint_size()
-        }
-        FieldValue::String(value) => {
-            let str_len = value.len();
-            varint_size(str_len as u64) + str_len
-        }
-        FieldValue::Bytes(value) => {
-            let bytes_len = value.len();
-            varint_size(bytes_len as u64) + bytes_len
-        }
-        FieldValue::Float(_) => 4,  // Fixed 4 bytes for f32
-        FieldValue::Double(_) => 8, // Fixed 8 bytes for f64
-        FieldValue::Message(message) => {
-            // For message types, we can now call encoded_size() directly
-            let message_size = message.encoded_size();
-            varint_size(message_size as u64) + message_size
-        }
-        FieldValue::MessageVec(messages) => {
-            // For message arrays, calculate total size
-            let mut total_size = 0;
-            for message in *messages {
-                let message_size = message.encoded_size();
-                total_size += varint_size(message_size as u64) + message_size;
+    let is_repeated = matches!(field_label, FieldLabel::Repeated);
+
+    match value_type {
+        ValueType::Int32 => {
+            if is_repeated {
+                let vec = value.downcast_ref::<Vec<i32>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<i32>",
+                    },
+                )?;
+                Ok(vec
+                    .iter()
+                    .map(|&v| {
+                        let variant: Variant = v.into();
+                        variant.varint_size()
+                    })
+                    .sum())
+            } else {
+                let &v = value.downcast_ref::<i32>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "i32",
+                    },
+                )?;
+                let variant: Variant = v.into();
+                Ok(variant.varint_size())
             }
-            total_size
+        }
+        ValueType::Int64 => {
+            if is_repeated {
+                let vec = value.downcast_ref::<Vec<i64>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<i64>",
+                    },
+                )?;
+                Ok(vec
+                    .iter()
+                    .map(|&v| {
+                        let variant: Variant = v.into();
+                        variant.varint_size()
+                    })
+                    .sum())
+            } else {
+                let &v = value.downcast_ref::<i64>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "i64",
+                    },
+                )?;
+                let variant: Variant = v.into();
+                Ok(variant.varint_size())
+            }
+        }
+        ValueType::UInt32 => {
+            if is_repeated {
+                let vec = value.downcast_ref::<Vec<u32>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<u32>",
+                    },
+                )?;
+                Ok(vec
+                    .iter()
+                    .map(|&v| {
+                        let variant: Variant = v.into();
+                        variant.varint_size()
+                    })
+                    .sum())
+            } else {
+                let &v = value.downcast_ref::<u32>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "u32",
+                    },
+                )?;
+                let variant: Variant = v.into();
+                Ok(variant.varint_size())
+            }
+        }
+        ValueType::UInt64 => {
+            if is_repeated {
+                let vec = value.downcast_ref::<Vec<u64>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<u64>",
+                    },
+                )?;
+                Ok(vec
+                    .iter()
+                    .map(|&v| {
+                        let variant: Variant = v.into();
+                        variant.varint_size()
+                    })
+                    .sum())
+            } else {
+                let &v = value.downcast_ref::<u64>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "u64",
+                    },
+                )?;
+                let variant: Variant = v.into();
+                Ok(variant.varint_size())
+            }
+        }
+        ValueType::Bool => {
+            if is_repeated {
+                let vec = value.downcast_ref::<Vec<bool>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<bool>",
+                    },
+                )?;
+                Ok(vec.len()) // Each bool is 1 byte in varint encoding
+            } else {
+                let _ = value.downcast_ref::<bool>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "bool",
+                    },
+                )?;
+                Ok(1) // bool is 1 byte in varint encoding
+            }
+        }
+        ValueType::String => {
+            if is_repeated {
+                let vec = value.downcast_ref::<Vec<String>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<String>",
+                    },
+                )?;
+                Ok(vec
+                    .iter()
+                    .map(|s| {
+                        let str_len = s.len();
+                        varint_size(str_len as u64) + str_len
+                    })
+                    .sum())
+            } else {
+                let s = value.downcast_ref::<String>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "String",
+                    },
+                )?;
+                let str_len = s.len();
+                Ok(varint_size(str_len as u64) + str_len)
+            }
+        }
+        ValueType::Bytes => {
+            if is_repeated {
+                let vec = value.downcast_ref::<Vec<Vec<u8>>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<Vec<u8>>",
+                    },
+                )?;
+                Ok(vec
+                    .iter()
+                    .map(|bytes| {
+                        let bytes_len = bytes.len();
+                        varint_size(bytes_len as u64) + bytes_len
+                    })
+                    .sum())
+            } else {
+                let bytes = value.downcast_ref::<Vec<u8>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<u8>",
+                    },
+                )?;
+                let bytes_len = bytes.len();
+                Ok(varint_size(bytes_len as u64) + bytes_len)
+            }
+        }
+        ValueType::Float => {
+            if is_repeated {
+                let vec = value.downcast_ref::<Vec<f32>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<f32>",
+                    },
+                )?;
+                Ok(vec.len() * 4) // Each f32 is 4 bytes
+            } else {
+                let _ = value.downcast_ref::<f32>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "f32",
+                    },
+                )?;
+                Ok(4) // f32 is 4 bytes
+            }
+        }
+        ValueType::Double => {
+            if is_repeated {
+                let vec = value.downcast_ref::<Vec<f64>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<f64>",
+                    },
+                )?;
+                Ok(vec.len() * 8) // Each f64 is 8 bytes
+            } else {
+                let _ = value.downcast_ref::<f64>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "f64",
+                    },
+                )?;
+                Ok(8) // f64 is 8 bytes
+            }
+        }
+        ValueType::Enum(_) => {
+            if is_repeated {
+                let vec = value.downcast_ref::<Vec<i32>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<i32>",
+                    },
+                )?;
+                Ok(vec
+                    .iter()
+                    .map(|&v| {
+                        let variant: Variant = v.into();
+                        variant.varint_size()
+                    })
+                    .sum())
+            } else {
+                let &v = value.downcast_ref::<i32>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "i32",
+                    },
+                )?;
+                let variant: Variant = v.into();
+                Ok(variant.varint_size())
+            }
+        }
+        ValueType::Message(_) => {
+            if is_repeated {
+                let vec = value
+                    .downcast_ref::<Vec<Box<dyn DescriptorMessage>>>()
+                    .ok_or(ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Vec<Box<dyn DescriptorMessage>>",
+                    })?;
+                Ok(vec
+                    .iter()
+                    .map(|message| {
+                        let message_size = message.encoded_size()?;
+                        varint_size(message_size as u64) + message_size
+                    })
+                    .sum::<Result<usize, _>>()?)
+            } else {
+                let message = value.downcast_ref::<Box<dyn DescriptorMessage>>().ok_or(
+                    ProtobufError::VariantDowncastOutOfRange {
+                        value: 0,
+                        target_type: "Box<dyn DescriptorMessage>",
+                    },
+                )?;
+                let message_size = message.encoded_size()?;
+                Ok(varint_size(message_size as u64) + message_size)
+            }
         }
     }
 }
