@@ -199,14 +199,10 @@ pub(crate) trait HasMetadata: 'static {
     fn metadata() -> crate::descriptor::MessageMetadata;
 }
 
-/// Calculate the size of a varint value in bytes
-fn varint_size(mut value: u64) -> usize {
-    let mut size = 1;
-    while value >= 0x80 {
-        value >>= 7;
-        size += 1;
-    }
-    size
+/// Calculate the size of a varint value in bytes using our common Variant implementation
+fn varint_size(value: u64) -> usize {
+    let variant: crate::variant::Variant = crate::PbUInt64::from(value).into();
+    variant.varint_size()
 }
 
 /// Calculate the size of a field value based on its metadata and actual value
@@ -459,7 +455,7 @@ fn calculate_field_size(
                     .iter()
                     .map(|message| {
                         let message_size = message.encoded_size()?;
-                        varint_size(message_size as u64) + message_size
+                        Ok(varint_size(message_size as u64) + message_size)
                     })
                     .sum::<Result<usize, _>>()?)
             } else {
