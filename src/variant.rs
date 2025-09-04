@@ -123,6 +123,66 @@ impl Variant {
         Ok(value != 0)
     }
 
+    /// Check if this variant can be safely converted to protobuf Int32.
+    ///
+    /// Protobuf Int32 has a range of -2^31 to 2^31-1.
+    /// This method performs strict range checking.
+    pub fn is_valid_int32(&self) -> bool {
+        let value = self.to_uint64();
+        // Check if upper 4 bytes are all zeros (for positive values)
+        // or all ones (for negative values in two's complement)
+        if value <= i32::MAX as u64 {
+            // Positive value: upper 4 bytes should be 0
+            (value >> 32) == 0
+        } else if value >= (i32::MIN as u64) {
+            // Negative value: upper 4 bytes should be 0xFFFFFFFF
+            (value >> 32) == 0xFFFFFFFF
+        } else {
+            false
+        }
+    }
+
+    /// Check if this variant can be safely converted to protobuf UInt32.
+    ///
+    /// Protobuf UInt32 has a range of 0 to 2^32-1.
+    /// This method performs strict range checking.
+    pub fn is_valid_uint32(&self) -> bool {
+        let value = self.to_uint64();
+        // Upper 4 bytes must be 0 for valid UInt32
+        (value >> 32) == 0
+    }
+
+    /// Check if this variant can be safely converted to protobuf SInt32.
+    ///
+    /// Protobuf SInt32 uses ZigZag encoding and has a range of -2^31 to 2^31-1.
+    /// This method performs strict range checking after ZigZag decoding.
+    pub fn is_valid_sint32(&self) -> bool {
+        let sint64 = self.to_sint64();
+        sint64 >= i32::MIN as i64 && sint64 <= i32::MAX as i64
+    }
+
+    /// Check if this variant can be safely converted to protobuf SInt64.
+    ///
+    /// Protobuf SInt64 uses ZigZag encoding and has a range of -2^63 to 2^63-1.
+    /// This method performs strict range checking after ZigZag decoding.
+    pub fn is_valid_sint64(&self) -> bool {
+        // All i64 values are valid for SInt64
+        true
+    }
+
+    /// Get the size of this variant when encoded as a varint.
+    ///
+    /// This method calculates the exact number of bytes needed to encode
+    /// the underlying value as a protobuf varint.
+    pub fn varint_size(&self) -> usize {
+        let value = self.to_uint64();
+        if value == 0 {
+            1
+        } else {
+            (64 - value.leading_zeros() as usize + 6) / 7
+        }
+    }
+
     /// Create a Variant from a u64 value for debugging and testing purposes.
     ///
     /// This method is intended for creating test data and debugging scenarios.

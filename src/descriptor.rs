@@ -6,6 +6,91 @@
 use crate::{ProtobufError, Result};
 use std::io::{Read, Write};
 
+// Protobuf integer types (wrapped for type safety)
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ProtobufInt32(i32);
+
+impl ProtobufInt32 {
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ProtobufInt64(i64);
+
+impl ProtobufInt64 {
+    pub fn new(value: i64) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i64 {
+        self.0
+    }
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ProtobufUInt32(u32);
+
+impl ProtobufUInt32 {
+    pub fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> u32 {
+        self.0
+    }
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ProtobufUInt64(u64);
+
+impl ProtobufUInt64 {
+    pub fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> u64 {
+        self.0
+    }
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ProtobufSInt32(i32);
+
+impl ProtobufSInt32 {
+    pub fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i32 {
+        self.0
+    }
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ProtobufSInt64(i64);
+
+impl ProtobufSInt64 {
+    pub fn new(value: i64) -> Self {
+        Self(value)
+    }
+
+    pub fn value(&self) -> i64 {
+        self.0
+    }
+}
+
 /// Field labels for protobuf fields (cardinality)
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldLabel {
@@ -47,10 +132,12 @@ pub enum DefaultValue {
 
 /// Field value types for safe access
 pub enum FieldValue<'a> {
-    Int32(i32),
-    Int64(i64),
-    UInt32(u32),
-    UInt64(u64),
+    Int32(ProtobufInt32),
+    Int64(ProtobufInt64),
+    UInt32(ProtobufUInt32),
+    UInt64(ProtobufUInt64),
+    SInt32(ProtobufSInt32),
+    SInt64(ProtobufSInt64),
     Bool(bool),
     String(&'a str),
     Bytes(&'a [u8]),
@@ -141,6 +228,15 @@ pub(crate) trait HasMetadata: 'static {
     fn metadata() -> crate::descriptor::MessageMetadata;
 }
 
+/// Trait for protobuf integer types that can be converted to varint and calculate their size
+pub trait ToVarintSize {
+    /// Calculate the size of this value when encoded as a protobuf varint
+    fn to_varint_size(&self) -> usize;
+
+    /// Check if this value is within the valid range for its protobuf type
+    fn is_valid_protobuf_value(&self) -> bool;
+}
+
 /// Calculate the size of a varint value in bytes
 fn varint_size(mut value: u64) -> usize {
     let mut size = 1;
@@ -151,14 +247,108 @@ fn varint_size(mut value: u64) -> usize {
     size
 }
 
+// Implement ToVarintSize for protobuf integer types
+impl ToVarintSize for ProtobufInt32 {
+    fn to_varint_size(&self) -> usize {
+        // Protobuf Int32: no encoding, just varint
+        varint_size(self.0 as u64)
+    }
+
+    fn is_valid_protobuf_value(&self) -> bool {
+        // Protobuf Int32 range: -2^31 to 2^31-1
+        self.0 >= i32::MIN && self.0 <= i32::MAX
+    }
+}
+
+impl ToVarintSize for ProtobufInt64 {
+    fn to_varint_size(&self) -> usize {
+        // Protobuf Int64: no encoding, just varint
+        varint_size(self.0 as u64)
+    }
+
+    fn is_valid_protobuf_value(&self) -> bool {
+        // Protobuf Int64 range: -2^63 to 2^63-1
+        self.0 >= i64::MIN && self.0 <= i64::MAX
+    }
+}
+
+impl ToVarintSize for ProtobufUInt32 {
+    fn to_varint_size(&self) -> usize {
+        varint_size(self.0 as u64)
+    }
+
+    fn is_valid_protobuf_value(&self) -> bool {
+        // Protobuf UInt32 range: 0 to 2^32-1
+        self.0 <= u32::MAX
+    }
+}
+
+impl ToVarintSize for ProtobufUInt64 {
+    fn to_varint_size(&self) -> usize {
+        varint_size(self.0)
+    }
+
+    fn is_valid_protobuf_value(&self) -> bool {
+        // Protobuf UInt64 range: 0 to 2^64-1
+        self.0 <= u64::MAX
+    }
+}
+
+impl ToVarintSize for ProtobufSInt32 {
+    fn to_varint_size(&self) -> usize {
+        // Protobuf SInt32: zigzag encoding
+        let val = if self.0 < 0 {
+            (-self.0 as u64) * 2 + 1
+        } else {
+            self.0 as u64
+        };
+        varint_size(val)
+    }
+
+    fn is_valid_protobuf_value(&self) -> bool {
+        // Protobuf SInt32 range: -2^31 to 2^31-1
+        self.0 >= i32::MIN && self.0 <= i32::MAX
+    }
+}
+
+impl ToVarintSize for ProtobufSInt64 {
+    fn to_varint_size(&self) -> usize {
+        // Protobuf SInt64: zigzag encoding
+        let val = if self.0 < 0 {
+            (-self.0 as u64) * 2 + 1
+        } else {
+            self.0 as u64
+        };
+        varint_size(val)
+    }
+
+    fn is_valid_protobuf_value(&self) -> bool {
+        // Protobuf SInt64 range: -2^63 to 2^63-1
+        self.0 >= i64::MIN && self.0 <= i64::MAX
+    }
+}
+
+impl ToVarintSize for bool {
+    fn to_varint_size(&self) -> usize {
+        varint_size(if *self { 1 } else { 0 })
+    }
+
+    fn is_valid_protobuf_value(&self) -> bool {
+        // Protobuf Bool: true or false
+        true
+    }
+}
+
 /// Calculate the size of a field value based on its actual value
 fn calculate_field_size_from_value(field_value: &FieldValue) -> usize {
     match field_value {
-        FieldValue::Int32(value) => varint_size(*value as u64),
-        FieldValue::Int64(value) => varint_size(*value as u64),
-        FieldValue::UInt32(value) => varint_size(*value as u64),
-        FieldValue::UInt64(value) => varint_size(*value),
-        FieldValue::Bool(_) => 1, // bool is always 1 byte
+        FieldValue::Int32(value) => value.to_varint_size(),
+        FieldValue::Int64(value) => value.to_varint_size(),
+        FieldValue::UInt32(value) => value.to_varint_size(),
+        FieldValue::UInt64(value) => value.to_varint_size(),
+        FieldValue::SInt32(value) => value.to_varint_size(),
+        FieldValue::SInt64(value) => value.to_varint_size(),
+        FieldValue::Bool(value) => value.to_varint_size(),
         FieldValue::String(value) => {
             let str_len = value.len();
             varint_size(str_len as u64) + str_len
@@ -183,74 +373,6 @@ fn calculate_field_size_from_value(field_value: &FieldValue) -> usize {
             }
             total_size
         }
-    }
-}
-
-/// Calculate the size of a field value based on its wire type and actual value
-fn calculate_field_size(field: &FieldMetadata, field_value: &dyn std::any::Any) -> usize {
-    match field.wire_type {
-        crate::wire_format::WireType::Varint => {
-            // For varint fields, we need to determine the actual value size
-            match field.value_type {
-                ValueType::Bool => 1, // bool is always 1 byte
-                ValueType::Int32 | ValueType::UInt32 => {
-                    if let Some(value) = field_value.downcast_ref::<i32>() {
-                        varint_size(*value as u64)
-                    } else if let Some(value) = field_value.downcast_ref::<u32>() {
-                        varint_size(*value as u64)
-                    } else {
-                        1 // fallback
-                    }
-                }
-                ValueType::Int64 | ValueType::UInt64 => {
-                    if let Some(value) = field_value.downcast_ref::<i64>() {
-                        varint_size(*value as u64)
-                    } else if let Some(value) = field_value.downcast_ref::<u64>() {
-                        varint_size(*value)
-                    } else {
-                        1 // fallback
-                    }
-                }
-                _ => 1, // fallback for other varint types
-            }
-        }
-        crate::wire_format::WireType::I64 => 8, // Fixed 8 bytes for f64
-        crate::wire_format::WireType::Len => {
-            // For length-delimited fields, calculate actual length + length prefix
-            match field.value_type {
-                ValueType::String => {
-                    if let Some(value) = field_value.downcast_ref::<String>() {
-                        let str_len = value.len();
-                        varint_size(str_len as u64) + str_len
-                    } else {
-                        1 // fallback
-                    }
-                }
-                ValueType::Bytes => {
-                    if let Some(value) = field_value.downcast_ref::<Vec<u8>>() {
-                        let bytes_len = value.len();
-                        varint_size(bytes_len as u64) + bytes_len
-                    } else {
-                        1 // fallback
-                    }
-                }
-                ValueType::Message(_) => {
-                    // For message types, we need to handle this differently
-                    // Since we can't easily call encoded_size() from Any, we'll use a fallback
-                    if let Some(bytes) = field_value.downcast_ref::<Vec<u8>>() {
-                        // If it's already encoded bytes
-                        let bytes_len = bytes.len();
-                        varint_size(bytes_len as u64) + bytes_len
-                    } else {
-                        // For now, we'll use a conservative estimate
-                        // This will be improved when we implement proper message encoding
-                        1 // fallback
-                    }
-                }
-                _ => 1, // fallback for other length-delimited types
-            }
-        }
-        _ => 1, // fallback for unknown wire types
     }
 }
 

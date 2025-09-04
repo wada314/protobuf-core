@@ -2,8 +2,8 @@
 //!
 //! This module contains the data structures and constants defined in descriptor.proto
 
-use crate::descriptor::DescriptorEnum;
 use crate::define_metadata;
+use crate::descriptor::DescriptorEnum;
 use std::io::Write;
 
 // Wrapped types for type safety
@@ -915,13 +915,13 @@ pub struct Annotation;
 /// }
 #[derive(Default)]
 pub struct UninterpretedOption {
-    name: Vec<NamePart>,              // repeated
-    identifier_value: Option<String>, // optional
-    positive_int_value: Option<u64>,  // optional
-    negative_int_value: Option<i64>,  // optional
-    double_value: Option<f64>,        // optional
-    string_value: Option<Vec<u8>>,    // optional (bytes)
-    aggregate_value: Option<String>,  // optional
+    name: Vec<NamePart>,                                           // repeated
+    identifier_value: Option<String>,                              // optional
+    positive_int_value: Option<crate::descriptor::ProtobufUInt64>, // optional
+    negative_int_value: Option<crate::descriptor::ProtobufInt64>,  // optional
+    double_value: Option<f64>,                                     // optional
+    string_value: Option<Vec<u8>>,                                 // optional (bytes)
+    aggregate_value: Option<String>,                               // optional
 }
 
 impl UninterpretedOption {
@@ -937,11 +937,13 @@ impl UninterpretedOption {
     pub fn identifier_value(&self) -> &str {
         self.identifier_value.as_deref().unwrap_or_default()
     }
-    pub fn positive_int_value(&self) -> u64 {
-        self.positive_int_value.unwrap_or_default()
+    pub fn positive_int_value(&self) -> crate::descriptor::ProtobufUInt64 {
+        self.positive_int_value
+            .unwrap_or_else(|| crate::descriptor::ProtobufUInt64::new(0))
     }
-    pub fn negative_int_value(&self) -> i64 {
-        self.negative_int_value.unwrap_or_default()
+    pub fn negative_int_value(&self) -> crate::descriptor::ProtobufInt64 {
+        self.negative_int_value
+            .unwrap_or_else(|| crate::descriptor::ProtobufInt64::new(0))
     }
     pub fn double_value(&self) -> f64 {
         self.double_value.unwrap_or_default()
@@ -979,8 +981,8 @@ impl crate::descriptor::HasMetadata for UninterpretedOption {
     define_metadata! {
         repeated name: Vec<NamePart> = 2;
         optional identifier_value: String = 3;
-        optional positive_int_value: u64 = 4;
-        optional negative_int_value: i64 = 5;
+        optional positive_int_value: ProtobufUInt64 = 4;
+        optional negative_int_value: ProtobufInt64 = 5;
         optional double_value: f64 = 6;
         optional string_value: Vec<u8> = 7;
         optional aggregate_value: String = 8;
@@ -1017,8 +1019,8 @@ mod tests {
         // Test default values
         assert_eq!(option.name().len(), 0);
         assert_eq!(option.identifier_value(), "");
-        assert_eq!(option.positive_int_value(), 0);
-        assert_eq!(option.negative_int_value(), 0);
+        assert_eq!(option.positive_int_value().value(), 0);
+        assert_eq!(option.negative_int_value().value(), 0);
         assert_eq!(option.double_value(), 0.0);
         assert_eq!(option.string_value().len(), 0);
         assert_eq!(option.aggregate_value(), "");
