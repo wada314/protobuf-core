@@ -915,13 +915,13 @@ pub struct Annotation;
 /// }
 #[derive(Default)]
 pub struct UninterpretedOption {
-    name: Vec<NamePart>,                                           // repeated
-    identifier_value: Option<String>,                              // optional
+    name: Vec<NamePart>,                                     // repeated
+    identifier_value: Option<String>,                        // optional
     positive_int_value: Option<crate::descriptor::PbUInt64>, // optional
     negative_int_value: Option<crate::descriptor::PbInt64>,  // optional
-    double_value: Option<f64>,                                     // optional
-    string_value: Option<Vec<u8>>,                                 // optional (bytes)
-    aggregate_value: Option<String>,                               // optional
+    double_value: Option<f64>,                               // optional
+    string_value: Option<Vec<u8>>,                           // optional (bytes)
+    aggregate_value: Option<String>,                         // optional
 }
 
 impl UninterpretedOption {
@@ -939,11 +939,11 @@ impl UninterpretedOption {
     }
     pub fn positive_int_value(&self) -> crate::descriptor::PbUInt64 {
         self.positive_int_value
-            .unwrap_or_else(|| crate::descriptor::PbUInt64::new(0))
+            .unwrap_or_else(|| crate::descriptor::PbUInt64::from(0))
     }
     pub fn negative_int_value(&self) -> crate::descriptor::PbInt64 {
         self.negative_int_value
-            .unwrap_or_else(|| crate::descriptor::PbInt64::new(0))
+            .unwrap_or_else(|| crate::descriptor::PbInt64::from(0))
     }
     pub fn double_value(&self) -> f64 {
         self.double_value.unwrap_or_default()

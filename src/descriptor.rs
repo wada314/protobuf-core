@@ -4,92 +4,33 @@
 //! and plugin.proto, along with basic encoding/decoding capabilities.
 
 use crate::{ProtobufError, Result};
+use derive_from::From;
 use std::io::{Read, Write};
 
 // Protobuf integer types (wrapped for type safety)
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
 pub struct PbInt32(i32);
 
-impl PbInt32 {
-    pub fn new(value: i32) -> Self {
-        Self(value)
-    }
-
-    pub fn value(&self) -> i32 {
-        self.0
-    }
-}
-
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
 pub struct PbInt64(i64);
 
-impl PbInt64 {
-    pub fn new(value: i64) -> Self {
-        Self(value)
-    }
-
-    pub fn value(&self) -> i64 {
-        self.0
-    }
-}
-
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
 pub struct PbUInt32(u32);
 
-impl PbUInt32 {
-    pub fn new(value: u32) -> Self {
-        Self(value)
-    }
-
-    pub fn value(&self) -> u32 {
-        self.0
-    }
-}
-
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
 pub struct PbUInt64(u64);
 
-impl PbUInt64 {
-    pub fn new(value: u64) -> Self {
-        Self(value)
-    }
-
-    pub fn value(&self) -> u64 {
-        self.0
-    }
-}
-
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
 pub struct PbSInt32(i32);
 
-impl PbSInt32 {
-    pub fn new(value: i32) -> Self {
-        Self(value)
-    }
-
-    pub fn value(&self) -> i32 {
-        self.0
-    }
-}
-
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
 pub struct PbSInt64(i64);
-
-impl PbSInt64 {
-    pub fn new(value: i64) -> Self {
-        Self(value)
-    }
-
-    pub fn value(&self) -> i64 {
-        self.0
-    }
-}
 
 /// Field labels for protobuf fields (cardinality)
 #[derive(Debug, Clone, PartialEq)]
@@ -251,80 +192,92 @@ fn varint_size(mut value: u64) -> usize {
 impl ToVarintSize for PbInt32 {
     fn to_varint_size(&self) -> usize {
         // Protobuf Int32: no encoding, just varint
-        varint_size(self.0 as u64)
+        let value: i32 = (*self).into();
+        varint_size(value as u64)
     }
 
     fn is_valid_protobuf_value(&self) -> bool {
         // Protobuf Int32 range: -2^31 to 2^31-1
-        self.0 >= i32::MIN && self.0 <= i32::MAX
+        let value: i32 = (*self).into();
+        value >= i32::MIN && value <= i32::MAX
     }
 }
 
 impl ToVarintSize for PbInt64 {
     fn to_varint_size(&self) -> usize {
         // Protobuf Int64: no encoding, just varint
-        varint_size(self.0 as u64)
+        let value: i64 = (*self).into();
+        varint_size(value as u64)
     }
 
     fn is_valid_protobuf_value(&self) -> bool {
         // Protobuf Int64 range: -2^63 to 2^63-1
-        self.0 >= i64::MIN && self.0 <= i64::MAX
+        let value: i64 = (*self).into();
+        value >= i64::MIN && value <= i64::MAX
     }
 }
 
 impl ToVarintSize for PbUInt32 {
     fn to_varint_size(&self) -> usize {
-        varint_size(self.0 as u64)
+        let value: u32 = (*self).into();
+        varint_size(value as u64)
     }
 
     fn is_valid_protobuf_value(&self) -> bool {
         // Protobuf UInt32 range: 0 to 2^32-1
-        self.0 <= u32::MAX
+        let value: u32 = (*self).into();
+        value <= u32::MAX
     }
 }
 
 impl ToVarintSize for PbUInt64 {
     fn to_varint_size(&self) -> usize {
-        varint_size(self.0)
+        let value: u64 = (*self).into();
+        varint_size(value)
     }
 
     fn is_valid_protobuf_value(&self) -> bool {
         // Protobuf UInt64 range: 0 to 2^64-1
-        self.0 <= u64::MAX
+        let value: u64 = (*self).into();
+        value <= u64::MAX
     }
 }
 
 impl ToVarintSize for PbSInt32 {
     fn to_varint_size(&self) -> usize {
         // Protobuf SInt32: zigzag encoding
-        let val = if self.0 < 0 {
-            (-self.0 as u64) * 2 + 1
+        let value: i32 = (*self).into();
+        let val = if value < 0 {
+            (-value as u64) * 2 + 1
         } else {
-            self.0 as u64
+            value as u64
         };
         varint_size(val)
     }
 
     fn is_valid_protobuf_value(&self) -> bool {
         // Protobuf SInt32 range: -2^31 to 2^31-1
-        self.0 >= i32::MIN && self.0 <= i32::MAX
+        let value: i32 = (*self).into();
+        value >= i32::MIN && value <= i32::MAX
     }
 }
 
 impl ToVarintSize for PbSInt64 {
     fn to_varint_size(&self) -> usize {
         // Protobuf SInt64: zigzag encoding
-        let val = if self.0 < 0 {
-            (-self.0 as u64) * 2 + 1
+        let value: i64 = (*self).into();
+        let val = if value < 0 {
+            (-value as u64) * 2 + 1
         } else {
-            self.0 as u64
+            value as u64
         };
         varint_size(val)
     }
 
     fn is_valid_protobuf_value(&self) -> bool {
         // Protobuf SInt64 range: -2^63 to 2^63-1
-        self.0 >= i64::MIN && self.0 <= i64::MAX
+        let value: i64 = (*self).into();
+        value >= i64::MIN && value <= i64::MAX
     }
 }
 
