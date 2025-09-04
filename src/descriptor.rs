@@ -169,15 +169,6 @@ pub(crate) trait HasMetadata: 'static {
     fn metadata() -> crate::descriptor::MessageMetadata;
 }
 
-/// Trait for protobuf integer types that can be converted to varint and calculate their size
-pub trait ToVarintSize {
-    /// Calculate the size of this value when encoded as a protobuf varint
-    fn to_varint_size(&self) -> usize;
-
-    /// Check if this value is within the valid range for its protobuf type
-    fn is_valid_protobuf_value(&self) -> bool;
-}
-
 /// Calculate the size of a varint value in bytes
 fn varint_size(mut value: u64) -> usize {
     let mut size = 1;
@@ -188,120 +179,39 @@ fn varint_size(mut value: u64) -> usize {
     size
 }
 
-// Implement ToVarintSize for protobuf integer types
-impl ToVarintSize for PbInt32 {
-    fn to_varint_size(&self) -> usize {
-        // Protobuf Int32: no encoding, just varint
-        let value: i32 = (*self).into();
-        varint_size(value as u64)
-    }
-
-    fn is_valid_protobuf_value(&self) -> bool {
-        // Protobuf Int32 range: -2^31 to 2^31-1
-        let value: i32 = (*self).into();
-        value >= i32::MIN && value <= i32::MAX
-    }
-}
-
-impl ToVarintSize for PbInt64 {
-    fn to_varint_size(&self) -> usize {
-        // Protobuf Int64: no encoding, just varint
-        let value: i64 = (*self).into();
-        varint_size(value as u64)
-    }
-
-    fn is_valid_protobuf_value(&self) -> bool {
-        // Protobuf Int64 range: -2^63 to 2^63-1
-        let value: i64 = (*self).into();
-        value >= i64::MIN && value <= i64::MAX
-    }
-}
-
-impl ToVarintSize for PbUInt32 {
-    fn to_varint_size(&self) -> usize {
-        let value: u32 = (*self).into();
-        varint_size(value as u64)
-    }
-
-    fn is_valid_protobuf_value(&self) -> bool {
-        // Protobuf UInt32 range: 0 to 2^32-1
-        let value: u32 = (*self).into();
-        value <= u32::MAX
-    }
-}
-
-impl ToVarintSize for PbUInt64 {
-    fn to_varint_size(&self) -> usize {
-        let value: u64 = (*self).into();
-        varint_size(value)
-    }
-
-    fn is_valid_protobuf_value(&self) -> bool {
-        // Protobuf UInt64 range: 0 to 2^64-1
-        let value: u64 = (*self).into();
-        value <= u64::MAX
-    }
-}
-
-impl ToVarintSize for PbSInt32 {
-    fn to_varint_size(&self) -> usize {
-        // Protobuf SInt32: zigzag encoding
-        let value: i32 = (*self).into();
-        let val = if value < 0 {
-            (-value as u64) * 2 + 1
-        } else {
-            value as u64
-        };
-        varint_size(val)
-    }
-
-    fn is_valid_protobuf_value(&self) -> bool {
-        // Protobuf SInt32 range: -2^31 to 2^31-1
-        let value: i32 = (*self).into();
-        value >= i32::MIN && value <= i32::MAX
-    }
-}
-
-impl ToVarintSize for PbSInt64 {
-    fn to_varint_size(&self) -> usize {
-        // Protobuf SInt64: zigzag encoding
-        let value: i64 = (*self).into();
-        let val = if value < 0 {
-            (-value as u64) * 2 + 1
-        } else {
-            value as u64
-        };
-        varint_size(val)
-    }
-
-    fn is_valid_protobuf_value(&self) -> bool {
-        // Protobuf SInt64 range: -2^63 to 2^63-1
-        let value: i64 = (*self).into();
-        value >= i64::MIN && value <= i64::MAX
-    }
-}
-
-impl ToVarintSize for bool {
-    fn to_varint_size(&self) -> usize {
-        varint_size(if *self { 1 } else { 0 })
-    }
-
-    fn is_valid_protobuf_value(&self) -> bool {
-        // Protobuf Bool: true or false
-        true
-    }
-}
-
 /// Calculate the size of a field value based on its actual value
 fn calculate_field_size_from_value(field_value: &FieldValue) -> usize {
+    use crate::variant::Variant;
+
     match field_value {
-        FieldValue::Int32(value) => value.to_varint_size(),
-        FieldValue::Int64(value) => value.to_varint_size(),
-        FieldValue::UInt32(value) => value.to_varint_size(),
-        FieldValue::UInt64(value) => value.to_varint_size(),
-        FieldValue::SInt32(value) => value.to_varint_size(),
-        FieldValue::SInt64(value) => value.to_varint_size(),
-        FieldValue::Bool(value) => value.to_varint_size(),
+        FieldValue::Int32(value) => {
+            let variant: Variant = (*value).into();
+            variant.varint_size()
+        }
+        FieldValue::Int64(value) => {
+            let variant: Variant = (*value).into();
+            variant.varint_size()
+        }
+        FieldValue::UInt32(value) => {
+            let variant: Variant = (*value).into();
+            variant.varint_size()
+        }
+        FieldValue::UInt64(value) => {
+            let variant: Variant = (*value).into();
+            variant.varint_size()
+        }
+        FieldValue::SInt32(value) => {
+            let variant: Variant = (*value).into();
+            variant.varint_size()
+        }
+        FieldValue::SInt64(value) => {
+            let variant: Variant = (*value).into();
+            variant.varint_size()
+        }
+        FieldValue::Bool(value) => {
+            let variant: Variant = (*value).into();
+            variant.varint_size()
+        }
         FieldValue::String(value) => {
             let str_len = value.len();
             varint_size(str_len as u64) + str_len
