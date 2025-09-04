@@ -205,6 +205,31 @@ fn varint_size(value: u64) -> usize {
     variant.varint_size()
 }
 
+/// Generic helper function to calculate field size for scalar and repeated fields
+fn calculate_scalar_field_size<T: 'static>(
+    value: &dyn std::any::Any,
+    is_repeated: bool,
+    scalar_type_name: &'static str,
+    vec_type_name: &'static str,
+    size_calculator: impl Fn(T) -> usize,
+) -> Result<usize, ProtobufError> {
+    if is_repeated {
+        let vec = value
+            .downcast_ref::<Vec<T>>()
+            .ok_or(ProtobufError::FieldTypeDowncastError {
+                expected_type: vec_type_name,
+            })?;
+        Ok(vec.iter().map(|&v| size_calculator(v)).sum())
+    } else {
+        let &v = value
+            .downcast_ref::<T>()
+            .ok_or(ProtobufError::FieldTypeDowncastError {
+                expected_type: scalar_type_name,
+            })?;
+        Ok(size_calculator(v))
+    }
+}
+
 /// Calculate the size of a field value based on its metadata and actual value
 fn calculate_field_size(
     field_label: &FieldLabel,
@@ -218,122 +243,37 @@ fn calculate_field_size(
 
     match value_type {
         ValueType::Int32 => {
-            if is_repeated {
-                let vec = value.downcast_ref::<Vec<i32>>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<i32>",
-                    },
-                )?;
-                Ok(vec
-                    .iter()
-                    .map(|&v| {
-                        let variant: Variant = v.into();
-                        variant.varint_size()
-                    })
-                    .sum())
-            } else {
-                let &v =
-                    value
-                        .downcast_ref::<i32>()
-                        .ok_or(ProtobufError::FieldTypeDowncastError {
-                            expected_type: "i32",
-                        })?;
+            calculate_scalar_field_size(value, is_repeated, "i32", "Vec<i32>", |v| {
                 let variant: Variant = v.into();
-                Ok(variant.varint_size())
-            }
+                variant.varint_size()
+            })
         }
         ValueType::Int64 => {
-            if is_repeated {
-                let vec = value.downcast_ref::<Vec<i64>>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<i64>",
-                    },
-                )?;
-                Ok(vec
-                    .iter()
-                    .map(|&v| {
-                        let variant: Variant = v.into();
-                        variant.varint_size()
-                    })
-                    .sum())
-            } else {
-                let &v =
-                    value
-                        .downcast_ref::<i64>()
-                        .ok_or(ProtobufError::FieldTypeDowncastError {
-                            expected_type: "i64",
-                        })?;
+            calculate_scalar_field_size(value, is_repeated, "i64", "Vec<i64>", |v| {
                 let variant: Variant = v.into();
-                Ok(variant.varint_size())
-            }
+                variant.varint_size()
+            })
         }
         ValueType::UInt32 => {
-            if is_repeated {
-                let vec = value.downcast_ref::<Vec<u32>>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<u32>",
-                    },
-                )?;
-                Ok(vec
-                    .iter()
-                    .map(|&v| {
-                        let variant: Variant = v.into();
-                        variant.varint_size()
-                    })
-                    .sum())
-            } else {
-                let &v =
-                    value
-                        .downcast_ref::<u32>()
-                        .ok_or(ProtobufError::FieldTypeDowncastError {
-                            expected_type: "u32",
-                        })?;
+            calculate_scalar_field_size(value, is_repeated, "u32", "Vec<u32>", |v| {
                 let variant: Variant = v.into();
-                Ok(variant.varint_size())
-            }
+                variant.varint_size()
+            })
         }
         ValueType::UInt64 => {
-            if is_repeated {
-                let vec = value.downcast_ref::<Vec<u64>>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<u64>",
-                    },
-                )?;
-                Ok(vec
-                    .iter()
-                    .map(|&v| {
-                        let variant: Variant = v.into();
-                        variant.varint_size()
-                    })
-                    .sum())
-            } else {
-                let &v =
-                    value
-                        .downcast_ref::<u64>()
-                        .ok_or(ProtobufError::FieldTypeDowncastError {
-                            expected_type: "u64",
-                        })?;
+            calculate_scalar_field_size(value, is_repeated, "u64", "Vec<u64>", |v| {
                 let variant: Variant = v.into();
-                Ok(variant.varint_size())
-            }
+                variant.varint_size()
+            })
         }
         ValueType::Bool => {
-            if is_repeated {
-                let vec = value.downcast_ref::<Vec<bool>>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<bool>",
-                    },
-                )?;
-                Ok(vec.len()) // Each bool is 1 byte in varint encoding
-            } else {
-                let _ =
-                    value
-                        .downcast_ref::<bool>()
-                        .ok_or(ProtobufError::FieldTypeDowncastError {
-                            expected_type: "bool",
-                        })?;
-                Ok(1) // bool is 1 byte in varint encoding
-            }
+            calculate_scalar_field_size(
+                value,
+                is_repeated,
+                "bool",
+                "Vec<bool>",
+                |_| 1, // Each bool is 1 byte in varint encoding
+            )
         }
         ValueType::String => {
             if is_repeated {
@@ -384,65 +324,28 @@ fn calculate_field_size(
             }
         }
         ValueType::Float => {
-            if is_repeated {
-                let vec = value.downcast_ref::<Vec<f32>>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<f32>",
-                    },
-                )?;
-                Ok(vec.len() * 4) // Each f32 is 4 bytes
-            } else {
-                let _ =
-                    value
-                        .downcast_ref::<f32>()
-                        .ok_or(ProtobufError::FieldTypeDowncastError {
-                            expected_type: "f32",
-                        })?;
-                Ok(4) // f32 is 4 bytes
-            }
+            calculate_scalar_field_size(
+                value,
+                is_repeated,
+                "f32",
+                "Vec<f32>",
+                |_| 4, // Each f32 is 4 bytes
+            )
         }
         ValueType::Double => {
-            if is_repeated {
-                let vec = value.downcast_ref::<Vec<f64>>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<f64>",
-                    },
-                )?;
-                Ok(vec.len() * 8) // Each f64 is 8 bytes
-            } else {
-                let _ =
-                    value
-                        .downcast_ref::<f64>()
-                        .ok_or(ProtobufError::FieldTypeDowncastError {
-                            expected_type: "f64",
-                        })?;
-                Ok(8) // f64 is 8 bytes
-            }
+            calculate_scalar_field_size(
+                value,
+                is_repeated,
+                "f64",
+                "Vec<f64>",
+                |_| 8, // Each f64 is 8 bytes
+            )
         }
         ValueType::Enum(_) => {
-            if is_repeated {
-                let vec = value.downcast_ref::<Vec<i32>>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<i32>",
-                    },
-                )?;
-                Ok(vec
-                    .iter()
-                    .map(|&v| {
-                        let variant: Variant = v.into();
-                        variant.varint_size()
-                    })
-                    .sum())
-            } else {
-                let &v =
-                    value
-                        .downcast_ref::<i32>()
-                        .ok_or(ProtobufError::FieldTypeDowncastError {
-                            expected_type: "i32",
-                        })?;
+            calculate_scalar_field_size(value, is_repeated, "i32", "Vec<i32>", |v| {
                 let variant: Variant = v.into();
-                Ok(variant.varint_size())
-            }
+                variant.varint_size()
+            })
         }
         ValueType::Message(_) => {
             if is_repeated {
