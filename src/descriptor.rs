@@ -210,10 +210,10 @@ fn calculate_scalar_field_size<T: 'static>(
     value: &dyn std::any::Any,
     is_repeated: bool,
     scalar_type_name: &'static str,
-    vec_type_name: &'static str,
     size_calculator: impl Fn(T) -> usize,
 ) -> Result<usize, ProtobufError> {
     if is_repeated {
+        let vec_type_name = format!("Vec<{}>", scalar_type_name);
         let vec = value
             .downcast_ref::<Vec<T>>()
             .ok_or(ProtobufError::FieldTypeDowncastError {
@@ -224,7 +224,7 @@ fn calculate_scalar_field_size<T: 'static>(
         let &v = value
             .downcast_ref::<T>()
             .ok_or(ProtobufError::FieldTypeDowncastError {
-                expected_type: scalar_type_name,
+                expected_type: scalar_type_name.to_string(),
             })?;
         Ok(size_calculator(v))
     }
@@ -242,36 +242,27 @@ fn calculate_field_size(
     let is_repeated = matches!(field_label, FieldLabel::Repeated);
 
     match value_type {
-        ValueType::Int32 => {
-            calculate_scalar_field_size(value, is_repeated, "i32", "Vec<i32>", |v| {
-                let variant: Variant = v.into();
-                variant.varint_size()
-            })
-        }
-        ValueType::Int64 => {
-            calculate_scalar_field_size(value, is_repeated, "i64", "Vec<i64>", |v| {
-                let variant: Variant = v.into();
-                variant.varint_size()
-            })
-        }
-        ValueType::UInt32 => {
-            calculate_scalar_field_size(value, is_repeated, "u32", "Vec<u32>", |v| {
-                let variant: Variant = v.into();
-                variant.varint_size()
-            })
-        }
-        ValueType::UInt64 => {
-            calculate_scalar_field_size(value, is_repeated, "u64", "Vec<u64>", |v| {
-                let variant: Variant = v.into();
-                variant.varint_size()
-            })
-        }
+        ValueType::Int32 => calculate_scalar_field_size(value, is_repeated, "i32", |v| {
+            let variant: Variant = v.into();
+            variant.varint_size()
+        }),
+        ValueType::Int64 => calculate_scalar_field_size(value, is_repeated, "i64", |v| {
+            let variant: Variant = v.into();
+            variant.varint_size()
+        }),
+        ValueType::UInt32 => calculate_scalar_field_size(value, is_repeated, "u32", |v| {
+            let variant: Variant = v.into();
+            variant.varint_size()
+        }),
+        ValueType::UInt64 => calculate_scalar_field_size(value, is_repeated, "u64", |v| {
+            let variant: Variant = v.into();
+            variant.varint_size()
+        }),
         ValueType::Bool => {
             calculate_scalar_field_size(
                 value,
                 is_repeated,
                 "bool",
-                "Vec<bool>",
                 |_| 1, // Each bool is 1 byte in varint encoding
             )
         }
@@ -279,7 +270,7 @@ fn calculate_field_size(
             if is_repeated {
                 let vec = value.downcast_ref::<Vec<String>>().ok_or(
                     ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<String>",
+                        expected_type: "Vec<String>".to_string(),
                     },
                 )?;
                 Ok(vec
@@ -292,7 +283,7 @@ fn calculate_field_size(
             } else {
                 let s = value.downcast_ref::<String>().ok_or(
                     ProtobufError::FieldTypeDowncastError {
-                        expected_type: "String",
+                        expected_type: "String".to_string(),
                     },
                 )?;
                 let str_len = s.len();
@@ -303,7 +294,7 @@ fn calculate_field_size(
             if is_repeated {
                 let vec = value.downcast_ref::<Vec<Vec<u8>>>().ok_or(
                     ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<Vec<u8>>",
+                        expected_type: "Vec<Vec<u8>>".to_string(),
                     },
                 )?;
                 Ok(vec
@@ -316,7 +307,7 @@ fn calculate_field_size(
             } else {
                 let bytes = value.downcast_ref::<Vec<u8>>().ok_or(
                     ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<u8>",
+                        expected_type: "Vec<u8>".to_string(),
                     },
                 )?;
                 let bytes_len = bytes.len();
@@ -328,7 +319,6 @@ fn calculate_field_size(
                 value,
                 is_repeated,
                 "f32",
-                "Vec<f32>",
                 |_| 4, // Each f32 is 4 bytes
             )
         }
@@ -337,22 +327,19 @@ fn calculate_field_size(
                 value,
                 is_repeated,
                 "f64",
-                "Vec<f64>",
                 |_| 8, // Each f64 is 8 bytes
             )
         }
-        ValueType::Enum(_) => {
-            calculate_scalar_field_size(value, is_repeated, "i32", "Vec<i32>", |v| {
-                let variant: Variant = v.into();
-                variant.varint_size()
-            })
-        }
+        ValueType::Enum(_) => calculate_scalar_field_size(value, is_repeated, "i32", |v| {
+            let variant: Variant = v.into();
+            variant.varint_size()
+        }),
         ValueType::Message(_) => {
             if is_repeated {
                 let vec = value
                     .downcast_ref::<Vec<Box<dyn DescriptorMessage>>>()
                     .ok_or(ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<Box<dyn DescriptorMessage>>",
+                        expected_type: "Vec<Box<dyn DescriptorMessage>>".to_string(),
                     })?;
                 Ok(vec
                     .iter()
@@ -364,7 +351,7 @@ fn calculate_field_size(
             } else {
                 let message = value.downcast_ref::<Box<dyn DescriptorMessage>>().ok_or(
                     ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Box<dyn DescriptorMessage>",
+                        expected_type: "Box<dyn DescriptorMessage>".to_string(),
                     },
                 )?;
                 let message_size = message.encoded_size()?;

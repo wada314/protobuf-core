@@ -33,7 +33,7 @@ pub enum ProtobufError {
     },
 
     #[error("Failed to downcast field value to expected type: {expected_type}")]
-    FieldTypeDowncastError { expected_type: &'static str },
+    FieldTypeDowncastError { expected_type: String },
 
     #[error("Malformed tag: field_number={field_number}, wire_type={wire_type}")]
     MalformedTag { field_number: u32, wire_type: u8 },
