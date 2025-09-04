@@ -71,6 +71,48 @@ pub enum DefaultValue {
     Double(f64),
 }
 
+/// Protobuf to Rust Type Mapping
+///
+/// This mapping defines how protobuf value types correspond to Rust types.
+///
+/// For proto2, we have three field labels:
+/// - optional: Can be unset (None) or set to a value
+/// - required: Must be set to a value (never None)  
+/// - repeated: Always a Vec<T> (can be empty)
+///
+/// Base type mapping (value_type => Rust type):
+/// Int32    => i32
+/// Int64    => i64
+/// UInt32   => u32
+/// UInt64   => u64
+/// SInt32   => i32 (ZigZag encoded)
+/// SInt64   => i64 (ZigZag encoded)
+/// Bool     => bool
+/// String   => String
+/// Bytes    => Vec<u8>
+/// Float    => f32
+/// Double   => f64
+/// Enum     => i32 (enum value)
+/// Message  => Box<dyn DescriptorMessage>
+///
+/// For repeated fields, the base type is simply wrapped with Vec<T>:
+/// repeated Int32    => Vec<i32>
+/// repeated Int64    => Vec<i64>
+/// repeated UInt32   => Vec<u32>
+/// repeated UInt64   => Vec<u64>
+/// repeated SInt32   => Vec<i32>
+/// repeated SInt64   => Vec<i64>
+/// repeated Bool     => Vec<bool>
+/// repeated String   => Vec<String>
+/// repeated Bytes    => Vec<Vec<u8>>
+/// repeated Float    => Vec<f32>
+/// repeated Double   => Vec<f64>
+/// repeated Enum     => Vec<i32>
+/// repeated Message  => Vec<Box<dyn DescriptorMessage>>
+///
+/// Note: SInt32 and SInt64 are ZigZag encoded but stored as regular i32/i64 in Rust.
+/// The encoding/decoding is handled by the wire format layer.
+
 /// Field value types for safe access
 pub enum FieldValue<'a> {
     Int32(PbInt32),
