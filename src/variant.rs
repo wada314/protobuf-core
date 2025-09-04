@@ -34,6 +34,7 @@ use crate::descriptor::{
 };
 use crate::wire_format::MAX_VARINT_SIZE;
 use crate::{ProtobufError, Result};
+use std::convert::{From, TryFrom};
 
 /// A fixed-size array wrapper for variant values.
 ///
@@ -64,71 +65,6 @@ impl Variant {
     pub fn to_uint64(&self) -> u64 {
         // Use Rust's built-in method to convert bytes to u64
         u64::from_le_bytes(self.0)
-    }
-
-    /// Convert to protobuf UInt32 type (32-bit unsigned integer).
-    ///
-    /// This conversion can fail if the value exceeds u32::MAX.
-    /// Returns Err(ProtobufError::VariantDowncastOutOfRange) if the value is too large.
-    pub fn to_uint32(&self) -> Result<ProtobufUInt32> {
-        let value = self.to_uint64();
-        u32::try_from(value)
-            .map_err(|_| ProtobufError::VariantDowncastOutOfRange {
-                value,
-                target_type: "u32",
-            })
-            .map(ProtobufUInt32::new)
-    }
-
-    /// Convert to protobuf Int32 type (32-bit signed integer, no encoding).
-    ///
-    /// Protobuf Int32 interprets the first 4 bytes as a signed 32-bit integer.
-    /// This conversion can fail if the upper 4 bytes contain non-zero values.
-    /// Returns Err(ProtobufError::VariantDowncastOutOfRange) if the value exceeds 32-bit range.
-    pub fn to_int32(&self) -> Result<ProtobufInt32> {
-        // Use to_uint32 to check upper 4 bytes and get the value
-        let uint32_value = self.to_uint32()?;
-        // Convert from u32 to i32 (this always succeeds)
-        Ok(ProtobufInt32::new(uint32_value.value() as i32))
-    }
-
-    /// Convert to protobuf Int64 type (64-bit signed integer, no encoding).
-    ///
-    /// Protobuf Int64 interprets all 8 bytes as a signed 64-bit integer.
-    /// This conversion cannot fail as all 8 bytes are used.
-    pub fn to_int64(&self) -> ProtobufInt64 {
-        // Interpret all 8 bytes as i64 (little-endian)
-        ProtobufInt64::new(i64::from_le_bytes(self.0))
-    }
-
-    /// Convert to protobuf SInt32 type (32-bit signed integer with ZigZag decoding).
-    ///
-    /// This conversion can fail if the ZigZag decoded value exceeds i32::MAX.
-    /// Returns Err(ProtobufError::VariantDowncastOutOfRange) if the value is too large.
-    pub fn to_sint32(&self) -> Result<ProtobufSInt32> {
-        let sint64 = self.to_sint64();
-        i32::try_from(sint64.value())
-            .map_err(|_| ProtobufError::VariantDowncastOutOfRange {
-                value: sint64.value() as u64,
-                target_type: "i32",
-            })
-            .map(ProtobufSInt32::new)
-    }
-
-    /// Convert to protobuf SInt64 type (64-bit signed integer with ZigZag decoding).
-    pub fn to_sint64(&self) -> ProtobufSInt64 {
-        let value = self.to_uint64();
-        let sint64_value = ((value >> 1) as i64) ^ (-((value & 1) as i64));
-        ProtobufSInt64::new(sint64_value)
-    }
-
-    /// Convert to protobuf Bool type.
-    ///
-    /// Any non-zero value is considered true, zero is false.
-    /// This conversion cannot fail, so it always returns Ok(bool).
-    pub fn to_bool(&self) -> Result<bool> {
-        let value = self.to_uint64();
-        Ok(value != 0)
     }
 
     /// Get the size of this variant when encoded as a varint.
@@ -164,6 +100,139 @@ impl Variant {
     pub fn debug_from_u64(value: u64) -> Self {
         let bytes = value.to_le_bytes();
         Self(bytes)
+    }
+}
+
+// From implementations for Variant (infallible conversions)
+// Note: u64 is treated as ProtobufUInt64 for consistency
+impl From<u64> for Variant {
+    fn from(value: u64) -> Self {
+        let bytes = value.to_le_bytes();
+        Self(bytes)
+    }
+}
+
+impl From<ProtobufUInt32> for Variant {
+    fn from(value: ProtobufUInt32) -> Self {
+        let bytes = (value.value() as u64).to_le_bytes();
+        Self(bytes)
+    }
+}
+
+impl From<ProtobufInt64> for Variant {
+    fn from(value: ProtobufInt64) -> Self {
+        let bytes = (value.value() as u64).to_le_bytes();
+        Self(bytes)
+    }
+}
+
+impl From<ProtobufSInt64> for Variant {
+    fn from(value: ProtobufSInt64) -> Self {
+        // Convert to ZigZag encoding
+        let sint64_value = value.value();
+        let zigzag_value = if sint64_value < 0 {
+            ((-sint64_value) as u64) * 2 - 1
+        } else {
+            (sint64_value as u64) * 2
+        };
+        let bytes = zigzag_value.to_le_bytes();
+        Self(bytes)
+    }
+}
+
+impl From<bool> for Variant {
+    fn from(value: bool) -> Self {
+        let bytes = (if value { 1u64 } else { 0u64 }).to_le_bytes();
+        Self(bytes)
+    }
+}
+
+// TryFrom implementations for Variant (fallible conversions)
+impl TryFrom<Variant> for ProtobufUInt32 {
+    type Error = ProtobufError;
+
+    fn try_from(variant: Variant) -> Result<Self> {
+        let value = variant.to_uint64();
+        u32::try_from(value)
+            .map_err(|_| ProtobufError::VariantDowncastOutOfRange {
+                value,
+                target_type: "u32",
+            })
+            .map(ProtobufUInt32::new)
+    }
+}
+
+impl TryFrom<Variant> for ProtobufInt32 {
+    type Error = ProtobufError;
+
+    fn try_from(variant: Variant) -> Result<Self> {
+        let value = variant.to_uint64();
+        // Check if upper 4 bytes are all zeros (for positive values)
+        // or all ones (for negative values in two's complement)
+        if value <= i32::MAX as u64 {
+            // Positive value: upper 4 bytes should be 0
+            if (value >> 32) == 0 {
+                Ok(ProtobufInt32::new(value as i32))
+            } else {
+                Err(ProtobufError::VariantDowncastOutOfRange {
+                    value,
+                    target_type: "i32",
+                })
+            }
+        } else if value >= (i32::MIN as u64) {
+            // Negative value: upper 4 bytes should be 0xFFFFFFFF
+            if (value >> 32) == 0xFFFFFFFF {
+                Ok(ProtobufInt32::new(value as i32))
+            } else {
+                Err(ProtobufError::VariantDowncastOutOfRange {
+                    value,
+                    target_type: "i32",
+                })
+            }
+        } else {
+            Err(ProtobufError::VariantDowncastOutOfRange {
+                value,
+                target_type: "i32",
+            })
+        }
+    }
+}
+
+impl TryFrom<Variant> for ProtobufSInt32 {
+    type Error = ProtobufError;
+
+    fn try_from(variant: Variant) -> Result<Self> {
+        let sint64: ProtobufSInt64 = variant.into();
+        i32::try_from(sint64.value())
+            .map_err(|_| ProtobufError::VariantDowncastOutOfRange {
+                value: sint64.value() as u64,
+                target_type: "i32",
+            })
+            .map(ProtobufSInt32::new)
+    }
+}
+
+impl From<Variant> for ProtobufInt64 {
+    fn from(variant: Variant) -> Self {
+        // Interpret all 8 bytes as i64 (little-endian)
+        ProtobufInt64::new(i64::from_le_bytes(variant.0))
+    }
+}
+
+impl From<Variant> for ProtobufSInt64 {
+    fn from(variant: Variant) -> Self {
+        let value = variant.to_uint64();
+        let sint64_value = ((value >> 1) as i64) ^ (-((value & 1) as i64));
+        ProtobufSInt64::new(sint64_value)
+    }
+}
+
+impl TryFrom<Variant> for bool {
+    type Error = ProtobufError;
+
+    fn try_from(variant: Variant) -> Result<Self> {
+        let value = variant.to_uint64();
+        Ok(value != 0)
     }
 }
 
@@ -322,16 +391,19 @@ mod tests {
 
         // Test all integer conversions
         assert_eq!(variant.to_uint64(), 406);
-        match variant.to_uint32() {
+        match ProtobufUInt32::try_from(variant) {
             Ok(value) => assert_eq!(value.value(), 406),
             Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
         }
-        assert_eq!(variant.to_int64().value(), 406);
-        match variant.to_int32() {
+        let variant = Variant::new(bytes); // Create new variant for next test
+        assert_eq!(ProtobufInt64::from(variant).value(), 406);
+        let variant = Variant::new(bytes); // Create new variant for next test
+        match ProtobufInt32::try_from(variant) {
             Ok(value) => assert_eq!(value.value(), 406),
             Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
         }
-        match variant.to_bool() {
+        let variant = Variant::new(bytes); // Create new variant for next test
+        match bool::try_from(variant) {
             Ok(value) => assert_eq!(value, true),
             Err(e) => panic!("Expected Ok(true), got error: {:?}", e),
         }
@@ -343,8 +415,9 @@ mod tests {
         let bytes = [0x01, 0, 0, 0, 0, 0, 0, 0];
         let variant = Variant::new(bytes);
 
-        assert_eq!(variant.to_sint64().value(), -1);
-        match variant.to_sint32() {
+        assert_eq!(ProtobufSInt64::from(variant).value(), -1);
+        let variant = Variant::new(bytes); // Create new variant for next test
+        match ProtobufSInt32::try_from(variant) {
             Ok(value) => assert_eq!(value.value(), -1),
             Err(e) => panic!("Expected Ok(-1), got error: {:?}", e),
         }
@@ -466,5 +539,88 @@ mod tests {
             assert_eq!(array_count, vec_count);
             assert_eq!(&array_bytes[..array_count], &vec_buffer[..]);
         }
+    }
+
+    #[test]
+    fn test_from_traits() {
+        // Test From<u64> for Variant
+        let variant: Variant = 150u64.into();
+        assert_eq!(variant.to_uint64(), 150);
+
+        // Test From<ProtobufUInt32> for Variant
+        let uint32 = ProtobufUInt32::new(150);
+        let variant: Variant = uint32.into();
+        assert_eq!(variant.to_uint64(), 150);
+
+        // Test From<ProtobufInt64> for Variant
+        let int64 = ProtobufInt64::new(150);
+        let variant: Variant = int64.into();
+        assert_eq!(variant.to_uint64(), 150);
+
+        // Test From<ProtobufSInt64> for Variant (with ZigZag encoding)
+        let sint64 = ProtobufSInt64::new(-1);
+        let variant: Variant = sint64.into();
+        assert_eq!(ProtobufSInt64::from(variant).value(), -1);
+
+        // Test From<bool> for Variant
+        let variant: Variant = true.into();
+        assert_eq!(bool::try_from(variant).unwrap(), true);
+    }
+
+    #[test]
+    fn test_try_from_traits() {
+        let bytes = [150, 0, 0, 0, 0, 0, 0, 0]; // 150 in little-endian
+
+        // Test TryFrom<Variant> for ProtobufUInt32
+        let variant = Variant::new(bytes);
+        let uint32: ProtobufUInt32 = variant.try_into().unwrap();
+        assert_eq!(uint32.value(), 150);
+
+        // Test TryFrom<Variant> for ProtobufInt32
+        let variant = Variant::new(bytes);
+        let int32: ProtobufInt32 = variant.try_into().unwrap();
+        assert_eq!(int32.value(), 150);
+
+        // Test From<Variant> for ProtobufInt64
+        let variant = Variant::new(bytes);
+        let int64: ProtobufInt64 = variant.into();
+        assert_eq!(int64.value(), 150);
+
+        // Test From<Variant> for ProtobufSInt64
+        // 150 in ZigZag encoding represents 75 in signed value
+        let variant = Variant::new(bytes);
+        let sint64: ProtobufSInt64 = variant.into();
+        assert_eq!(sint64.value(), 75);
+
+        // Test TryFrom<Variant> for bool
+        let variant = Variant::new(bytes);
+        let bool_value: bool = variant.try_into().unwrap();
+        assert_eq!(bool_value, true);
+    }
+
+    #[test]
+    fn test_roundtrip_conversions() {
+        // Test roundtrip for u64
+        let original = 150u64;
+        let variant: Variant = original.into();
+        assert_eq!(variant.to_uint64(), original);
+
+        // Test roundtrip for ProtobufUInt32
+        let original = ProtobufUInt32::new(150);
+        let variant: Variant = original.into();
+        let converted: ProtobufUInt32 = variant.try_into().unwrap();
+        assert_eq!(converted.value(), original.value());
+
+        // Test roundtrip for ProtobufSInt64 (with ZigZag encoding)
+        let original = ProtobufSInt64::new(-1);
+        let variant: Variant = original.into();
+        let converted: ProtobufSInt64 = variant.into();
+        assert_eq!(converted.value(), original.value());
+
+        // Test roundtrip for bool
+        let original = true;
+        let variant: Variant = original.into();
+        let converted: bool = variant.try_into().unwrap();
+        assert_eq!(converted, original);
     }
 }
