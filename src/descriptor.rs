@@ -266,54 +266,14 @@ fn calculate_field_size(
                 |_| 1, // Each bool is 1 byte in varint encoding
             )
         }
-        ValueType::String => {
-            if is_repeated {
-                let vec = value.downcast_ref::<Vec<String>>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<String>".to_string(),
-                    },
-                )?;
-                Ok(vec
-                    .iter()
-                    .map(|s| {
-                        let str_len = s.len();
-                        varint_size(str_len as u64) + str_len
-                    })
-                    .sum())
-            } else {
-                let s = value.downcast_ref::<String>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "String".to_string(),
-                    },
-                )?;
-                let str_len = s.len();
-                Ok(varint_size(str_len as u64) + str_len)
-            }
-        }
-        ValueType::Bytes => {
-            if is_repeated {
-                let vec = value.downcast_ref::<Vec<Vec<u8>>>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<Vec<u8>>".to_string(),
-                    },
-                )?;
-                Ok(vec
-                    .iter()
-                    .map(|bytes| {
-                        let bytes_len = bytes.len();
-                        varint_size(bytes_len as u64) + bytes_len
-                    })
-                    .sum())
-            } else {
-                let bytes = value.downcast_ref::<Vec<u8>>().ok_or(
-                    ProtobufError::FieldTypeDowncastError {
-                        expected_type: "Vec<u8>".to_string(),
-                    },
-                )?;
-                let bytes_len = bytes.len();
-                Ok(varint_size(bytes_len as u64) + bytes_len)
-            }
-        }
+        ValueType::String => calculate_scalar_field_size(value, is_repeated, "String", |s| {
+            let str_len = s.len();
+            varint_size(str_len as u64) + str_len
+        }),
+        ValueType::Bytes => calculate_scalar_field_size(value, is_repeated, "Vec<u8>", |bytes| {
+            let bytes_len = bytes.len();
+            varint_size(bytes_len as u64) + bytes_len
+        }),
         ValueType::Float => {
             calculate_scalar_field_size(
                 value,
