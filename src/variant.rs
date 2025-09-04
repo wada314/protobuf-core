@@ -29,6 +29,9 @@
 //! return `Result<T, VariantError>` to make error handling explicit.
 //! Methods that cannot fail (like `to_uint64` and `to_bool`) return their values directly.
 
+use crate::descriptor::{
+    ProtobufInt32, ProtobufInt64, ProtobufSInt32, ProtobufSInt64, ProtobufUInt32,
+};
 use crate::wire_format::MAX_VARINT_SIZE;
 use crate::{ProtobufError, Result};
 
@@ -67,12 +70,14 @@ impl Variant {
     ///
     /// This conversion can fail if the value exceeds u32::MAX.
     /// Returns Err(ProtobufError::VariantDowncastOutOfRange) if the value is too large.
-    pub fn to_uint32(&self) -> Result<u32> {
+    pub fn to_uint32(&self) -> Result<ProtobufUInt32> {
         let value = self.to_uint64();
-        u32::try_from(value).map_err(|_| ProtobufError::VariantDowncastOutOfRange {
-            value,
-            target_type: "u32",
-        })
+        u32::try_from(value)
+            .map_err(|_| ProtobufError::VariantDowncastOutOfRange {
+                value,
+                target_type: "u32",
+            })
+            .map(ProtobufUInt32::new)
     }
 
     /// Convert to protobuf Int32 type (32-bit signed integer, no encoding).
@@ -80,38 +85,41 @@ impl Variant {
     /// Protobuf Int32 interprets the first 4 bytes as a signed 32-bit integer.
     /// This conversion can fail if the upper 4 bytes contain non-zero values.
     /// Returns Err(ProtobufError::VariantDowncastOutOfRange) if the value exceeds 32-bit range.
-    pub fn to_int32(&self) -> Result<i32> {
+    pub fn to_int32(&self) -> Result<ProtobufInt32> {
         // Use to_uint32 to check upper 4 bytes and get the value
         let uint32_value = self.to_uint32()?;
         // Convert from u32 to i32 (this always succeeds)
-        Ok(uint32_value as i32)
+        Ok(ProtobufInt32::new(uint32_value.value() as i32))
     }
 
     /// Convert to protobuf Int64 type (64-bit signed integer, no encoding).
     ///
     /// Protobuf Int64 interprets all 8 bytes as a signed 64-bit integer.
     /// This conversion cannot fail as all 8 bytes are used.
-    pub fn to_int64(&self) -> i64 {
+    pub fn to_int64(&self) -> ProtobufInt64 {
         // Interpret all 8 bytes as i64 (little-endian)
-        i64::from_le_bytes(self.0)
+        ProtobufInt64::new(i64::from_le_bytes(self.0))
     }
 
     /// Convert to protobuf SInt32 type (32-bit signed integer with ZigZag decoding).
     ///
     /// This conversion can fail if the ZigZag decoded value exceeds i32::MAX.
     /// Returns Err(ProtobufError::VariantDowncastOutOfRange) if the value is too large.
-    pub fn to_sint32(&self) -> Result<i32> {
+    pub fn to_sint32(&self) -> Result<ProtobufSInt32> {
         let sint64 = self.to_sint64();
-        i32::try_from(sint64).map_err(|_| ProtobufError::VariantDowncastOutOfRange {
-            value: sint64 as u64,
-            target_type: "i32",
-        })
+        i32::try_from(sint64.value())
+            .map_err(|_| ProtobufError::VariantDowncastOutOfRange {
+                value: sint64.value() as u64,
+                target_type: "i32",
+            })
+            .map(ProtobufSInt32::new)
     }
 
     /// Convert to protobuf SInt64 type (64-bit signed integer with ZigZag decoding).
-    pub fn to_sint64(&self) -> i64 {
+    pub fn to_sint64(&self) -> ProtobufSInt64 {
         let value = self.to_uint64();
-        ((value >> 1) as i64) ^ (-((value & 1) as i64))
+        let sint64_value = ((value >> 1) as i64) ^ (-((value & 1) as i64));
+        ProtobufSInt64::new(sint64_value)
     }
 
     /// Convert to protobuf Bool type.
@@ -121,53 +129,6 @@ impl Variant {
     pub fn to_bool(&self) -> Result<bool> {
         let value = self.to_uint64();
         Ok(value != 0)
-    }
-
-    /// Check if this variant can be safely converted to protobuf Int32.
-    ///
-    /// Protobuf Int32 has a range of -2^31 to 2^31-1.
-    /// This method performs strict range checking.
-    pub fn is_valid_int32(&self) -> bool {
-        let value = self.to_uint64();
-        // Check if upper 4 bytes are all zeros (for positive values)
-        // or all ones (for negative values in two's complement)
-        if value <= i32::MAX as u64 {
-            // Positive value: upper 4 bytes should be 0
-            (value >> 32) == 0
-        } else if value >= (i32::MIN as u64) {
-            // Negative value: upper 4 bytes should be 0xFFFFFFFF
-            (value >> 32) == 0xFFFFFFFF
-        } else {
-            false
-        }
-    }
-
-    /// Check if this variant can be safely converted to protobuf UInt32.
-    ///
-    /// Protobuf UInt32 has a range of 0 to 2^32-1.
-    /// This method performs strict range checking.
-    pub fn is_valid_uint32(&self) -> bool {
-        let value = self.to_uint64();
-        // Upper 4 bytes must be 0 for valid UInt32
-        (value >> 32) == 0
-    }
-
-    /// Check if this variant can be safely converted to protobuf SInt32.
-    ///
-    /// Protobuf SInt32 uses ZigZag encoding and has a range of -2^31 to 2^31-1.
-    /// This method performs strict range checking after ZigZag decoding.
-    pub fn is_valid_sint32(&self) -> bool {
-        let sint64 = self.to_sint64();
-        sint64 >= i32::MIN as i64 && sint64 <= i32::MAX as i64
-    }
-
-    /// Check if this variant can be safely converted to protobuf SInt64.
-    ///
-    /// Protobuf SInt64 uses ZigZag encoding and has a range of -2^63 to 2^63-1.
-    /// This method performs strict range checking after ZigZag decoding.
-    pub fn is_valid_sint64(&self) -> bool {
-        // All i64 values are valid for SInt64
-        true
     }
 
     /// Get the size of this variant when encoded as a varint.
@@ -362,12 +323,12 @@ mod tests {
         // Test all integer conversions
         assert_eq!(variant.to_uint64(), 406);
         match variant.to_uint32() {
-            Ok(value) => assert_eq!(value, 406),
+            Ok(value) => assert_eq!(value.value(), 406),
             Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
         }
-        assert_eq!(variant.to_int64(), 406);
+        assert_eq!(variant.to_int64().value(), 406);
         match variant.to_int32() {
-            Ok(value) => assert_eq!(value, 406),
+            Ok(value) => assert_eq!(value.value(), 406),
             Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
         }
         match variant.to_bool() {
@@ -382,9 +343,9 @@ mod tests {
         let bytes = [0x01, 0, 0, 0, 0, 0, 0, 0];
         let variant = Variant::new(bytes);
 
-        assert_eq!(variant.to_sint64(), -1);
+        assert_eq!(variant.to_sint64().value(), -1);
         match variant.to_sint32() {
-            Ok(value) => assert_eq!(value, -1),
+            Ok(value) => assert_eq!(value.value(), -1),
             Err(e) => panic!("Expected Ok(-1), got error: {:?}", e),
         }
     }
