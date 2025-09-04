@@ -9,9 +9,9 @@ use std::io::{Read, Write};
 // Protobuf integer types (wrapped for type safety)
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ProtobufInt32(i32);
+pub struct PbInt32(i32);
 
-impl ProtobufInt32 {
+impl PbInt32 {
     pub fn new(value: i32) -> Self {
         Self(value)
     }
@@ -23,9 +23,9 @@ impl ProtobufInt32 {
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ProtobufInt64(i64);
+pub struct PbInt64(i64);
 
-impl ProtobufInt64 {
+impl PbInt64 {
     pub fn new(value: i64) -> Self {
         Self(value)
     }
@@ -37,9 +37,9 @@ impl ProtobufInt64 {
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ProtobufUInt32(u32);
+pub struct PbUInt32(u32);
 
-impl ProtobufUInt32 {
+impl PbUInt32 {
     pub fn new(value: u32) -> Self {
         Self(value)
     }
@@ -51,9 +51,9 @@ impl ProtobufUInt32 {
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ProtobufUInt64(u64);
+pub struct PbUInt64(u64);
 
-impl ProtobufUInt64 {
+impl PbUInt64 {
     pub fn new(value: u64) -> Self {
         Self(value)
     }
@@ -65,9 +65,9 @@ impl ProtobufUInt64 {
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ProtobufSInt32(i32);
+pub struct PbSInt32(i32);
 
-impl ProtobufSInt32 {
+impl PbSInt32 {
     pub fn new(value: i32) -> Self {
         Self(value)
     }
@@ -79,9 +79,9 @@ impl ProtobufSInt32 {
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ProtobufSInt64(i64);
+pub struct PbSInt64(i64);
 
-impl ProtobufSInt64 {
+impl PbSInt64 {
     pub fn new(value: i64) -> Self {
         Self(value)
     }
@@ -132,12 +132,12 @@ pub enum DefaultValue {
 
 /// Field value types for safe access
 pub enum FieldValue<'a> {
-    Int32(ProtobufInt32),
-    Int64(ProtobufInt64),
-    UInt32(ProtobufUInt32),
-    UInt64(ProtobufUInt64),
-    SInt32(ProtobufSInt32),
-    SInt64(ProtobufSInt64),
+    Int32(PbInt32),
+    Int64(PbInt64),
+    UInt32(PbUInt32),
+    UInt64(PbUInt64),
+    SInt32(PbSInt32),
+    SInt64(PbSInt64),
     Bool(bool),
     String(&'a str),
     Bytes(&'a [u8]),
@@ -248,7 +248,7 @@ fn varint_size(mut value: u64) -> usize {
 }
 
 // Implement ToVarintSize for protobuf integer types
-impl ToVarintSize for ProtobufInt32 {
+impl ToVarintSize for PbInt32 {
     fn to_varint_size(&self) -> usize {
         // Protobuf Int32: no encoding, just varint
         varint_size(self.0 as u64)
@@ -260,7 +260,7 @@ impl ToVarintSize for ProtobufInt32 {
     }
 }
 
-impl ToVarintSize for ProtobufInt64 {
+impl ToVarintSize for PbInt64 {
     fn to_varint_size(&self) -> usize {
         // Protobuf Int64: no encoding, just varint
         varint_size(self.0 as u64)
@@ -272,7 +272,7 @@ impl ToVarintSize for ProtobufInt64 {
     }
 }
 
-impl ToVarintSize for ProtobufUInt32 {
+impl ToVarintSize for PbUInt32 {
     fn to_varint_size(&self) -> usize {
         varint_size(self.0 as u64)
     }
@@ -283,7 +283,7 @@ impl ToVarintSize for ProtobufUInt32 {
     }
 }
 
-impl ToVarintSize for ProtobufUInt64 {
+impl ToVarintSize for PbUInt64 {
     fn to_varint_size(&self) -> usize {
         varint_size(self.0)
     }
@@ -294,7 +294,7 @@ impl ToVarintSize for ProtobufUInt64 {
     }
 }
 
-impl ToVarintSize for ProtobufSInt32 {
+impl ToVarintSize for PbSInt32 {
     fn to_varint_size(&self) -> usize {
         // Protobuf SInt32: zigzag encoding
         let val = if self.0 < 0 {
@@ -311,7 +311,7 @@ impl ToVarintSize for ProtobufSInt32 {
     }
 }
 
-impl ToVarintSize for ProtobufSInt64 {
+impl ToVarintSize for PbSInt64 {
     fn to_varint_size(&self) -> usize {
         // Protobuf SInt64: zigzag encoding
         let val = if self.0 < 0 {

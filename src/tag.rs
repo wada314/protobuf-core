@@ -62,7 +62,7 @@ where
     let Some(variant) = variant_result else {
         return Ok(None);
     };
-    let tag_value: crate::descriptor::ProtobufUInt32 = variant.try_into()?;
+    let tag_value: crate::descriptor::PbUInt32 = variant.try_into()?;
     let (field_number, wire_type) = parse_tag(tag_value.value())?;
     Ok(Some((field_number, wire_type)))
 }
