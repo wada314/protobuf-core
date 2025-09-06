@@ -31,7 +31,7 @@
 
 use crate::wire_format::MAX_VARINT_SIZE;
 use crate::{ProtobufError, Result};
-use std::convert::{From, TryFrom};
+use std::convert::TryFrom;
 
 /// A fixed-size array wrapper for variant values.
 ///
@@ -635,55 +635,5 @@ mod tests {
         let variant = Variant::from_bool(original);
         let converted = variant.to_bool();
         assert_eq!(converted, original);
-    }
-}
-
-// Additional From implementations for basic integer types
-impl From<i32> for Variant {
-    fn from(value: i32) -> Self {
-        let bytes = (value as u64).to_le_bytes();
-        Self(bytes)
-    }
-}
-
-impl From<u32> for Variant {
-    fn from(value: u32) -> Self {
-        let bytes = (value as u64).to_le_bytes();
-        Self(bytes)
-    }
-}
-
-impl From<i64> for Variant {
-    fn from(value: i64) -> Self {
-        let bytes = (value as u64).to_le_bytes();
-        Self(bytes)
-    }
-}
-
-impl From<&i32> for Variant {
-    fn from(value: &i32) -> Self {
-        let bytes = (*value as u64).to_le_bytes();
-        Self(bytes)
-    }
-}
-
-impl From<&i64> for Variant {
-    fn from(value: &i64) -> Self {
-        let bytes = (*value as u64).to_le_bytes();
-        Self(bytes)
-    }
-}
-
-impl From<&u32> for Variant {
-    fn from(value: &u32) -> Self {
-        let bytes = (*value as u64).to_le_bytes();
-        Self(bytes)
-    }
-}
-
-impl From<&u64> for Variant {
-    fn from(value: &u64) -> Self {
-        let bytes = (*value as u64).to_le_bytes();
-        Self(bytes)
     }
 }
