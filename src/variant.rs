@@ -167,33 +167,11 @@ impl Variant {
     /// This method interprets the variant value as a regular signed 32-bit integer.
     /// Returns an error if the value is out of range for i32.
     pub fn to_int32(&self) -> Result<i32> {
-        let value = self.to_uint64();
-        if value <= i32::MAX as u64 {
-            // Positive value: upper 4 bytes should be 0
-            if (value >> 32) == 0 {
-                Ok(value as i32)
-            } else {
-                Err(ProtobufError::VariantDowncastOutOfRange {
-                    value,
-                    target_type: "i32",
-                })
-            }
-        } else if value >= (i32::MIN as u64) {
-            // Negative value: upper 4 bytes should be 0xFFFFFFFF
-            if (value >> 32) == 0xFFFFFFFF {
-                Ok(value as i32)
-            } else {
-                Err(ProtobufError::VariantDowncastOutOfRange {
-                    value,
-                    target_type: "i32",
-                })
-            }
-        } else {
-            Err(ProtobufError::VariantDowncastOutOfRange {
-                value,
-                target_type: "i32",
-            })
-        }
+        let value = self.to_int64();
+        i32::try_from(value).map_err(|_| ProtobufError::VariantDowncastOutOfRange {
+            value: value as u64,
+            target_type: "i32",
+        })
     }
 
     /// Convert to signed 64-bit integer (i64) - non-ZigZag version.
