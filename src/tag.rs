@@ -16,14 +16,6 @@ pub struct Tag {
 }
 
 impl Tag {
-    /// Create a new tag from field number and wire type
-    pub fn new(field_number: FieldNumber, wire_type: WireType) -> Self {
-        Self {
-            field_number,
-            wire_type,
-        }
-    }
-
     /// Build the encoded tag value
     pub fn to_encoded(self) -> u32 {
         (Into::<u32>::into(self.field_number) << FIELD_NUMBER_SHIFT) | (self.wire_type as u32)
@@ -40,7 +32,10 @@ impl Tag {
         // Parse wire type
         let wire_type = WireType::try_from(wire_type_value as u8)?;
 
-        Ok(Self::new(field_number, wire_type))
+        Ok(Self {
+            field_number,
+            wire_type,
+        })
     }
 }
 
@@ -74,7 +69,10 @@ mod tests {
     fn test_tag_build_and_parse() {
         let field_number = FieldNumber::try_new(1).unwrap();
         let wire_type = WireType::Varint;
-        let tag = Tag::new(field_number, wire_type);
+        let tag = Tag {
+            field_number,
+            wire_type,
+        };
 
         let encoded = tag.to_encoded();
         let parsed_tag = Tag::from_encoded(encoded).unwrap();
@@ -86,7 +84,10 @@ mod tests {
     fn test_tag_struct() {
         let field_number = FieldNumber::try_new(1).unwrap();
         let wire_type = WireType::Varint;
-        let tag = Tag::new(field_number, wire_type);
+        let tag = Tag {
+            field_number,
+            wire_type,
+        };
 
         assert_eq!(tag.field_number, field_number);
         assert_eq!(tag.wire_type, wire_type);
