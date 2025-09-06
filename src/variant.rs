@@ -161,6 +161,63 @@ impl Variant {
         Self(bytes)
     }
 
+    /// Convert to signed 32-bit integer (i32) - non-ZigZag version.
+    ///
+    /// This method interprets the variant value as a regular signed 32-bit integer.
+    /// Returns an error if the value is out of range for i32.
+    pub fn to_int32(&self) -> Result<i32> {
+        let value = self.to_uint64();
+        if value <= i32::MAX as u64 {
+            // Positive value: upper 4 bytes should be 0
+            if (value >> 32) == 0 {
+                Ok(value as i32)
+            } else {
+                Err(ProtobufError::VariantDowncastOutOfRange {
+                    value,
+                    target_type: "i32",
+                })
+            }
+        } else if value >= (i32::MIN as u64) {
+            // Negative value: upper 4 bytes should be 0xFFFFFFFF
+            if (value >> 32) == 0xFFFFFFFF {
+                Ok(value as i32)
+            } else {
+                Err(ProtobufError::VariantDowncastOutOfRange {
+                    value,
+                    target_type: "i32",
+                })
+            }
+        } else {
+            Err(ProtobufError::VariantDowncastOutOfRange {
+                value,
+                target_type: "i32",
+            })
+        }
+    }
+
+    /// Convert to signed 64-bit integer (i64) - non-ZigZag version.
+    ///
+    /// This method interprets the variant value as a regular signed 64-bit integer.
+    pub fn to_int64(&self) -> i64 {
+        i64::from_le_bytes(self.0)
+    }
+
+    /// Create a Variant from a signed 32-bit integer (i32) - non-ZigZag version.
+    ///
+    /// This method creates a Variant from an i32 value without ZigZag encoding.
+    pub fn from_int32(value: i32) -> Self {
+        let bytes = (value as u64).to_le_bytes();
+        Self(bytes)
+    }
+
+    /// Create a Variant from a signed 64-bit integer (i64) - non-ZigZag version.
+    ///
+    /// This method creates a Variant from an i64 value without ZigZag encoding.
+    pub fn from_int64(value: i64) -> Self {
+        let bytes = (value as u64).to_le_bytes();
+        Self(bytes)
+    }
+
     /// Create a Variant from a u64 value for debugging and testing purposes.
     ///
     /// This method is intended for creating test data and debugging scenarios.
@@ -533,6 +590,14 @@ mod tests {
         // Test from_bool
         let variant = Variant::from_bool(true);
         assert_eq!(variant.to_bool(), true);
+
+        // Test from_int32 (non-ZigZag)
+        let variant = Variant::from_int32(150);
+        assert_eq!(variant.to_int64(), 150);
+
+        // Test from_int64 (non-ZigZag)
+        let variant = Variant::from_int64(150);
+        assert_eq!(variant.to_int64(), 150);
     }
 
     #[test]
@@ -551,6 +616,12 @@ mod tests {
 
         // Test to_bool
         assert_eq!(variant.to_bool(), true);
+
+        // Test to_int32 (non-ZigZag)
+        assert_eq!(variant.to_int32().unwrap(), 150);
+
+        // Test to_int64 (non-ZigZag)
+        assert_eq!(variant.to_int64(), 150);
     }
 
     #[test]
@@ -566,10 +637,22 @@ mod tests {
         let converted = variant.to_uint32().unwrap();
         assert_eq!(converted, original);
 
-        // Test roundtrip for i64
+        // Test roundtrip for i64 (ZigZag)
         let original = -1i64;
         let variant = Variant::from_sint64(original);
         let converted = variant.to_sint64();
+        assert_eq!(converted, original);
+
+        // Test roundtrip for i64 (non-ZigZag)
+        let original = 150i64;
+        let variant = Variant::from_int64(original);
+        let converted = variant.to_int64();
+        assert_eq!(converted, original);
+
+        // Test roundtrip for i32 (non-ZigZag)
+        let original = 150i32;
+        let variant = Variant::from_int32(original);
+        let converted = variant.to_int32().unwrap();
         assert_eq!(converted, original);
 
         // Test roundtrip for bool
