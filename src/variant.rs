@@ -43,6 +43,10 @@ use std::io::{Read, Write};
 pub struct Variant([u8; 8]);
 
 impl Variant {
+    // ============================================================================
+    // Converting from / to [u8; 8]
+    // ============================================================================
+
     /// Create a new Variant from raw bytes.
     ///
     /// This constructor takes the raw bytes as they appear in the serialized data.
@@ -56,6 +60,70 @@ impl Variant {
         &self.0
     }
 
+    // ============================================================================
+    // from / to protobuf integer types
+    // ============================================================================
+
+    /// Create a Variant from an unsigned 64-bit integer (u64).
+    ///
+    /// This method creates a Variant from a u64 value.
+    pub fn from_uint64(value: u64) -> Self {
+        let bytes = value.to_le_bytes();
+        Self(bytes)
+    }
+
+    /// Create a Variant from an unsigned 32-bit integer (u32).
+    ///
+    /// This method creates a Variant from a u32 value.
+    pub fn from_uint32(value: u32) -> Self {
+        let bytes = (value as u64).to_le_bytes();
+        Self(bytes)
+    }
+
+    /// Create a Variant from a signed 64-bit integer (i64) using ZigZag encoding.
+    ///
+    /// This method creates a Variant from an i64 value using ZigZag encoding.
+    pub fn from_sint64(value: i64) -> Self {
+        let zigzag_value = if value < 0 {
+            ((-value) as u64) * 2 - 1
+        } else {
+            (value as u64) * 2
+        };
+        let bytes = zigzag_value.to_le_bytes();
+        Self(bytes)
+    }
+
+    /// Create a Variant from a signed 32-bit integer (i32) using ZigZag encoding.
+    ///
+    /// This method creates a Variant from an i32 value using ZigZag encoding.
+    pub fn from_sint32(value: i32) -> Self {
+        Self::from_sint64(value as i64)
+    }
+
+    /// Create a Variant from a signed 64-bit integer (i64) without ZigZag encoding.
+    ///
+    /// This method creates a Variant from an i64 value without ZigZag encoding.
+    pub fn from_int64(value: i64) -> Self {
+        let bytes = (value as u64).to_le_bytes();
+        Self(bytes)
+    }
+
+    /// Create a Variant from a signed 32-bit integer (i32) without ZigZag encoding.
+    ///
+    /// This method creates a Variant from an i32 value without ZigZag encoding.
+    pub fn from_int32(value: i32) -> Self {
+        let bytes = (value as u64).to_le_bytes();
+        Self(bytes)
+    }
+
+    /// Create a Variant from a boolean.
+    ///
+    /// This method creates a Variant from a boolean value.
+    pub fn from_bool(value: bool) -> Self {
+        let bytes = (if value { 1u64 } else { 0u64 }).to_le_bytes();
+        Self(bytes)
+    }
+
     /// Convert to protobuf UInt64 type (64-bit unsigned integer).
     ///
     /// Since the Variant contains the decoded value (not encoded varint),
@@ -63,31 +131,6 @@ impl Variant {
     pub fn to_uint64(&self) -> u64 {
         // Use Rust's built-in method to convert bytes to u64
         u64::from_le_bytes(self.0)
-    }
-
-    /// Get the size of this variant when encoded as a varint.
-    ///
-    /// This method calculates the exact number of bytes needed to encode
-    /// the underlying value as a protobuf varint.
-    pub fn varint_size(&self) -> usize {
-        let value = self.to_uint64();
-        if value == 0 {
-            1
-        } else {
-            (64 - value.leading_zeros() as usize + 6) / 7
-        }
-    }
-
-    /// Convert to signed 32-bit integer (i32).
-    ///
-    /// This method interprets the variant value as a ZigZag-encoded signed 32-bit integer.
-    /// Returns an error if the value is out of range for i32.
-    pub fn to_sint32(&self) -> Result<i32> {
-        let sint64_value = self.to_sint64();
-        i32::try_from(sint64_value).map_err(|_| ProtobufError::VariantDowncastOutOfRange {
-            value: sint64_value as u64,
-            target_type: "i32",
-        })
     }
 
     /// Convert to unsigned 32-bit integer (u32).
@@ -102,7 +145,7 @@ impl Variant {
         })
     }
 
-    /// Convert to signed 64-bit integer (i64).
+    /// Convert to signed 64-bit integer (i64) using ZigZag decoding.
     ///
     /// This method interprets the variant value as a ZigZag-encoded signed 64-bit integer.
     pub fn to_sint64(&self) -> i64 {
@@ -110,59 +153,26 @@ impl Variant {
         ((value >> 1) as i64) ^ (-((value & 1) as i64))
     }
 
-    /// Convert to boolean.
+    /// Convert to signed 32-bit integer (i32) using ZigZag decoding.
     ///
-    /// This method interprets the variant value as a boolean.
-    /// Returns true if the value is non-zero, false otherwise.
-    pub fn to_bool(&self) -> bool {
-        self.to_uint64() != 0
+    /// This method interprets the variant value as a ZigZag-encoded signed 32-bit integer.
+    /// Returns an error if the value is out of range for i32.
+    pub fn to_sint32(&self) -> Result<i32> {
+        let sint64_value = self.to_sint64();
+        i32::try_from(sint64_value).map_err(|_| ProtobufError::VariantDowncastOutOfRange {
+            value: sint64_value as u64,
+            target_type: "i32",
+        })
     }
 
-    /// Create a Variant from a signed 32-bit integer (i32).
+    /// Convert to signed 64-bit integer (i64) without ZigZag decoding.
     ///
-    /// This method creates a Variant from an i32 value using ZigZag encoding.
-    pub fn from_sint32(value: i32) -> Self {
-        Self::from_sint64(value as i64)
+    /// This method interprets the variant value as a regular signed 64-bit integer.
+    pub fn to_int64(&self) -> i64 {
+        i64::from_le_bytes(self.0)
     }
 
-    /// Create a Variant from an unsigned 32-bit integer (u32).
-    ///
-    /// This method creates a Variant from a u32 value.
-    pub fn from_uint32(value: u32) -> Self {
-        let bytes = (value as u64).to_le_bytes();
-        Self(bytes)
-    }
-
-    /// Create a Variant from a signed 64-bit integer (i64).
-    ///
-    /// This method creates a Variant from an i64 value using ZigZag encoding.
-    pub fn from_sint64(value: i64) -> Self {
-        let zigzag_value = if value < 0 {
-            ((-value) as u64) * 2 - 1
-        } else {
-            (value as u64) * 2
-        };
-        let bytes = zigzag_value.to_le_bytes();
-        Self(bytes)
-    }
-
-    /// Create a Variant from an unsigned 64-bit integer (u64).
-    ///
-    /// This method creates a Variant from a u64 value.
-    pub fn from_uint64(value: u64) -> Self {
-        let bytes = value.to_le_bytes();
-        Self(bytes)
-    }
-
-    /// Create a Variant from a boolean.
-    ///
-    /// This method creates a Variant from a boolean value.
-    pub fn from_bool(value: bool) -> Self {
-        let bytes = (if value { 1u64 } else { 0u64 }).to_le_bytes();
-        Self(bytes)
-    }
-
-    /// Convert to signed 32-bit integer (i32) - non-ZigZag version.
+    /// Convert to signed 32-bit integer (i32) without ZigZag decoding.
     ///
     /// This method interprets the variant value as a regular signed 32-bit integer.
     /// Returns an error if the value is out of range for i32.
@@ -174,49 +184,29 @@ impl Variant {
         })
     }
 
-    /// Convert to signed 64-bit integer (i64) - non-ZigZag version.
+    /// Convert to boolean.
     ///
-    /// This method interprets the variant value as a regular signed 64-bit integer.
-    pub fn to_int64(&self) -> i64 {
-        i64::from_le_bytes(self.0)
+    /// This method interprets the variant value as a boolean.
+    /// Returns true if the value is non-zero, false otherwise.
+    pub fn to_bool(&self) -> bool {
+        self.to_uint64() != 0
     }
 
-    /// Create a Variant from a signed 32-bit integer (i32) - non-ZigZag version.
-    ///
-    /// This method creates a Variant from an i32 value without ZigZag encoding.
-    pub fn from_int32(value: i32) -> Self {
-        let bytes = (value as u64).to_le_bytes();
-        Self(bytes)
-    }
+    // ============================================================================
+    // serialization
+    // ============================================================================
 
-    /// Create a Variant from a signed 64-bit integer (i64) - non-ZigZag version.
+    /// Get the size of this variant when encoded as a varint.
     ///
-    /// This method creates a Variant from an i64 value without ZigZag encoding.
-    pub fn from_int64(value: i64) -> Self {
-        let bytes = (value as u64).to_le_bytes();
-        Self(bytes)
-    }
-
-    /// Create a Variant from a u64 value for debugging and testing purposes.
-    ///
-    /// This method is intended for creating test data and debugging scenarios.
-    /// It converts the u64 value to its little-endian byte representation.
-    ///
-    /// # Safety
-    /// This method is safe but should only be used in debug/test contexts.
-    /// For production code, use `read_variant` to decode actual varint data.
-    ///
-    /// # Example
-    /// ```
-    /// use protobuf_core::variant::Variant;
-    ///
-    /// let variant = Variant::debug_from_u64(150);
-    /// assert_eq!(variant.to_uint64(), 150);
-    /// ```
-    #[cfg(test)]
-    pub fn debug_from_u64(value: u64) -> Self {
-        let bytes = value.to_le_bytes();
-        Self(bytes)
+    /// This method calculates the exact number of bytes needed to encode
+    /// the underlying value as a protobuf varint.
+    pub fn varint_size(&self) -> usize {
+        let value = self.to_uint64();
+        if value == 0 {
+            1
+        } else {
+            (64 - value.leading_zeros() as usize + 6) / 7
+        }
     }
 
     /// Encode this variant as a varint and return the bytes with count.
@@ -256,6 +246,32 @@ impl Variant {
         }
 
         (bytes, bytes_written)
+    }
+
+    // ============================================================================
+    // others
+    // ============================================================================
+
+    /// Create a Variant from a u64 value for debugging and testing purposes.
+    ///
+    /// This method is intended for creating test data and debugging scenarios.
+    /// It converts the u64 value to its little-endian byte representation.
+    ///
+    /// # Safety
+    /// This method is safe but should only be used in debug/test contexts.
+    /// For production code, use `read_variant` to decode actual varint data.
+    ///
+    /// # Example
+    /// ```
+    /// use protobuf_core::variant::Variant;
+    ///
+    /// let variant = Variant::debug_from_u64(150);
+    /// assert_eq!(variant.to_uint64(), 150);
+    /// ```
+    #[cfg(test)]
+    pub fn debug_from_u64(value: u64) -> Self {
+        let bytes = value.to_le_bytes();
+        Self(bytes)
     }
 }
 
