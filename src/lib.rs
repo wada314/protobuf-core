@@ -10,7 +10,10 @@ pub mod wire_format;
 
 pub use field_number::FieldNumber;
 pub use tag::{build_tag, parse_tag, read_tag};
-pub use variant::{read_variant, Variant};
+pub use variant::{
+    read_variant, read_variant_from_iterator, write_variant, ReadExtVariant, Variant,
+    WriteExtVariant,
+};
 pub use wire_format::{WireType, MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER};
 
 use thiserror::Error;
@@ -35,6 +38,9 @@ pub enum ProtobufError {
 
     #[error("Malformed tag: field_number={field_number}, wire_type={wire_type}")]
     MalformedTag { field_number: u32, wire_type: u8 },
+
+    #[error("I/O error: {0}")]
+    IoError(#[from] ::std::io::Error),
 }
 
 /// Custom Result type for protobuf operations

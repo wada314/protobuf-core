@@ -256,7 +256,7 @@ impl Variant {
 /// - Successful reads with data: `Ok(Some(Variant))`
 /// - No data available: `Ok(None)`
 /// - Error conditions: `Err(VariantError)`
-pub fn read_variant<I>(iter: &mut I) -> Result<Option<Variant>>
+pub fn read_variant_from_iterator<I>(iter: &mut I) -> Result<Option<Variant>>
 where
     I: Iterator<Item = u8>,
 {
@@ -289,6 +289,50 @@ where
     // Convert the decoded u64 value to 8-byte array (little-endian)
     let result_bytes = decoded_value.to_le_bytes();
 
+    Ok(Some(Variant::new(result_bytes)))
+}
+
+/// Read a variant from a Read instance.
+///
+/// Returns the Variant if successfully read.
+/// Returns `Ok(None)` if no input is available (EOF).
+/// Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
+///
+/// # Error Cases
+/// This function has two distinct failure scenarios:
+/// 1. **No input available**: EOF reached → `Ok(None)`
+/// 2. **Input too long**: The variant exceeds MAX_VARINT_SIZE bytes → `Err(VariantError::TooLong)`
+/// 3. **I/O error**: Read operation failed → `Err(ProtobufError::IoError)`
+///
+/// The `Result<Option<T>, E>` pattern clearly distinguishes between:
+/// - Successful reads with data: `Ok(Some(Variant))`
+/// - No data available: `Ok(None)`
+/// - Error conditions: `Err(VariantError)`
+pub fn read_variant<R>(reader: &mut R) -> Result<Option<Variant>>
+where
+    R: ::std::io::Read,
+{
+    let mut decoded_value = 0u64;
+    let mut shift = 0;
+    let mut buffer = [0u8; 1];
+
+    for _ in 0..MAX_VARINT_SIZE {
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
+            return Ok(None); // EOF
+        }
+
+        let byte = buffer[0];
+        let value = (byte & 0x7F) as u64;
+        decoded_value |= value << shift;
+
+        if byte & 0x80 == 0 {
+            break;
+        }
+        shift += 7;
+    }
+
+    let result_bytes = decoded_value.to_le_bytes();
     Ok(Some(Variant::new(result_bytes)))
 }
 
@@ -377,6 +421,71 @@ pub fn encode_variant(value: u64) -> ([u8; 10], usize) {
     (bytes, bytes_written)
 }
 
+/// Extension trait for reading variants from Read instances.
+///
+/// This trait provides a convenient method to read variants directly from
+/// any type that implements `std::io::Read`.
+///
+/// # Example
+/// ```
+/// use std::io::Cursor;
+/// use protobuf_core::variant::{ReadExtVariant, Variant};
+///
+/// let data = vec![0x96, 0x01]; // 150 in varint encoding
+/// let mut reader = Cursor::new(data);
+/// let variant = reader.read_variant().unwrap().unwrap();
+/// assert_eq!(variant.to_uint64(), 150);
+/// ```
+pub trait ReadExtVariant {
+    /// Read a variant from this reader.
+    ///
+    /// Returns the Variant if successfully read.
+    /// Returns `Ok(None)` if no input is available (EOF).
+    /// Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
+    fn read_variant(&mut self) -> Result<Option<Variant>>;
+}
+
+impl<R> ReadExtVariant for R
+where
+    R: ::std::io::Read,
+{
+    fn read_variant(&mut self) -> Result<Option<Variant>> {
+        read_variant(self)
+    }
+}
+
+/// Extension trait for writing variants to Write instances.
+///
+/// This trait provides a convenient method to write variants directly to
+/// any type that implements `std::io::Write`.
+///
+/// # Example
+/// ```
+/// use std::io::Write;
+/// use protobuf_core::variant::{WriteExtVariant, Variant};
+///
+/// let variant = Variant::from_uint64(150);
+/// let mut writer = Vec::new();
+/// writer.write_variant(&variant).unwrap();
+/// assert_eq!(writer, vec![0x96, 0x01]);
+/// ```
+pub trait WriteExtVariant {
+    /// Write a variant to this writer.
+    ///
+    /// Encodes a Variant as a varint and writes it to this writer.
+    /// Returns the number of bytes written on success.
+    fn write_variant(&mut self, value: &Variant) -> ::std::io::Result<usize>;
+}
+
+impl<W> WriteExtVariant for W
+where
+    W: ::std::io::Write,
+{
+    fn write_variant(&mut self, value: &Variant) -> ::std::io::Result<usize> {
+        write_variant(self, value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,12 +536,42 @@ mod tests {
     }
 
     #[test]
-    fn test_read_variant() {
+    fn test_read_variant_from_iterator() {
         let input = [0x96, 0x01];
         let mut iter = input.iter().copied();
-        let variant = read_variant(&mut iter).unwrap().unwrap();
+        let variant = read_variant_from_iterator(&mut iter).unwrap().unwrap();
 
         assert_eq!(variant.to_uint64(), 150);
+    }
+
+    #[test]
+    fn test_read_variant_from_reader() {
+        use ::std::io::Cursor;
+        let input = [0x96, 0x01];
+        let mut reader = Cursor::new(input);
+        let variant = read_variant(&mut reader).unwrap().unwrap();
+
+        assert_eq!(variant.to_uint64(), 150);
+    }
+
+    #[test]
+    fn test_read_ext_variant_trait() {
+        use ::std::io::Cursor;
+        let input = [0x96, 0x01];
+        let mut reader = Cursor::new(input);
+        let variant = reader.read_variant().unwrap().unwrap();
+
+        assert_eq!(variant.to_uint64(), 150);
+    }
+
+    #[test]
+    fn test_write_ext_variant_trait() {
+        let variant = Variant::from_uint64(150);
+        let mut writer = Vec::new();
+        let bytes_written = writer.write_variant(&variant).unwrap();
+
+        assert_eq!(bytes_written, 2);
+        assert_eq!(writer, vec![0x96, 0x01]);
     }
 
     #[test]
@@ -483,7 +622,7 @@ mod tests {
             write_variant(&mut buffer, &variant).unwrap();
 
             let mut iter = buffer.iter().copied();
-            let decoded_variant = read_variant(&mut iter).unwrap().unwrap();
+            let decoded_variant = read_variant_from_iterator(&mut iter).unwrap().unwrap();
             let decoded_value = decoded_variant.to_uint64();
 
             assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);

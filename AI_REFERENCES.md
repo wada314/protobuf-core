@@ -106,6 +106,21 @@ This project aims to create a **language-neutral protobuf utility library** that
      - `src/wire_format.rs` - wire format constants and definitions
    - **Benefits**: Clearer namespace hierarchy, better maintainability, follows modern Rust practices
 
+7. **Enhanced Variant I/O API** (`src/variant.rs`)
+   - **Dual API Design**: 
+     - `read_variant()` - for `std::io::Read` instances (primary API)
+     - `read_variant_from_iterator()` - for `Iterator<Item = u8>` (legacy support)
+   - **Extension Traits**:
+     - `ReadExtVariant` - adds `read_variant()` method to any `std::io::Read` type
+     - `WriteExtVariant` - adds `write_variant()` method to any `std::io::Write` type
+   - **Benefits**:
+     - Natural API: `reader.read_variant()` and `writer.write_variant(&variant)`
+     - Backward compatibility: existing iterator-based code continues to work
+     - Performance: efficient 1-byte reads from buffered readers
+     - Consistency: follows Rust standard library patterns
+   - **Error Handling**: Added `ProtobufError::IoError` variant for I/O errors
+   - **Comprehensive Testing**: All APIs tested with both unit tests and doc tests
+
 ### 🔄 Next Steps
 7. **Enhanced error types** - Expand error handling for additional protobuf operations
 8. **Documentation improvements** - Add comprehensive examples and usage guides
