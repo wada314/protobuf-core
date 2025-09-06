@@ -3,7 +3,6 @@
 //! This library provides common definitions, constants, enums, and basic logic
 //! for implementing Protocol Buffers in Rust.
 
-pub mod descriptor;
 pub mod field_number;
 pub mod tag;
 pub mod variant;
