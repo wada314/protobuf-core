@@ -4,33 +4,7 @@
 //! and plugin.proto, along with basic encoding/decoding capabilities.
 
 use crate::{ProtobufError, Result};
-use derive_more::From;
 use std::io::{Read, Write};
-
-// Protobuf integer types (wrapped for type safety)
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbInt32(pub i32);
-
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbInt64(pub i64);
-
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbUInt32(pub u32);
-
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbUInt64(pub u64);
-
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbSInt32(pub i32);
-
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbSInt64(pub i64);
 
 /// Field labels for protobuf fields (cardinality)
 #[derive(Debug, Clone, PartialEq)]
@@ -201,7 +175,7 @@ pub(crate) trait HasMetadata: 'static {
 
 /// Calculate the size of a varint value in bytes using our common Variant implementation
 fn varint_size(value: u64) -> usize {
-    let variant: crate::variant::Variant = PbUInt64::from(value).into();
+    let variant: crate::variant::Variant = value.into();
     variant.varint_size()
 }
 

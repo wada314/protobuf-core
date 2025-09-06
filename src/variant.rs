@@ -29,7 +29,6 @@
 //! return `Result<T, VariantError>` to make error handling explicit.
 //! Methods that cannot fail (like `to_uint64` and `to_bool`) return their values directly.
 
-use crate::descriptor::{PbInt32, PbInt64, PbSInt32, PbSInt64, PbUInt32, PbUInt64};
 use crate::wire_format::MAX_VARINT_SIZE;
 use crate::{ProtobufError, Result};
 use std::convert::{From, TryFrom};
@@ -78,6 +77,90 @@ impl Variant {
         }
     }
 
+    /// Convert to signed 32-bit integer (i32).
+    ///
+    /// This method interprets the variant value as a ZigZag-encoded signed 32-bit integer.
+    /// Returns an error if the value is out of range for i32.
+    pub fn to_sint32(&self) -> Result<i32> {
+        let sint64_value = self.to_sint64();
+        i32::try_from(sint64_value).map_err(|_| ProtobufError::VariantDowncastOutOfRange {
+            value: sint64_value as u64,
+            target_type: "i32",
+        })
+    }
+
+    /// Convert to unsigned 32-bit integer (u32).
+    ///
+    /// This method interprets the variant value as an unsigned 32-bit integer.
+    /// Returns an error if the value is out of range for u32.
+    pub fn to_uint32(&self) -> Result<u32> {
+        let value = self.to_uint64();
+        u32::try_from(value).map_err(|_| ProtobufError::VariantDowncastOutOfRange {
+            value,
+            target_type: "u32",
+        })
+    }
+
+    /// Convert to signed 64-bit integer (i64).
+    ///
+    /// This method interprets the variant value as a ZigZag-encoded signed 64-bit integer.
+    pub fn to_sint64(&self) -> i64 {
+        let value = self.to_uint64();
+        ((value >> 1) as i64) ^ (-((value & 1) as i64))
+    }
+
+    /// Convert to boolean.
+    ///
+    /// This method interprets the variant value as a boolean.
+    /// Returns true if the value is non-zero, false otherwise.
+    pub fn to_bool(&self) -> bool {
+        self.to_uint64() != 0
+    }
+
+    /// Create a Variant from a signed 32-bit integer (i32).
+    ///
+    /// This method creates a Variant from an i32 value using ZigZag encoding.
+    pub fn from_sint32(value: i32) -> Self {
+        Self::from_sint64(value as i64)
+    }
+
+    /// Create a Variant from an unsigned 32-bit integer (u32).
+    ///
+    /// This method creates a Variant from a u32 value.
+    pub fn from_uint32(value: u32) -> Self {
+        let bytes = (value as u64).to_le_bytes();
+        Self(bytes)
+    }
+
+    /// Create a Variant from a signed 64-bit integer (i64).
+    ///
+    /// This method creates a Variant from an i64 value using ZigZag encoding.
+    pub fn from_sint64(value: i64) -> Self {
+        let zigzag_value = if value < 0 {
+            ((-value) as u64) * 2 - 1
+        } else {
+            (value as u64) * 2
+        };
+        let bytes = zigzag_value.to_le_bytes();
+        Self(bytes)
+    }
+
+    /// Create a Variant from an unsigned 64-bit integer (u64).
+    ///
+    /// This method creates a Variant from a u64 value.
+    pub fn from_uint64(value: u64) -> Self {
+        let bytes = value.to_le_bytes();
+        Self(bytes)
+    }
+
+    /// Create a Variant from a boolean.
+    ///
+    /// This method creates a Variant from a boolean value.
+    pub fn from_bool(value: bool) -> Self {
+        let bytes = (if value { 1u64 } else { 0u64 }).to_le_bytes();
+        Self(bytes)
+    }
+
     /// Create a Variant from a u64 value for debugging and testing purposes.
     ///
     /// This method is intended for creating test data and debugging scenarios.
@@ -110,119 +193,10 @@ impl From<u64> for Variant {
     }
 }
 
-impl From<PbUInt32> for Variant {
-    fn from(value: PbUInt32) -> Self {
-        let bytes = (value.0 as u64).to_le_bytes();
-        Self(bytes)
-    }
-}
-
-impl From<PbInt64> for Variant {
-    fn from(value: PbInt64) -> Self {
-        let bytes = (value.0 as u64).to_le_bytes();
-        Self(bytes)
-    }
-}
-
-impl From<PbSInt64> for Variant {
-    fn from(value: PbSInt64) -> Self {
-        // Convert to ZigZag encoding
-        let sint64_value = value.0;
-        let zigzag_value = if sint64_value < 0 {
-            ((-sint64_value) as u64) * 2 - 1
-        } else {
-            (sint64_value as u64) * 2
-        };
-        let bytes = zigzag_value.to_le_bytes();
-        Self(bytes)
-    }
-}
-
 impl From<bool> for Variant {
     fn from(value: bool) -> Self {
         let bytes = (if value { 1u64 } else { 0u64 }).to_le_bytes();
         Self(bytes)
-    }
-}
-
-// TryFrom implementations for Variant (fallible conversions)
-impl TryFrom<Variant> for PbUInt32 {
-    type Error = ProtobufError;
-
-    fn try_from(variant: Variant) -> Result<Self> {
-        let value = variant.to_uint64();
-        u32::try_from(value)
-            .map_err(|_| ProtobufError::VariantDowncastOutOfRange {
-                value,
-                target_type: "u32",
-            })
-            .map(|v| PbUInt32(v))
-    }
-}
-
-impl TryFrom<Variant> for PbInt32 {
-    type Error = ProtobufError;
-
-    fn try_from(variant: Variant) -> Result<Self> {
-        let value = variant.to_uint64();
-        // Check if upper 4 bytes are all zeros (for positive values)
-        // or all ones (for negative values in two's complement)
-        if value <= i32::MAX as u64 {
-            // Positive value: upper 4 bytes should be 0
-            if (value >> 32) == 0 {
-                Ok(PbInt32(value as i32))
-            } else {
-                Err(ProtobufError::VariantDowncastOutOfRange {
-                    value,
-                    target_type: "i32",
-                })
-            }
-        } else if value >= (i32::MIN as u64) {
-            // Negative value: upper 4 bytes should be 0xFFFFFFFF
-            if (value >> 32) == 0xFFFFFFFF {
-                Ok(PbInt32(value as i32))
-            } else {
-                Err(ProtobufError::VariantDowncastOutOfRange {
-                    value,
-                    target_type: "i32",
-                })
-            }
-        } else {
-            Err(ProtobufError::VariantDowncastOutOfRange {
-                value,
-                target_type: "i32",
-            })
-        }
-    }
-}
-
-impl TryFrom<Variant> for PbSInt32 {
-    type Error = ProtobufError;
-
-    fn try_from(variant: Variant) -> Result<Self> {
-        let sint64: PbSInt64 = variant.into();
-        let sint64_value = sint64.0;
-        i32::try_from(sint64_value)
-            .map_err(|_| ProtobufError::VariantDowncastOutOfRange {
-                value: sint64_value as u64,
-                target_type: "i32",
-            })
-            .map(|v| PbSInt32(v))
-    }
-}
-
-impl From<Variant> for PbInt64 {
-    fn from(variant: Variant) -> Self {
-        // Interpret all 8 bytes as i64 (little-endian)
-        PbInt64(i64::from_le_bytes(variant.0))
-    }
-}
-
-impl From<Variant> for PbSInt64 {
-    fn from(variant: Variant) -> Self {
-        let value = variant.to_uint64();
-        let sint64_value = ((value >> 1) as i64) ^ (-((value & 1) as i64));
-        PbSInt64(sint64_value)
     }
 }
 
@@ -390,22 +364,20 @@ mod tests {
 
         // Test all integer conversions
         assert_eq!(variant.to_uint64(), 406);
-        match PbUInt32::try_from(variant) {
-            Ok(value) => assert_eq!(u32::from(value), 406),
+        match variant.to_uint32() {
+            Ok(value) => assert_eq!(value, 406),
             Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
         }
         let variant = Variant::new(bytes); // Create new variant for next test
-        assert_eq!(i64::from(PbInt64::from(variant)), 406);
+                                           // 406 in ZigZag encoding represents 203 in signed value
+        assert_eq!(variant.to_sint64(), 203);
         let variant = Variant::new(bytes); // Create new variant for next test
-        match PbInt32::try_from(variant) {
-            Ok(value) => assert_eq!(i32::from(value), 406),
-            Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
+        match variant.to_sint32() {
+            Ok(value) => assert_eq!(value, 203),
+            Err(e) => panic!("Expected Ok(203), got error: {:?}", e),
         }
         let variant = Variant::new(bytes); // Create new variant for next test
-        match bool::try_from(variant) {
-            Ok(value) => assert_eq!(value, true),
-            Err(e) => panic!("Expected Ok(true), got error: {:?}", e),
-        }
+        assert_eq!(variant.to_bool(), true);
     }
 
     #[test]
@@ -414,10 +386,10 @@ mod tests {
         let bytes = [0x01, 0, 0, 0, 0, 0, 0, 0];
         let variant = Variant::new(bytes);
 
-        assert_eq!(i64::from(PbSInt64::from(variant)), -1);
+        assert_eq!(variant.to_sint64(), -1);
         let variant = Variant::new(bytes); // Create new variant for next test
-        match PbSInt32::try_from(variant) {
-            Ok(value) => assert_eq!(i32::from(value), -1),
+        match variant.to_sint32() {
+            Ok(value) => assert_eq!(value, -1),
             Err(e) => panic!("Expected Ok(-1), got error: {:?}", e),
         }
     }
@@ -546,55 +518,39 @@ mod tests {
         let variant: Variant = 150u64.into();
         assert_eq!(variant.to_uint64(), 150);
 
-        // Test From<PbUInt32> for Variant
-        let uint32 = PbUInt32::from(150);
-        let variant: Variant = uint32.into();
+        // Test from_uint32
+        let variant = Variant::from_uint32(150);
         assert_eq!(variant.to_uint64(), 150);
 
-        // Test From<PbInt64> for Variant
-        let int64 = PbInt64::from(150);
-        let variant: Variant = int64.into();
-        assert_eq!(variant.to_uint64(), 150);
+        // Test from_sint64
+        let variant = Variant::from_sint64(150);
+        assert_eq!(variant.to_sint64(), 150);
 
-        // Test From<PbSInt64> for Variant (with ZigZag encoding)
-        let sint64 = PbSInt64::from(-1);
-        let variant: Variant = sint64.into();
-        assert_eq!(i64::from(PbSInt64::from(variant)), -1);
+        // Test from_sint64 with negative value
+        let variant = Variant::from_sint64(-1);
+        assert_eq!(variant.to_sint64(), -1);
 
-        // Test From<bool> for Variant
-        let variant: Variant = true.into();
-        assert_eq!(bool::try_from(variant).unwrap(), true);
+        // Test from_bool
+        let variant = Variant::from_bool(true);
+        assert_eq!(variant.to_bool(), true);
     }
 
     #[test]
-    fn test_try_from_traits() {
+    fn test_to_methods() {
         let bytes = [150, 0, 0, 0, 0, 0, 0, 0]; // 150 in little-endian
-
-        // Test TryFrom<Variant> for PbUInt32
         let variant = Variant::new(bytes);
-        let uint32: PbUInt32 = variant.try_into().unwrap();
-        assert_eq!(u32::from(uint32), 150);
 
-        // Test TryFrom<Variant> for PbInt32
-        let variant = Variant::new(bytes);
-        let int32: PbInt32 = variant.try_into().unwrap();
-        assert_eq!(i32::from(int32), 150);
+        // Test to_uint32
+        assert_eq!(variant.to_uint32().unwrap(), 150);
 
-        // Test From<Variant> for PbInt64
-        let variant = Variant::new(bytes);
-        let int64: PbInt64 = variant.into();
-        assert_eq!(i64::from(int64), 150);
+        // Test to_sint32 (150 in ZigZag encoding represents 75 in signed value)
+        assert_eq!(variant.to_sint32().unwrap(), 75);
 
-        // Test From<Variant> for PbSInt64
-        // 150 in ZigZag encoding represents 75 in signed value
-        let variant = Variant::new(bytes);
-        let sint64: PbSInt64 = variant.into();
-        assert_eq!(i64::from(sint64), 75);
+        // Test to_sint64 (150 in ZigZag encoding represents 75 in signed value)
+        assert_eq!(variant.to_sint64(), 75);
 
-        // Test TryFrom<Variant> for bool
-        let variant = Variant::new(bytes);
-        let bool_value: bool = variant.try_into().unwrap();
-        assert_eq!(bool_value, true);
+        // Test to_bool
+        assert_eq!(variant.to_bool(), true);
     }
 
     #[test]
@@ -604,22 +560,22 @@ mod tests {
         let variant: Variant = original.into();
         assert_eq!(variant.to_uint64(), original);
 
-        // Test roundtrip for PbUInt32
-        let original = PbUInt32::from(150);
-        let variant: Variant = original.into();
-        let converted: PbUInt32 = variant.try_into().unwrap();
-        assert_eq!(u32::from(converted), u32::from(original));
+        // Test roundtrip for u32
+        let original = 150u32;
+        let variant = Variant::from_uint32(original);
+        let converted = variant.to_uint32().unwrap();
+        assert_eq!(converted, original);
 
-        // Test roundtrip for PbSInt64 (with ZigZag encoding)
-        let original = PbSInt64::from(-1);
-        let variant: Variant = original.into();
-        let converted: PbSInt64 = variant.into();
-        assert_eq!(i64::from(converted), i64::from(original));
+        // Test roundtrip for i64
+        let original = -1i64;
+        let variant = Variant::from_sint64(original);
+        let converted = variant.to_sint64();
+        assert_eq!(converted, original);
 
         // Test roundtrip for bool
         let original = true;
-        let variant: Variant = original.into();
-        let converted: bool = variant.try_into().unwrap();
+        let variant = Variant::from_bool(original);
+        let converted = variant.to_bool();
         assert_eq!(converted, original);
     }
 }
@@ -642,13 +598,6 @@ impl From<u32> for Variant {
 impl From<i64> for Variant {
     fn from(value: i64) -> Self {
         let bytes = (value as u64).to_le_bytes();
-        Self(bytes)
-    }
-}
-
-impl From<PbUInt64> for Variant {
-    fn from(value: PbUInt64) -> Self {
-        let bytes = value.0.to_le_bytes();
         Self(bytes)
     }
 }
