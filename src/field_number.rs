@@ -64,6 +64,16 @@ impl FieldNumber {
             _ => 5,
         }
     }
+
+    /// Returns the field number as a u32.
+    pub fn as_u32(self) -> u32 {
+        self.0
+    }
+
+    /// Returns the field number as a usize.
+    pub fn as_usize(self) -> usize {
+        self.0 as usize
+    }
 }
 
 impl TryFrom<u32> for FieldNumber {
@@ -112,6 +122,8 @@ mod tests {
         let field = FieldNumber::try_new(42).unwrap();
         assert_eq!(u32::from(field), 42);
         assert_eq!(usize::from(field), 42);
+        assert_eq!(field.as_u32(), 42);
+        assert_eq!(field.as_usize(), 42);
     }
 
     #[test]
@@ -160,5 +172,22 @@ mod tests {
 
         // Field 100000000: (100000000 << 3) | 7 = 800000000 | 7 = 800000007 (5 bytes)
         assert_eq!(FieldNumber::try_new(100000000).unwrap().encoded_size(), 5);
+    }
+
+    #[test]
+    fn test_as_u32_and_as_usize() {
+        let min_field = FieldNumber::MIN;
+        let max_field = FieldNumber::MAX;
+        let mid_field = FieldNumber::try_new(1000).unwrap();
+
+        // Test as_u32
+        assert_eq!(min_field.as_u32(), 1);
+        assert_eq!(max_field.as_u32(), 536_870_911);
+        assert_eq!(mid_field.as_u32(), 1000);
+
+        // Test as_usize
+        assert_eq!(min_field.as_usize(), 1);
+        assert_eq!(max_field.as_usize(), 536_870_911);
+        assert_eq!(mid_field.as_usize(), 1000);
     }
 }
