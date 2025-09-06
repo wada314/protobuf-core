@@ -1,5 +1,4 @@
 use std::convert::TryFrom;
-
 /// A validated Protocol Buffers field number.
 ///
 /// Field numbers must be in the range [1, 2^29 - 1].
@@ -33,11 +32,6 @@ impl FieldNumber {
         Ok(Self(value))
     }
 
-    /// Returns the underlying u32 value.
-    pub fn get(self) -> u32 {
-        self.0
-    }
-
     /// Checks if the field number can be encoded as a single-byte tag.
     /// Field numbers 1-15 result in tags that fit in 1 byte.
     pub fn is_tag_single_byte(self) -> bool {
@@ -59,23 +53,10 @@ impl FieldNumber {
     ///
     /// The tag is encoded as: (field_number << 3) | wire_type
     /// Since wire_type is 0-7, the maximum tag value is (field_number * 8) + 7
-    pub fn tag_encoded_size(self) -> usize {
+    pub fn encoded_size(self) -> usize {
         let max_tag_value = (self.0 << 3) | 7; // field_number << 3 + max wire_type (7)
 
         match max_tag_value {
-            0..=0x7F => 1,
-            0x80..=0x3FFF => 2,
-            0x4000..=0x1FFFFF => 3,
-            0x200000..=0xFFFFFFF => 4,
-            _ => 5,
-        }
-    }
-
-    /// Returns the minimum number of bytes needed to encode this field number as a varint.
-    ///
-    /// Note: This is rarely useful in practice since field numbers are always encoded as part of a tag.
-    pub fn encoded_size(self) -> usize {
-        match self.0 {
             0..=0x7F => 1,
             0x80..=0x3FFF => 2,
             0x4000..=0x1FFFFF => 3,
@@ -95,13 +76,13 @@ impl TryFrom<u32> for FieldNumber {
 
 impl From<FieldNumber> for u32 {
     fn from(field_number: FieldNumber) -> Self {
-        field_number.get()
+        field_number.0
     }
 }
 
 impl From<FieldNumber> for usize {
     fn from(field_number: FieldNumber) -> Self {
-        field_number.get() as usize
+        field_number.0 as usize
     }
 }
 
