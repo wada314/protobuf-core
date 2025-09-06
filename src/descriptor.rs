@@ -175,7 +175,7 @@ pub(crate) trait HasMetadata: 'static {
 
 /// Calculate the size of a varint value in bytes using our common Variant implementation
 fn varint_size(value: u64) -> usize {
-    let variant: crate::variant::Variant = value.into();
+    let variant = crate::variant::Variant::from_uint64(value);
     variant.varint_size()
 }
 

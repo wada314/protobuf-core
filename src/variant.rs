@@ -241,31 +241,6 @@ impl Variant {
     }
 }
 
-// From implementations for Variant (infallible conversions)
-// Note: u64 is treated as ProtobufUInt64 for consistency
-impl From<u64> for Variant {
-    fn from(value: u64) -> Self {
-        let bytes = value.to_le_bytes();
-        Self(bytes)
-    }
-}
-
-impl From<bool> for Variant {
-    fn from(value: bool) -> Self {
-        let bytes = (if value { 1u64 } else { 0u64 }).to_le_bytes();
-        Self(bytes)
-    }
-}
-
-impl TryFrom<Variant> for bool {
-    type Error = ProtobufError;
-
-    fn try_from(variant: Variant) -> Result<Self> {
-        let value = variant.to_uint64();
-        Ok(value != 0)
-    }
-}
-
 /// Read a variant from a byte iterator.
 ///
 /// Returns the Variant if successfully read.
@@ -572,7 +547,7 @@ mod tests {
     #[test]
     fn test_from_traits() {
         // Test From<u64> for Variant
-        let variant: Variant = 150u64.into();
+        let variant = Variant::from_uint64(150);
         assert_eq!(variant.to_uint64(), 150);
 
         // Test from_uint32
@@ -628,7 +603,7 @@ mod tests {
     fn test_roundtrip_conversions() {
         // Test roundtrip for u64
         let original = 150u64;
-        let variant: Variant = original.into();
+        let variant = Variant::debug_from_u64(original);
         assert_eq!(variant.to_uint64(), original);
 
         // Test roundtrip for u32
