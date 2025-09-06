@@ -32,6 +32,7 @@
 use crate::wire_format::MAX_VARINT_SIZE;
 use crate::{ProtobufError, Result};
 use std::convert::TryFrom;
+use std::io::{Read, Write};
 
 /// A fixed-size array wrapper for variant values.
 ///
@@ -369,7 +370,7 @@ pub trait ReadExtVariant {
 
 impl<R> ReadExtVariant for R
 where
-    R: ::std::io::Read,
+    R: Read,
 {
     fn read_variant(&mut self) -> Result<Option<Variant>> {
         let mut decoded_value = 0u64;
@@ -436,14 +437,14 @@ pub trait WriteExtVariant {
     /// assert_eq!(bytes_written, 2);
     /// assert_eq!(buffer, vec![0x96, 0x01]);
     /// ```
-    fn write_variant(&mut self, value: &Variant) -> ::std::io::Result<usize>;
+    fn write_variant(&mut self, value: &Variant) -> std::io::Result<usize>;
 }
 
 impl<W> WriteExtVariant for W
 where
-    W: ::std::io::Write,
+    W: Write,
 {
-    fn write_variant(&mut self, value: &Variant) -> ::std::io::Result<usize> {
+    fn write_variant(&mut self, value: &Variant) -> std::io::Result<usize> {
         let u64_value = value.to_uint64();
         let (bytes, count) = encode_variant(u64_value);
         self.write_all(&bytes[..count])?;
@@ -511,7 +512,7 @@ mod tests {
 
     #[test]
     fn test_read_variant_from_reader() {
-        use ::std::io::Cursor;
+        use std::io::Cursor;
         let input = [0x96, 0x01];
         let mut reader = Cursor::new(input);
         let variant = reader.read_variant().unwrap().unwrap();
@@ -521,7 +522,7 @@ mod tests {
 
     #[test]
     fn test_read_ext_variant_trait() {
-        use ::std::io::Cursor;
+        use std::io::Cursor;
         let input = [0x96, 0x01];
         let mut reader = Cursor::new(input);
         let variant = reader.read_variant().unwrap().unwrap();

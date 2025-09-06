@@ -117,6 +117,7 @@ This project aims to create a **language-neutral protobuf utility library** that
      - Performance: efficient 1-byte reads from buffered readers
      - Consistency: follows Rust standard library patterns
      - Clean separation: I/O operations are extension methods, core logic remains as functions
+     - Clean imports: Uses `std::io::{Read, Write}` imports instead of full paths
    - **Error Handling**: Added `ProtobufError::IoError` variant for I/O errors
    - **Comprehensive Testing**: All APIs tested with both unit tests and doc tests
    - **API Simplification**: Removed standalone `read_variant()` and `write_variant()` functions in favor of extension traits
