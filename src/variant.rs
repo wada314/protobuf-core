@@ -218,6 +218,45 @@ impl Variant {
         let bytes = value.to_le_bytes();
         Self(bytes)
     }
+
+    /// Encode this variant as a varint and return the bytes with count.
+    ///
+    /// Returns a tuple of (bytes, count) where:
+    /// - bytes: fixed-size array containing the encoded varint
+    /// - count: actual number of bytes used (1-10)
+    ///
+    /// This is the most efficient method as it avoids any memory allocation
+    /// and returns a fixed-size array that can be easily copied or sliced.
+    ///
+    /// # Example
+    /// ```
+    /// use protobuf_core::variant::Variant;
+    ///
+    /// let variant = Variant::from_uint64(150);
+    /// let (bytes, count) = variant.encode();
+    /// assert_eq!(count, 2);
+    /// assert_eq!(&bytes[..count], &[0x96, 0x01]);
+    /// ```
+    pub fn encode(&self) -> ([u8; 10], usize) {
+        let value = self.to_uint64();
+        let mut bytes = [0u8; 10];
+        let mut bytes_written = 0;
+        let mut remaining_value = value;
+
+        for byte in bytes.iter_mut() {
+            *byte = (remaining_value & 0x7F) as u8;
+            remaining_value >>= 7;
+            bytes_written += 1;
+
+            if remaining_value == 0 {
+                break;
+            } else {
+                *byte |= 0x80; // continuation bit
+            }
+        }
+
+        (bytes, bytes_written)
+    }
 }
 
 /// Extension trait for collecting variants from byte iterators.
@@ -279,43 +318,6 @@ where
 
         Ok(Some(Variant::new(result_bytes)))
     }
-}
-
-/// Encode a variant and return the bytes with count.
-///
-/// Returns a tuple of (bytes, count) where:
-/// - bytes: fixed-size array containing the encoded varint
-/// - count: actual number of bytes used (1-10)
-///
-/// This is the most efficient method as it avoids any memory allocation
-/// and returns a fixed-size array that can be easily copied or sliced.
-///
-/// # Example
-/// ```
-/// use protobuf_core::variant::encode_variant;
-///
-/// let (bytes, count) = encode_variant(150);
-/// assert_eq!(count, 2);
-/// assert_eq!(&bytes[..count], &[0x96, 0x01]);
-/// ```
-pub fn encode_variant(value: u64) -> ([u8; 10], usize) {
-    let mut bytes = [0u8; 10];
-    let mut bytes_written = 0;
-    let mut remaining_value = value;
-
-    for byte in bytes.iter_mut() {
-        *byte = (remaining_value & 0x7F) as u8;
-        remaining_value >>= 7;
-        bytes_written += 1;
-
-        if remaining_value == 0 {
-            break;
-        } else {
-            *byte |= 0x80; // continuation bit
-        }
-    }
-
-    (bytes, bytes_written)
 }
 
 /// Extension trait for reading variants from Read instances.
@@ -426,8 +428,7 @@ where
     W: Write,
 {
     fn write_variant(&mut self, value: &Variant) -> std::io::Result<usize> {
-        let u64_value = value.to_uint64();
-        let (bytes, count) = encode_variant(u64_value);
+        let (bytes, count) = value.encode();
         self.write_all(&bytes[..count])?;
         Ok(count)
     }
@@ -597,22 +598,26 @@ mod tests {
     #[test]
     fn test_encode_variant() {
         // Test encoding small values
-        let (bytes, count) = encode_variant(150);
+        let variant = Variant::from_uint64(150);
+        let (bytes, count) = variant.encode();
         assert_eq!(count, 2);
         assert_eq!(&bytes[..count], &[0x96, 0x01]);
 
         // Test encoding single-byte values
-        let (bytes, count) = encode_variant(127);
+        let variant = Variant::from_uint64(127);
+        let (bytes, count) = variant.encode();
         assert_eq!(count, 1);
         assert_eq!(&bytes[..count], &[0x7F]);
 
         // Test encoding zero
-        let (bytes, count) = encode_variant(0);
+        let variant = Variant::from_uint64(0);
+        let (bytes, count) = variant.encode();
         assert_eq!(count, 1);
         assert_eq!(&bytes[..count], &[0x00]);
 
         // Test encoding large values
-        let (bytes, count) = encode_variant(0x7FFFFFFFFFFFFFFF);
+        let variant = Variant::from_uint64(0x7FFFFFFFFFFFFFFF);
+        let (bytes, count) = variant.encode();
         assert_eq!(count, 9);
         assert_eq!(
             &bytes[..count],
@@ -620,7 +625,8 @@ mod tests {
         );
 
         // Test encoding maximum varint (10 bytes)
-        let (bytes, count) = encode_variant(0xFFFFFFFFFFFFFFFF);
+        let variant = Variant::from_uint64(0xFFFFFFFFFFFFFFFF);
+        let (bytes, count) = variant.encode();
         assert_eq!(count, 10);
         assert_eq!(
             &bytes[..count],
@@ -633,14 +639,14 @@ mod tests {
         let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
 
         for &value in &test_values {
-            // Method 1: encode_variant
-            let (array_bytes, array_count) = encode_variant(value);
+            // Method 1: encode method
+            let variant = Variant::debug_from_u64(value);
+            let (array_bytes, array_count) = variant.encode();
 
             // Method 2: write_variant (std::io::Write)
-            let variant = Variant::debug_from_u64(value);
-
+            let variant2 = Variant::debug_from_u64(value);
             let mut vec_buffer = Vec::new();
-            let vec_count = vec_buffer.write_variant(&variant).unwrap();
+            let vec_count = vec_buffer.write_variant(&variant2).unwrap();
 
             // Both methods should produce the same result
             assert_eq!(array_count, vec_count);

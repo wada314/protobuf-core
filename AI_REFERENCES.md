@@ -111,17 +111,19 @@ This project aims to create a **language-neutral protobuf utility library** that
      - `ReadExtVariant` - adds `read_variant()` method to any `std::io::Read` type
      - `WriteExtVariant` - adds `write_variant()` method to any `std::io::Write` type
      - `IteratorExtVariant` - adds `collect_variant()` method to any `Iterator<Item = u8>` type
+   - **Variant Methods**:
+     - `Variant::encode()` - encodes the variant as varint bytes with count
    - **Benefits**:
-     - Natural API: `reader.read_variant()`, `writer.write_variant(&variant)`, and `iter.collect_variant()`
+     - Natural API: `reader.read_variant()`, `writer.write_variant(&variant)`, `iter.collect_variant()`, and `variant.encode()`
      - Performance: efficient 1-byte reads from buffered readers
      - Consistency: follows Rust standard library patterns
-     - Clean separation: I/O operations are extension methods, core logic remains as functions
+     - Clean separation: I/O operations are extension methods, encoding is a variant method
      - Clean imports: Uses `std::io::{Read, Write}` imports instead of full paths
      - Iterator integration: `collect_variant()` provides `FromIterator`-like functionality for variants
-     - API unification: All I/O operations use extension traits, no standalone functions
+     - API unification: All operations use methods, no standalone functions
    - **Error Handling**: Added `ProtobufError::IoError` variant for I/O errors
    - **Comprehensive Testing**: All APIs tested with both unit tests and doc tests
-   - **API Simplification**: Removed all standalone I/O functions in favor of extension traits
+   - **API Simplification**: Removed all standalone functions in favor of methods and extension traits
 
 ### 🔄 Next Steps
 7. **Enhanced error types** - Expand error handling for additional protobuf operations
