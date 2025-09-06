@@ -80,15 +80,10 @@ mod tests {
         let result = parse_tag(tag);
         assert!(result.is_err());
 
-        if let Err(ProtobufError::MalformedTag {
-            field_number,
-            wire_type,
-        }) = result
-        {
-            assert_eq!(field_number, 0);
-            assert_eq!(wire_type, 0);
+        if let Err(ProtobufError::FieldNumberOutOfRange { value }) = result {
+            assert_eq!(value, 0);
         } else {
-            panic!("Expected MalformedTag error");
+            panic!("Expected FieldNumberOutOfRange error");
         }
     }
 
