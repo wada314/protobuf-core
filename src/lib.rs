@@ -10,7 +10,7 @@ pub mod wire_format;
 
 pub use field_number::FieldNumber;
 pub use tag::{build_tag, parse_tag, read_tag};
-pub use variant::{read_variant_from_iterator, ReadExtVariant, Variant, WriteExtVariant};
+pub use variant::{IteratorExtVariant, ReadExtVariant, Variant, WriteExtVariant};
 pub use wire_format::{WireType, MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER};
 
 use thiserror::Error;

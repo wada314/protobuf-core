@@ -56,9 +56,9 @@ pub fn read_tag<I>(iter: &mut I) -> Result<Option<(FieldNumber, WireType)>>
 where
     I: Iterator<Item = u8>,
 {
-    use crate::variant::read_variant_from_iterator;
+    use crate::variant::IteratorExtVariant;
 
-    let variant_result = read_variant_from_iterator(iter)?;
+    let variant_result = iter.collect_variant()?;
     let Some(variant) = variant_result else {
         return Ok(None);
     };

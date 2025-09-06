@@ -220,55 +220,65 @@ impl Variant {
     }
 }
 
-/// Read a variant from a byte iterator.
+/// Extension trait for collecting variants from byte iterators.
 ///
-/// Returns the Variant if successfully read.
-/// Returns `Ok(None)` if no input is available (empty iterator).
-/// Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
+/// This trait provides convenient methods to collect variants directly from
+/// any iterator that yields bytes.
 ///
-/// # Error Cases
-/// This function has two distinct failure scenarios:
-/// 1. **No input available**: The iterator is empty (no bytes to read) → `Ok(None)`
-/// 2. **Input too long**: The variant exceeds MAX_VARINT_SIZE bytes → `Err(VariantError::TooLong)`
+/// # Example
+/// ```
+/// use protobuf_core::variant::{IteratorExtVariant, Variant};
 ///
-/// The `Result<Option<T>, E>` pattern clearly distinguishes between:
-/// - Successful reads with data: `Ok(Some(Variant))`
-/// - No data available: `Ok(None)`
-/// - Error conditions: `Err(VariantError)`
-pub fn read_variant_from_iterator<I>(iter: &mut I) -> Result<Option<Variant>>
+/// let bytes = vec![0x96, 0x01]; // 150 in varint encoding
+/// let mut iter = bytes.into_iter();
+/// let variant: Option<Variant> = iter.collect_variant().unwrap();
+/// assert_eq!(variant.unwrap().to_uint64(), 150);
+/// ```
+pub trait IteratorExtVariant {
+    /// Collect a variant from this iterator.
+    ///
+    /// Returns the Variant if successfully read.
+    /// Returns `Ok(None)` if no input is available (empty iterator).
+    /// Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
+    fn collect_variant(self) -> Result<Option<Variant>>;
+}
+
+impl<I> IteratorExtVariant for I
 where
     I: Iterator<Item = u8>,
 {
-    let mut bytes_read = 0;
-    let mut decoded_value = 0u64;
-    let mut shift = 0;
+    fn collect_variant(self) -> Result<Option<Variant>> {
+        let mut bytes_read = 0;
+        let mut decoded_value = 0u64;
+        let mut shift = 0;
 
-    for byte in iter {
-        if bytes_read >= MAX_VARINT_SIZE {
-            return Err(ProtobufError::VariantDowncastOutOfRange {
-                value: 0,
-                target_type: "variant (too long)",
-            }); // Variant too long
+        for byte in self {
+            if bytes_read >= MAX_VARINT_SIZE {
+                return Err(ProtobufError::VariantDowncastOutOfRange {
+                    value: 0,
+                    target_type: "variant (too long)",
+                }); // Variant too long
+            }
+
+            let value = (byte & 0x7F) as u64;
+            decoded_value |= value << shift;
+            bytes_read += 1;
+
+            if byte & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
         }
 
-        let value = (byte & 0x7F) as u64;
-        decoded_value |= value << shift;
-        bytes_read += 1;
-
-        if byte & 0x80 == 0 {
-            break;
+        if bytes_read == 0 {
+            return Ok(None); // No bytes read
         }
-        shift += 7;
+
+        // Convert the decoded u64 value to 8-byte array (little-endian)
+        let result_bytes = decoded_value.to_le_bytes();
+
+        Ok(Some(Variant::new(result_bytes)))
     }
-
-    if bytes_read == 0 {
-        return Ok(None); // No bytes read
-    }
-
-    // Convert the decoded u64 value to 8-byte array (little-endian)
-    let result_bytes = decoded_value.to_le_bytes();
-
-    Ok(Some(Variant::new(result_bytes)))
 }
 
 /// Encode a variant and return the bytes with count.
@@ -482,8 +492,8 @@ mod tests {
     #[test]
     fn test_read_variant_from_iterator() {
         let input = [0x96, 0x01];
-        let mut iter = input.iter().copied();
-        let variant = read_variant_from_iterator(&mut iter).unwrap().unwrap();
+        let iter = input.iter().copied();
+        let variant = iter.collect_variant().unwrap().unwrap();
 
         assert_eq!(variant.to_uint64(), 150);
     }
@@ -516,6 +526,24 @@ mod tests {
 
         assert_eq!(bytes_written, 2);
         assert_eq!(writer, vec![0x96, 0x01]);
+    }
+
+    #[test]
+    fn test_iterator_ext_variant_trait() {
+        let bytes = vec![0x96, 0x01]; // 150 in varint encoding
+        let iter = bytes.into_iter();
+        let variant = iter.collect_variant().unwrap().unwrap();
+
+        assert_eq!(variant.to_uint64(), 150);
+    }
+
+    #[test]
+    fn test_iterator_ext_variant_empty() {
+        let bytes = vec![];
+        let iter = bytes.into_iter();
+        let variant = iter.collect_variant().unwrap();
+
+        assert_eq!(variant, None);
     }
 
     #[test]
@@ -565,8 +593,8 @@ mod tests {
             let mut buffer = Vec::new();
             buffer.write_variant(&variant).unwrap();
 
-            let mut iter = buffer.iter().copied();
-            let decoded_variant = read_variant_from_iterator(&mut iter).unwrap().unwrap();
+            let iter = buffer.iter().copied();
+            let decoded_variant = iter.collect_variant().unwrap().unwrap();
             let decoded_value = decoded_variant.to_uint64();
 
             assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
