@@ -38,11 +38,7 @@ impl Tag {
         let field_number = FieldNumber::new(field_number_value)?;
 
         // Parse wire type
-        let wire_type = WireType::try_from(wire_type_value as u8).map_err(|_| {
-            ProtobufError::InvalidWireType {
-                value: wire_type_value as u8,
-            }
-        })?;
+        let wire_type = WireType::try_from(wire_type_value as u8)?;
 
         Ok(Self::new(field_number, wire_type))
     }

@@ -36,7 +36,7 @@ impl From<WireType> for u8 {
 }
 
 impl TryFrom<u8> for WireType {
-    type Error = ();
+    type Error = crate::ProtobufError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
@@ -46,7 +46,7 @@ impl TryFrom<u8> for WireType {
             3 => Ok(WireType::SGroup),
             4 => Ok(WireType::EGroup),
             5 => Ok(WireType::I32),
-            _ => Err(()),
+            _ => Err(crate::ProtobufError::InvalidWireType { value }),
         }
     }
 }
@@ -145,14 +145,30 @@ mod tests {
 
     #[test]
     fn test_wire_type_try_from_trait() {
-        assert_eq!(WireType::try_from(0), Ok(WireType::Varint));
-        assert_eq!(WireType::try_from(1), Ok(WireType::I64));
-        assert_eq!(WireType::try_from(2), Ok(WireType::Len));
-        assert_eq!(WireType::try_from(3), Ok(WireType::SGroup));
-        assert_eq!(WireType::try_from(4), Ok(WireType::EGroup));
-        assert_eq!(WireType::try_from(5), Ok(WireType::I32));
-        assert_eq!(WireType::try_from(6), Err(()));
-        assert_eq!(WireType::try_from(255), Err(()));
+        // Test valid wire types
+        assert_eq!(WireType::try_from(0).unwrap(), WireType::Varint);
+        assert_eq!(WireType::try_from(1).unwrap(), WireType::I64);
+        assert_eq!(WireType::try_from(2).unwrap(), WireType::Len);
+        assert_eq!(WireType::try_from(3).unwrap(), WireType::SGroup);
+        assert_eq!(WireType::try_from(4).unwrap(), WireType::EGroup);
+        assert_eq!(WireType::try_from(5).unwrap(), WireType::I32);
+
+        // Test invalid wire types
+        let result = WireType::try_from(6);
+        assert!(result.is_err());
+        if let Err(crate::ProtobufError::InvalidWireType { value }) = result {
+            assert_eq!(value, 6);
+        } else {
+            panic!("Expected InvalidWireType error");
+        }
+
+        let result = WireType::try_from(255);
+        assert!(result.is_err());
+        if let Err(crate::ProtobufError::InvalidWireType { value }) = result {
+            assert_eq!(value, 255);
+        } else {
+            panic!("Expected InvalidWireType error");
+        }
     }
 
     #[test]
