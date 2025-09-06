@@ -298,13 +298,6 @@ where
 /// assert_eq!(count, 2);
 /// assert_eq!(&bytes[..count], &[0x96, 0x01]);
 /// ```
-///
-/// # Implementation Notes
-/// This is a reference implementation that processes one byte at a time.
-/// Implementors may optimize by:
-/// - Using platform-specific SIMD instructions
-/// - Processing multiple bytes in parallel
-/// - Using lookup tables for common values
 pub fn encode_variant(value: u64) -> ([u8; 10], usize) {
     let mut bytes = [0u8; 10];
     let mut bytes_written = 0;
