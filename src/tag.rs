@@ -35,7 +35,7 @@ impl Tag {
         let wire_type_value = encoded & WIRE_TYPE_MASK;
 
         // Create field number
-        let field_number = FieldNumber::new(field_number_value)?;
+        let field_number = FieldNumber::try_new(field_number_value)?;
 
         // Parse wire type
         let wire_type = WireType::try_from(wire_type_value as u8)?;
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn test_tag_build_and_parse() {
-        let field_number = FieldNumber::new(1).unwrap();
+        let field_number = FieldNumber::try_new(1).unwrap();
         let wire_type = WireType::Varint;
         let tag = Tag::new(field_number, wire_type);
 
@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn test_tag_struct() {
-        let field_number = FieldNumber::new(1).unwrap();
+        let field_number = FieldNumber::try_new(1).unwrap();
         let wire_type = WireType::Varint;
         let tag = Tag::new(field_number, wire_type);
 
@@ -130,7 +130,7 @@ mod tests {
         let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
         let mut iter = bytes.into_iter();
         let tag = read_tag(&mut iter).unwrap().unwrap();
-        assert_eq!(tag.field_number, FieldNumber::new(1).unwrap());
+        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
         assert_eq!(tag.wire_type, WireType::Varint);
     }
 

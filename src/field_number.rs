@@ -25,7 +25,7 @@ impl FieldNumber {
     pub const RESERVED_RANGE_END: u32 = 19999;
 
     /// Creates a new field number, validating the range.
-    pub fn new(value: u32) -> Result<Self, FieldNumberError> {
+    pub fn try_new(value: u32) -> Result<Self, FieldNumberError> {
         if value < Self::MIN.0 || value > Self::MAX.0 {
             return Err(FieldNumberError::OutOfRange(value));
         }
@@ -70,7 +70,7 @@ impl TryFrom<u32> for FieldNumber {
     type Error = FieldNumberError;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
-        Self::new(value)
+        Self::try_new(value)
     }
 }
 
@@ -99,17 +99,17 @@ mod tests {
 
     #[test]
     fn test_field_number_creation() {
-        assert!(FieldNumber::new(1).is_ok());
-        assert!(FieldNumber::new(16).is_ok());
-        assert!(FieldNumber::new(536_870_911).is_ok());
+        assert!(FieldNumber::try_new(1).is_ok());
+        assert!(FieldNumber::try_new(16).is_ok());
+        assert!(FieldNumber::try_new(536_870_911).is_ok());
 
-        assert!(FieldNumber::new(0).is_err());
-        assert!(FieldNumber::new(536_870_912).is_err());
+        assert!(FieldNumber::try_new(0).is_err());
+        assert!(FieldNumber::try_new(536_870_912).is_err());
     }
 
     #[test]
     fn test_field_number_conversion() {
-        let field = FieldNumber::new(42).unwrap();
+        let field = FieldNumber::try_new(42).unwrap();
         assert_eq!(u32::from(field), 42);
         assert_eq!(usize::from(field), 42);
     }
@@ -125,10 +125,10 @@ mod tests {
 
     #[test]
     fn test_helper_methods() {
-        let single_byte_field = FieldNumber::new(15).unwrap();
-        let multi_byte_field = FieldNumber::new(16).unwrap();
-        let large_field = FieldNumber::new(1000).unwrap();
-        let reserved_field = FieldNumber::new(19500).unwrap();
+        let single_byte_field = FieldNumber::try_new(15).unwrap();
+        let multi_byte_field = FieldNumber::try_new(16).unwrap();
+        let large_field = FieldNumber::try_new(1000).unwrap();
+        let reserved_field = FieldNumber::try_new(19500).unwrap();
 
         assert!(single_byte_field.is_tag_single_byte());
         assert!(!multi_byte_field.is_tag_single_byte());
@@ -144,21 +144,21 @@ mod tests {
     #[test]
     fn test_encoded_size() {
         // Field 1: (1 << 3) | 7 = 8 | 7 = 15 (1 byte)
-        assert_eq!(FieldNumber::new(1).unwrap().encoded_size(), 1);
+        assert_eq!(FieldNumber::try_new(1).unwrap().encoded_size(), 1);
 
         // Field 16: (16 << 3) | 7 = 128 | 7 = 135 (2 bytes)
-        assert_eq!(FieldNumber::new(16).unwrap().encoded_size(), 2);
+        assert_eq!(FieldNumber::try_new(16).unwrap().encoded_size(), 2);
 
         // Field 100: (100 << 3) | 7 = 800 | 7 = 807 (2 bytes)
-        assert_eq!(FieldNumber::new(100).unwrap().encoded_size(), 2);
+        assert_eq!(FieldNumber::try_new(100).unwrap().encoded_size(), 2);
 
         // Field 10000: (10000 << 3) | 7 = 80000 | 7 = 80007 (3 bytes)
-        assert_eq!(FieldNumber::new(10000).unwrap().encoded_size(), 3);
+        assert_eq!(FieldNumber::try_new(10000).unwrap().encoded_size(), 3);
 
         // Field 1000000: (1000000 << 3) | 7 = 8000000 | 7 = 8000007 (4 bytes)
-        assert_eq!(FieldNumber::new(1000000).unwrap().encoded_size(), 4);
+        assert_eq!(FieldNumber::try_new(1000000).unwrap().encoded_size(), 4);
 
         // Field 100000000: (100000000 << 3) | 7 = 800000000 | 7 = 800000007 (5 bytes)
-        assert_eq!(FieldNumber::new(100000000).unwrap().encoded_size(), 5);
+        assert_eq!(FieldNumber::try_new(100000000).unwrap().encoded_size(), 5);
     }
 }
