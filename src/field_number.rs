@@ -1,3 +1,4 @@
+use crate::ProtobufError;
 use std::convert::TryFrom;
 /// A validated Protocol Buffers field number.
 ///
@@ -25,9 +26,9 @@ impl FieldNumber {
     pub const RESERVED_RANGE_END: u32 = 19999;
 
     /// Creates a new field number, validating the range.
-    pub fn try_new(value: u32) -> Result<Self, FieldNumberError> {
+    pub fn try_new(value: u32) -> Result<Self, ProtobufError> {
         if value < Self::MIN.0 || value > Self::MAX.0 {
-            return Err(FieldNumberError::OutOfRange(value));
+            return Err(ProtobufError::FieldNumberOutOfRange { value });
         }
         Ok(Self(value))
     }
@@ -77,7 +78,7 @@ impl FieldNumber {
 }
 
 impl TryFrom<u32> for FieldNumber {
-    type Error = FieldNumberError;
+    type Error = ProtobufError;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         Self::try_new(value)
@@ -94,13 +95,6 @@ impl From<FieldNumber> for usize {
     fn from(field_number: FieldNumber) -> Self {
         field_number.0 as usize
     }
-}
-
-/// Error type for field number validation.
-#[derive(Debug, PartialEq, thiserror::Error)]
-pub enum FieldNumberError {
-    #[error("Field number {0} is out of range (must be between 1 and 536870911)")]
-    OutOfRange(u32),
 }
 
 #[cfg(test)]
@@ -128,11 +122,18 @@ mod tests {
 
     #[test]
     fn test_field_number_try_from() {
-        assert_eq!(FieldNumber::try_from(1), Ok(FieldNumber(1)));
-        assert_eq!(
-            FieldNumber::try_from(0),
-            Err(FieldNumberError::OutOfRange(0))
-        );
+        let result = FieldNumber::try_from(1);
+        assert!(result.is_ok());
+        let field_number = result.unwrap();
+        assert_eq!(field_number.as_u32(), 1);
+
+        let result = FieldNumber::try_from(0);
+        assert!(result.is_err());
+        if let Err(ProtobufError::FieldNumberOutOfRange { value }) = result {
+            assert_eq!(value, 0);
+        } else {
+            panic!("Expected FieldNumberOutOfRange error");
+        }
     }
 
     #[test]
