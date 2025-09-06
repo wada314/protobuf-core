@@ -26,43 +26,30 @@ impl Tag {
 
     /// Build the encoded tag value
     pub fn to_encoded(self) -> u32 {
-        build_tag(self.field_number, self.wire_type)
+        (Into::<u32>::into(self.field_number) << FIELD_NUMBER_SHIFT) | (self.wire_type as u32)
     }
 
     /// Parse a tag from an encoded value
     pub fn from_encoded(encoded: u32) -> Result<Self> {
-        let (field_number, wire_type) = parse_tag(encoded)?;
+        let field_number_value = encoded >> FIELD_NUMBER_SHIFT;
+        let wire_type_value = encoded & WIRE_TYPE_MASK;
+
+        // Create field number (this should succeed since we already validated the range)
+        let field_number = FieldNumber::new(field_number_value).map_err(|_| {
+            ProtobufError::FieldNumberOutOfRange {
+                value: field_number_value,
+            }
+        })?;
+
+        // Parse wire type
+        let wire_type = WireType::try_from(wire_type_value as u8).map_err(|_| {
+            ProtobufError::InvalidWireType {
+                value: wire_type_value as u8,
+            }
+        })?;
+
         Ok(Self::new(field_number, wire_type))
     }
-}
-
-/// Build a tag from field number and wire type.
-///
-/// The tag is encoded as: (field_number << 3) | wire_type
-pub fn build_tag(field_number: FieldNumber, wire_type: WireType) -> u32 {
-    (Into::<u32>::into(field_number) << FIELD_NUMBER_SHIFT) | (wire_type as u32)
-}
-
-/// Parse a tag into field number and wire type.
-///
-/// Returns an error if the field number or wire type is invalid.
-pub fn parse_tag(tag: u32) -> Result<(FieldNumber, WireType)> {
-    let field_number_value = tag >> FIELD_NUMBER_SHIFT;
-    let wire_type_value = tag & WIRE_TYPE_MASK;
-
-    // Create field number (this should succeed since we already validated the range)
-    let field_number =
-        FieldNumber::new(field_number_value).map_err(|_| ProtobufError::FieldNumberOutOfRange {
-            value: field_number_value,
-        })?;
-
-    // Parse wire type
-    let wire_type =
-        WireType::try_from(wire_type_value as u8).map_err(|_| ProtobufError::InvalidWireType {
-            value: wire_type_value as u8,
-        })?;
-
-    Ok((field_number, wire_type))
 }
 
 /// Read a tag from a byte iterator.
@@ -94,11 +81,12 @@ mod tests {
     fn test_tag_build_and_parse() {
         let field_number = FieldNumber::new(1).unwrap();
         let wire_type = WireType::Varint;
-        let tag = build_tag(field_number, wire_type);
+        let tag = Tag::new(field_number, wire_type);
 
-        let (parsed_field, parsed_wire_type) = parse_tag(tag).unwrap();
-        assert_eq!(parsed_field, field_number);
-        assert_eq!(parsed_wire_type, wire_type);
+        let encoded = tag.to_encoded();
+        let parsed_tag = Tag::from_encoded(encoded).unwrap();
+        assert_eq!(parsed_tag.field_number, field_number);
+        assert_eq!(parsed_tag.wire_type, wire_type);
     }
 
     #[test]
@@ -120,7 +108,7 @@ mod tests {
     fn test_parse_tag_invalid_field_number() {
         // Test with field number 0 (invalid)
         let tag = 0; // field_number = 0, wire_type = 0
-        let result = parse_tag(tag);
+        let result = Tag::from_encoded(tag);
         assert!(result.is_err());
 
         if let Err(ProtobufError::FieldNumberOutOfRange { value }) = result {
@@ -134,7 +122,7 @@ mod tests {
     fn test_parse_tag_invalid_wire_type() {
         // Test with invalid wire type 6
         let tag = (1 << 3) | 6; // field_number = 1, wire_type = 6
-        let result = parse_tag(tag);
+        let result = Tag::from_encoded(tag);
         assert!(result.is_err());
 
         if let Err(ProtobufError::InvalidWireType { value }) = result {
