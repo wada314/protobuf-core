@@ -292,91 +292,6 @@ where
     Ok(Some(Variant::new(result_bytes)))
 }
 
-/// Read a variant from a Read instance.
-///
-/// Returns the Variant if successfully read.
-/// Returns `Ok(None)` if no input is available (EOF).
-/// Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
-///
-/// # Error Cases
-/// This function has two distinct failure scenarios:
-/// 1. **No input available**: EOF reached → `Ok(None)`
-/// 2. **Input too long**: The variant exceeds MAX_VARINT_SIZE bytes → `Err(VariantError::TooLong)`
-/// 3. **I/O error**: Read operation failed → `Err(ProtobufError::IoError)`
-///
-/// The `Result<Option<T>, E>` pattern clearly distinguishes between:
-/// - Successful reads with data: `Ok(Some(Variant))`
-/// - No data available: `Ok(None)`
-/// - Error conditions: `Err(VariantError)`
-pub fn read_variant<R>(reader: &mut R) -> Result<Option<Variant>>
-where
-    R: ::std::io::Read,
-{
-    let mut decoded_value = 0u64;
-    let mut shift = 0;
-    let mut buffer = [0u8; 1];
-
-    for _ in 0..MAX_VARINT_SIZE {
-        let n = reader.read(&mut buffer)?;
-        if n == 0 {
-            return Ok(None); // EOF
-        }
-
-        let byte = buffer[0];
-        let value = (byte & 0x7F) as u64;
-        decoded_value |= value << shift;
-
-        if byte & 0x80 == 0 {
-            break;
-        }
-        shift += 7;
-    }
-
-    let result_bytes = decoded_value.to_le_bytes();
-    Ok(Some(Variant::new(result_bytes)))
-}
-
-/// Write a variant to a writer.
-///
-/// Encodes a Variant as a varint and writes it to the provided writer.
-/// Returns the number of bytes written on success.
-///
-/// # Arguments
-/// * `writer` - The writer to write the encoded varint to
-/// * `value` - The Variant to encode
-///
-/// # Returns
-/// * `Ok(usize)` - Number of bytes written
-/// * `Err(::std::io::Error)` - I/O error from the writer
-///
-/// # Example
-/// ```
-/// use ::std::io::Write;
-/// use protobuf_core::variant::{write_variant, Variant};
-///
-/// let variant = Variant::new([150, 0, 0, 0, 0, 0, 0, 0]);
-/// let mut buffer = Vec::new();
-/// write_variant(&mut buffer, &variant).unwrap();
-/// assert_eq!(buffer, vec![0x96, 0x01]);
-/// ```
-///
-/// # Implementation Notes
-/// This implementation uses encode_variant internally for efficiency,
-/// then writes all bytes at once to the writer. This approach:
-/// - Avoids multiple write operations
-/// - Leverages the optimized encode_variant function
-/// - Maintains compatibility with ::std::io::Write trait
-/// - Provides type consistency with read_variant
-pub fn write_variant<W>(writer: &mut W, value: &Variant) -> ::std::io::Result<usize>
-where
-    W: ::std::io::Write,
-{
-    let u64_value = value.to_uint64();
-    let (bytes, count) = encode_variant(u64_value);
-    writer.write_all(&bytes[..count])?;
-    Ok(count)
-}
-
 /// Encode a variant and return the bytes with count.
 ///
 /// Returns a tuple of (bytes, count) where:
@@ -442,6 +357,13 @@ pub trait ReadExtVariant {
     /// Returns the Variant if successfully read.
     /// Returns `Ok(None)` if no input is available (EOF).
     /// Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
+    /// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
+    ///
+    /// # Error Cases
+    /// This method has three distinct failure scenarios:
+    /// 1. **No input available**: EOF reached → `Ok(None)`
+    /// 2. **Input too long**: The variant exceeds MAX_VARINT_SIZE bytes → `Err(VariantError::TooLong)`
+    /// 3. **I/O error**: Read operation failed → `Err(ProtobufError::IoError)`
     fn read_variant(&mut self) -> Result<Option<Variant>>;
 }
 
@@ -450,7 +372,28 @@ where
     R: ::std::io::Read,
 {
     fn read_variant(&mut self) -> Result<Option<Variant>> {
-        read_variant(self)
+        let mut decoded_value = 0u64;
+        let mut shift = 0;
+        let mut buffer = [0u8; 1];
+
+        for _ in 0..MAX_VARINT_SIZE {
+            let n = self.read(&mut buffer)?;
+            if n == 0 {
+                return Ok(None); // EOF
+            }
+
+            let byte = buffer[0];
+            let value = (byte & 0x7F) as u64;
+            decoded_value |= value << shift;
+
+            if byte & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+        }
+
+        let result_bytes = decoded_value.to_le_bytes();
+        Ok(Some(Variant::new(result_bytes)))
     }
 }
 
@@ -474,6 +417,25 @@ pub trait WriteExtVariant {
     ///
     /// Encodes a Variant as a varint and writes it to this writer.
     /// Returns the number of bytes written on success.
+    ///
+    /// # Arguments
+    /// * `value` - The Variant to encode and write
+    ///
+    /// # Returns
+    /// * `Ok(usize)` - Number of bytes written
+    /// * `Err(::std::io::Error)` - I/O error from the writer
+    ///
+    /// # Example
+    /// ```
+    /// use std::io::Write;
+    /// use protobuf_core::variant::{WriteExtVariant, Variant};
+    ///
+    /// let variant = Variant::from_uint64(150);
+    /// let mut buffer = Vec::new();
+    /// let bytes_written = buffer.write_variant(&variant).unwrap();
+    /// assert_eq!(bytes_written, 2);
+    /// assert_eq!(buffer, vec![0x96, 0x01]);
+    /// ```
     fn write_variant(&mut self, value: &Variant) -> ::std::io::Result<usize>;
 }
 
@@ -482,7 +444,10 @@ where
     W: ::std::io::Write,
 {
     fn write_variant(&mut self, value: &Variant) -> ::std::io::Result<usize> {
-        write_variant(self, value)
+        let u64_value = value.to_uint64();
+        let (bytes, count) = encode_variant(u64_value);
+        self.write_all(&bytes[..count])?;
+        Ok(count)
     }
 }
 
@@ -549,7 +514,7 @@ mod tests {
         use ::std::io::Cursor;
         let input = [0x96, 0x01];
         let mut reader = Cursor::new(input);
-        let variant = read_variant(&mut reader).unwrap().unwrap();
+        let variant = reader.read_variant().unwrap().unwrap();
 
         assert_eq!(variant.to_uint64(), 150);
     }
@@ -579,34 +544,34 @@ mod tests {
         // Test encoding small values
         let variant = Variant::debug_from_u64(150);
         let mut buffer = Vec::new();
-        let bytes_written = write_variant(&mut buffer, &variant).unwrap();
+        let bytes_written = buffer.write_variant(&variant).unwrap();
         assert_eq!(bytes_written, 2);
         assert_eq!(buffer, vec![0x96, 0x01]);
 
         // Test encoding single-byte values
         let variant = Variant::debug_from_u64(127);
         let mut buffer = Vec::new();
-        let bytes_written = write_variant(&mut buffer, &variant).unwrap();
+        let bytes_written = buffer.write_variant(&variant).unwrap();
         assert_eq!(bytes_written, 1);
         assert_eq!(buffer, vec![0x7F]);
 
         // Test encoding zero
         let variant = Variant::debug_from_u64(0);
         let mut buffer = Vec::new();
-        let bytes_written = write_variant(&mut buffer, &variant).unwrap();
+        let bytes_written = buffer.write_variant(&variant).unwrap();
         assert_eq!(bytes_written, 1);
         assert_eq!(buffer, vec![0x00]);
 
         // Test encoding large values
         let variant = Variant::debug_from_u64(0x7FFFFFFFFFFFFFFF);
         let mut buffer = Vec::new();
-        let bytes_written = write_variant(&mut buffer, &variant).unwrap();
+        let bytes_written = buffer.write_variant(&variant).unwrap();
         assert_eq!(bytes_written, 9); // 9-byte varint
 
         // Test encoding maximum varint (10 bytes)
         let variant = Variant::debug_from_u64(0xFFFFFFFFFFFFFFFF);
         let mut buffer = Vec::new();
-        let bytes_written = write_variant(&mut buffer, &variant).unwrap();
+        let bytes_written = buffer.write_variant(&variant).unwrap();
         assert_eq!(bytes_written, 10); // Maximum varint size
     }
 
@@ -619,7 +584,7 @@ mod tests {
             let variant = Variant::debug_from_u64(value);
 
             let mut buffer = Vec::new();
-            write_variant(&mut buffer, &variant).unwrap();
+            buffer.write_variant(&variant).unwrap();
 
             let mut iter = buffer.iter().copied();
             let decoded_variant = read_variant_from_iterator(&mut iter).unwrap().unwrap();
@@ -675,7 +640,7 @@ mod tests {
             let variant = Variant::debug_from_u64(value);
 
             let mut vec_buffer = Vec::new();
-            let vec_count = write_variant(&mut vec_buffer, &variant).unwrap();
+            let vec_count = vec_buffer.write_variant(&variant).unwrap();
 
             // Both methods should produce the same result
             assert_eq!(array_count, vec_count);

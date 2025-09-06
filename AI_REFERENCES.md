@@ -107,19 +107,19 @@ This project aims to create a **language-neutral protobuf utility library** that
    - **Benefits**: Clearer namespace hierarchy, better maintainability, follows modern Rust practices
 
 7. **Enhanced Variant I/O API** (`src/variant.rs`)
-   - **Dual API Design**: 
-     - `read_variant()` - for `std::io::Read` instances (primary API)
-     - `read_variant_from_iterator()` - for `Iterator<Item = u8>` (legacy support)
-   - **Extension Traits**:
+   - **Extension Traits Only Design**: 
      - `ReadExtVariant` - adds `read_variant()` method to any `std::io::Read` type
      - `WriteExtVariant` - adds `write_variant()` method to any `std::io::Write` type
+     - `read_variant_from_iterator()` - standalone function for `Iterator<Item = u8>` (legacy support)
    - **Benefits**:
      - Natural API: `reader.read_variant()` and `writer.write_variant(&variant)`
      - Backward compatibility: existing iterator-based code continues to work
      - Performance: efficient 1-byte reads from buffered readers
      - Consistency: follows Rust standard library patterns
+     - Clean separation: I/O operations are extension methods, core logic remains as functions
    - **Error Handling**: Added `ProtobufError::IoError` variant for I/O errors
    - **Comprehensive Testing**: All APIs tested with both unit tests and doc tests
+   - **API Simplification**: Removed standalone `read_variant()` and `write_variant()` functions in favor of extension traits
 
 ### 🔄 Next Steps
 7. **Enhanced error types** - Expand error handling for additional protobuf operations
