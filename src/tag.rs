@@ -5,7 +5,7 @@
 
 use crate::field_number::FieldNumber;
 use crate::wire_format::{WireType, FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK};
-use crate::{ProtobufError, Result};
+use crate::Result;
 use ::std::convert::TryFrom;
 
 /// A protobuf tag containing field number and wire type
@@ -68,6 +68,7 @@ where
 mod tests {
     use super::*;
     use crate::wire_format::WireType;
+    use crate::ProtobufError;
 
     #[test]
     fn test_tag_build_and_parse() {
