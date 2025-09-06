@@ -8,6 +8,34 @@ use crate::wire_format::{WireType, FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK};
 use crate::{ProtobufError, Result};
 use ::std::convert::TryFrom;
 
+/// A protobuf tag containing field number and wire type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tag {
+    pub field_number: FieldNumber,
+    pub wire_type: WireType,
+}
+
+impl Tag {
+    /// Create a new tag from field number and wire type
+    pub fn new(field_number: FieldNumber, wire_type: WireType) -> Self {
+        Self {
+            field_number,
+            wire_type,
+        }
+    }
+
+    /// Build the encoded tag value
+    pub fn to_encoded(self) -> u32 {
+        build_tag(self.field_number, self.wire_type)
+    }
+
+    /// Parse a tag from an encoded value
+    pub fn from_encoded(encoded: u32) -> Result<Self> {
+        let (field_number, wire_type) = parse_tag(encoded)?;
+        Ok(Self::new(field_number, wire_type))
+    }
+}
+
 /// Build a tag from field number and wire type.
 ///
 /// The tag is encoded as: (field_number << 3) | wire_type
@@ -39,10 +67,10 @@ pub fn parse_tag(tag: u32) -> Result<(FieldNumber, WireType)> {
 
 /// Read a tag from a byte iterator.
 ///
-/// Returns the field number and wire type.
+/// Returns the tag containing field number and wire type.
 /// Returns `Ok(None)` if no input is available.
 /// Returns `Err(ProtobufError)` if the tag is malformed.
-pub fn read_tag<I>(iter: &mut I) -> Result<Option<(FieldNumber, WireType)>>
+pub fn read_tag<I>(iter: &mut I) -> Result<Option<Tag>>
 where
     I: Iterator<Item = u8>,
 {
@@ -53,8 +81,8 @@ where
         return Ok(None);
     };
     let tag_value = variant.to_uint32()?;
-    let (field_number, wire_type) = parse_tag(tag_value)?;
-    Ok(Some((field_number, wire_type)))
+    let tag = Tag::from_encoded(tag_value)?;
+    Ok(Some(tag))
 }
 
 #[cfg(test)]
@@ -71,6 +99,21 @@ mod tests {
         let (parsed_field, parsed_wire_type) = parse_tag(tag).unwrap();
         assert_eq!(parsed_field, field_number);
         assert_eq!(parsed_wire_type, wire_type);
+    }
+
+    #[test]
+    fn test_tag_struct() {
+        let field_number = FieldNumber::new(1).unwrap();
+        let wire_type = WireType::Varint;
+        let tag = Tag::new(field_number, wire_type);
+
+        assert_eq!(tag.field_number, field_number);
+        assert_eq!(tag.wire_type, wire_type);
+
+        // Test encoding and decoding
+        let encoded = tag.to_encoded();
+        let decoded = Tag::from_encoded(encoded).unwrap();
+        assert_eq!(decoded, tag);
     }
 
     #[test]
@@ -105,9 +148,9 @@ mod tests {
     fn test_read_tag() {
         let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
         let mut iter = bytes.into_iter();
-        let (field_number, wire_type) = read_tag(&mut iter).unwrap().unwrap();
-        assert_eq!(field_number, FieldNumber::new(1).unwrap());
-        assert_eq!(wire_type, WireType::Varint);
+        let tag = read_tag(&mut iter).unwrap().unwrap();
+        assert_eq!(tag.field_number, FieldNumber::new(1).unwrap());
+        assert_eq!(tag.wire_type, WireType::Varint);
     }
 
     #[test]
