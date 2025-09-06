@@ -4,33 +4,33 @@
 //! and plugin.proto, along with basic encoding/decoding capabilities.
 
 use crate::{ProtobufError, Result};
-use derive_from::From;
+use derive_more::From;
 use std::io::{Read, Write};
 
 // Protobuf integer types (wrapped for type safety)
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbInt32(i32);
+pub struct PbInt32(pub i32);
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbInt64(i64);
+pub struct PbInt64(pub i64);
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbUInt32(u32);
+pub struct PbUInt32(pub u32);
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbUInt64(u64);
+pub struct PbUInt64(pub u64);
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbSInt32(i32);
+pub struct PbSInt32(pub i32);
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, From)]
-pub struct PbSInt64(i64);
+pub struct PbSInt64(pub i64);
 
 /// Field labels for protobuf fields (cardinality)
 #[derive(Debug, Clone, PartialEq)]
@@ -136,7 +136,7 @@ pub struct MessageMetadata {
 /// Basic trait for descriptor messages that can be encoded/decoded
 pub trait DescriptorMessage {
     /// Calculate the encoded size of this message in bytes
-    fn encoded_size(&self) -> Result<usize, ProtobufError>;
+    fn encoded_size(&self) -> Result<usize>;
 
     /// Encode this message to the given writer
     fn encode(&self, writer: &mut dyn Write) -> Result<usize>;
@@ -147,7 +147,7 @@ pub trait DescriptorMessage {
 
 // Common implementation for all types that have metadata
 impl<T: HasMetadata> DescriptorMessage for T {
-    fn encoded_size(&self) -> Result<usize, ProtobufError> {
+    fn encoded_size(&self) -> Result<usize> {
         let metadata = Self::metadata();
         let mut total_size = 0;
 
@@ -173,11 +173,11 @@ impl<T: HasMetadata> DescriptorMessage for T {
         Ok(total_size)
     }
 
-    fn encode(&self, writer: &mut dyn Write) -> Result<usize> {
+    fn encode(&self, _writer: &mut dyn Write) -> Result<usize> {
         todo!("Implement encode using metadata")
     }
 
-    fn decode(&mut self, reader: &mut dyn Read) -> Result<usize> {
+    fn decode(&mut self, _reader: &mut dyn Read) -> Result<usize> {
         todo!("Implement decode using metadata")
     }
 }
@@ -201,7 +201,7 @@ pub(crate) trait HasMetadata: 'static {
 
 /// Calculate the size of a varint value in bytes using our common Variant implementation
 fn varint_size(value: u64) -> usize {
-    let variant: crate::variant::Variant = crate::PbUInt64::from(value).into();
+    let variant: crate::variant::Variant = PbUInt64::from(value).into();
     variant.varint_size()
 }
 
@@ -210,8 +210,8 @@ fn calculate_scalar_field_size<T: 'static>(
     value: &dyn std::any::Any,
     is_repeated: bool,
     scalar_type_name: &'static str,
-    size_calculator: impl Fn(T) -> usize,
-) -> Result<usize, ProtobufError> {
+    size_calculator: impl Fn(&T) -> usize,
+) -> Result<usize> {
     if is_repeated {
         let vec_type_name = format!("Vec<{}>", scalar_type_name);
         let vec = value
@@ -219,9 +219,9 @@ fn calculate_scalar_field_size<T: 'static>(
             .ok_or(ProtobufError::FieldTypeDowncastError {
                 expected_type: vec_type_name,
             })?;
-        Ok(vec.iter().map(|&v| size_calculator(v)).sum())
+        Ok(vec.iter().map(|v| size_calculator(v)).sum())
     } else {
-        let &v = value
+        let v = value
             .downcast_ref::<T>()
             .ok_or(ProtobufError::FieldTypeDowncastError {
                 expected_type: scalar_type_name.to_string(),
@@ -234,27 +234,27 @@ fn calculate_scalar_field_size<T: 'static>(
 fn calculate_field_size(
     field_label: &FieldLabel,
     value_type: &ValueType,
-    wire_type: &crate::wire_format::WireType,
+    _wire_type: &crate::wire_format::WireType,
     value: &dyn std::any::Any,
-) -> Result<usize, ProtobufError> {
+) -> Result<usize> {
     use crate::variant::Variant;
 
     let is_repeated = matches!(field_label, FieldLabel::Repeated);
 
     match value_type {
-        ValueType::Int32 => calculate_scalar_field_size(value, is_repeated, "i32", |v| {
+        ValueType::Int32 => calculate_scalar_field_size(value, is_repeated, "i32", |v: &i32| {
             let variant: Variant = v.into();
             variant.varint_size()
         }),
-        ValueType::Int64 => calculate_scalar_field_size(value, is_repeated, "i64", |v| {
+        ValueType::Int64 => calculate_scalar_field_size(value, is_repeated, "i64", |v: &i64| {
             let variant: Variant = v.into();
             variant.varint_size()
         }),
-        ValueType::UInt32 => calculate_scalar_field_size(value, is_repeated, "u32", |v| {
+        ValueType::UInt32 => calculate_scalar_field_size(value, is_repeated, "u32", |v: &u32| {
             let variant: Variant = v.into();
             variant.varint_size()
         }),
-        ValueType::UInt64 => calculate_scalar_field_size(value, is_repeated, "u64", |v| {
+        ValueType::UInt64 => calculate_scalar_field_size(value, is_repeated, "u64", |v: &u64| {
             let variant: Variant = v.into();
             variant.varint_size()
         }),
@@ -263,23 +263,27 @@ fn calculate_field_size(
                 value,
                 is_repeated,
                 "bool",
-                |_| 1, // Each bool is 1 byte in varint encoding
+                |_: &bool| 1, // Each bool is 1 byte in varint encoding
             )
         }
-        ValueType::String => calculate_scalar_field_size(value, is_repeated, "String", |s| {
-            let str_len = s.len();
-            varint_size(str_len as u64) + str_len
-        }),
-        ValueType::Bytes => calculate_scalar_field_size(value, is_repeated, "Vec<u8>", |bytes| {
-            let bytes_len = bytes.len();
-            varint_size(bytes_len as u64) + bytes_len
-        }),
+        ValueType::String => {
+            calculate_scalar_field_size(value, is_repeated, "String", |s: &String| {
+                let str_len = s.len();
+                varint_size(str_len as u64) + str_len
+            })
+        }
+        ValueType::Bytes => {
+            calculate_scalar_field_size(value, is_repeated, "Vec<u8>", |bytes: &Vec<u8>| {
+                let bytes_len = bytes.len();
+                varint_size(bytes_len as u64) + bytes_len
+            })
+        }
         ValueType::Float => {
             calculate_scalar_field_size(
                 value,
                 is_repeated,
                 "f32",
-                |_| 4, // Each f32 is 4 bytes
+                |_: &f32| 4, // Each f32 is 4 bytes
             )
         }
         ValueType::Double => {
@@ -287,10 +291,10 @@ fn calculate_field_size(
                 value,
                 is_repeated,
                 "f64",
-                |_| 8, // Each f64 is 8 bytes
+                |_: &f64| 8, // Each f64 is 8 bytes
             )
         }
-        ValueType::Enum(_) => calculate_scalar_field_size(value, is_repeated, "i32", |v| {
+        ValueType::Enum(_) => calculate_scalar_field_size(value, is_repeated, "i32", |v: &i32| {
             let variant: Variant = v.into();
             variant.varint_size()
         }),
@@ -307,7 +311,7 @@ fn calculate_field_size(
                         let message_size = message.encoded_size()?;
                         Ok(varint_size(message_size as u64) + message_size)
                     })
-                    .sum::<Result<usize, _>>()?)
+                    .sum::<Result<usize>>()?)
             } else {
                 let message = value.downcast_ref::<Box<dyn DescriptorMessage>>().ok_or(
                     ProtobufError::FieldTypeDowncastError {

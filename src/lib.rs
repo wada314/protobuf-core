@@ -5,7 +5,6 @@
 
 pub mod descriptor;
 pub mod field_number;
-pub mod google;
 pub mod tag;
 pub mod variant;
 pub mod wire_format;

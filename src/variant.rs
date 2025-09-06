@@ -29,7 +29,7 @@
 //! return `Result<T, VariantError>` to make error handling explicit.
 //! Methods that cannot fail (like `to_uint64` and `to_bool`) return their values directly.
 
-use crate::descriptor::{PbInt32, PbInt64, PbSInt32, PbSInt64, PbUInt32};
+use crate::descriptor::{PbInt32, PbInt64, PbSInt32, PbSInt64, PbUInt32, PbUInt64};
 use crate::wire_format::MAX_VARINT_SIZE;
 use crate::{ProtobufError, Result};
 use std::convert::{From, TryFrom};
@@ -112,14 +112,14 @@ impl From<u64> for Variant {
 
 impl From<PbUInt32> for Variant {
     fn from(value: PbUInt32) -> Self {
-        let bytes = (u32::from(value) as u64).to_le_bytes();
+        let bytes = (value.0 as u64).to_le_bytes();
         Self(bytes)
     }
 }
 
 impl From<PbInt64> for Variant {
     fn from(value: PbInt64) -> Self {
-        let bytes = (i64::from(value) as u64).to_le_bytes();
+        let bytes = (value.0 as u64).to_le_bytes();
         Self(bytes)
     }
 }
@@ -127,7 +127,7 @@ impl From<PbInt64> for Variant {
 impl From<PbSInt64> for Variant {
     fn from(value: PbSInt64) -> Self {
         // Convert to ZigZag encoding
-        let sint64_value = i64::from(value);
+        let sint64_value = value.0;
         let zigzag_value = if sint64_value < 0 {
             ((-sint64_value) as u64) * 2 - 1
         } else {
@@ -156,7 +156,7 @@ impl TryFrom<Variant> for PbUInt32 {
                 value,
                 target_type: "u32",
             })
-            .map(PbUInt32::from)
+            .map(|v| PbUInt32(v))
     }
 }
 
@@ -170,7 +170,7 @@ impl TryFrom<Variant> for PbInt32 {
         if value <= i32::MAX as u64 {
             // Positive value: upper 4 bytes should be 0
             if (value >> 32) == 0 {
-                Ok(PbInt32::from(value as i32))
+                Ok(PbInt32(value as i32))
             } else {
                 Err(ProtobufError::VariantDowncastOutOfRange {
                     value,
@@ -180,7 +180,7 @@ impl TryFrom<Variant> for PbInt32 {
         } else if value >= (i32::MIN as u64) {
             // Negative value: upper 4 bytes should be 0xFFFFFFFF
             if (value >> 32) == 0xFFFFFFFF {
-                Ok(PbInt32::from(value as i32))
+                Ok(PbInt32(value as i32))
             } else {
                 Err(ProtobufError::VariantDowncastOutOfRange {
                     value,
@@ -201,20 +201,20 @@ impl TryFrom<Variant> for PbSInt32 {
 
     fn try_from(variant: Variant) -> Result<Self> {
         let sint64: PbSInt64 = variant.into();
-        let sint64_value = i64::from(sint64);
+        let sint64_value = sint64.0;
         i32::try_from(sint64_value)
             .map_err(|_| ProtobufError::VariantDowncastOutOfRange {
                 value: sint64_value as u64,
                 target_type: "i32",
             })
-            .map(PbSInt32::from)
+            .map(|v| PbSInt32(v))
     }
 }
 
 impl From<Variant> for PbInt64 {
     fn from(variant: Variant) -> Self {
         // Interpret all 8 bytes as i64 (little-endian)
-        PbInt64::from(i64::from_le_bytes(variant.0))
+        PbInt64(i64::from_le_bytes(variant.0))
     }
 }
 
@@ -222,7 +222,7 @@ impl From<Variant> for PbSInt64 {
     fn from(variant: Variant) -> Self {
         let value = variant.to_uint64();
         let sint64_value = ((value >> 1) as i64) ^ (-((value & 1) as i64));
-        PbSInt64::from(sint64_value)
+        PbSInt64(sint64_value)
     }
 }
 
@@ -621,5 +621,62 @@ mod tests {
         let variant: Variant = original.into();
         let converted: bool = variant.try_into().unwrap();
         assert_eq!(converted, original);
+    }
+}
+
+// Additional From implementations for basic integer types
+impl From<i32> for Variant {
+    fn from(value: i32) -> Self {
+        let bytes = (value as u64).to_le_bytes();
+        Self(bytes)
+    }
+}
+
+impl From<u32> for Variant {
+    fn from(value: u32) -> Self {
+        let bytes = (value as u64).to_le_bytes();
+        Self(bytes)
+    }
+}
+
+impl From<i64> for Variant {
+    fn from(value: i64) -> Self {
+        let bytes = (value as u64).to_le_bytes();
+        Self(bytes)
+    }
+}
+
+impl From<PbUInt64> for Variant {
+    fn from(value: PbUInt64) -> Self {
+        let bytes = value.0.to_le_bytes();
+        Self(bytes)
+    }
+}
+
+impl From<&i32> for Variant {
+    fn from(value: &i32) -> Self {
+        let bytes = (*value as u64).to_le_bytes();
+        Self(bytes)
+    }
+}
+
+impl From<&i64> for Variant {
+    fn from(value: &i64) -> Self {
+        let bytes = (*value as u64).to_le_bytes();
+        Self(bytes)
+    }
+}
+
+impl From<&u32> for Variant {
+    fn from(value: &u32) -> Self {
+        let bytes = (*value as u64).to_le_bytes();
+        Self(bytes)
+    }
+}
+
+impl From<&u64> for Variant {
+    fn from(value: &u64) -> Self {
+        let bytes = (*value as u64).to_le_bytes();
+        Self(bytes)
     }
 }

@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 thiserror = "1.0"
-derive_from = "0.1"
+derive_more = "0.99"
 
 [features]
 default = ["descriptor-encode", "descriptor-decode"]

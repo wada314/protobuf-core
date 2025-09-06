@@ -63,7 +63,7 @@ where
         return Ok(None);
     };
     let tag_value: crate::descriptor::PbUInt32 = variant.try_into()?;
-    let (field_number, wire_type) = parse_tag(u32::from(tag_value))?;
+    let (field_number, wire_type) = parse_tag(tag_value.0)?;
     Ok(Some((field_number, wire_type)))
 }
 

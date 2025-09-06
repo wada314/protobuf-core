@@ -24,8 +24,13 @@ This project aims to create a **language-neutral protobuf utility library** that
 1. **Wire format constants** - Basic protobuf wire format definitions
 2. **Integer (de)serialization logic** - Core encoding/decoding algorithms
 3. **Minimum error types** - Essential error handling for protobuf operations
-4. **Descriptor.proto and plugin.proto** - Minimal implementations for code generation support
+4. **Basic descriptor structures** - Core types and enums for protobuf descriptors
 5. **Edition support** - Support for different protobuf editions
+
+## Scope Limitations
+- **No protobuf message implementations** - This library focuses on core utilities, not full message implementations
+- **No google.protobuf.* message structures** - These are implementation details that should be handled by specific protobuf libraries
+- **Focus on constants and basic logic** - Primarily provides definitions, enums, and fundamental operations
 
 ## Technical Requirements
 - **Delivery format**: Rust library providing constants and trivial logic
@@ -92,21 +97,15 @@ This project aims to create a **language-neutral protobuf utility library** that
      - Enables consistent error handling across all protobuf operations
      - Makes code more readable with `Result<T>` instead of `Result<T, ProtobufError>`
 
-6. **Protobuf Descriptor Structures** (`src/descriptor/`)
-   - **Module structure**: Organized following protobuf package hierarchy
-     - `google.protobuf` - Core descriptor definitions
-     - `google.protobuf.compiler` - Plugin-related structures
+6. **Protobuf Descriptor Structures** (`src/descriptor.rs`)
    - **Implementation approach**: Constant-based wrapped i32 types (see design decisions below)
    - **Coverage**: Basic structure outlines for descriptor.proto and plugin.proto
    - **Status**: Skeleton structures completed, field implementation pending
 
-7. **Enum to Constant-Based Wrapped i32 Types Conversion** (`src/descriptor/`)
+7. **Enum to Constant-Based Wrapped i32 Types Conversion** (`src/descriptor.rs`)
    - **Complete conversion**: All protobuf enums converted from Rust enums to constant-based wrapped i32 types
    - **Files updated**:
      - `descriptor.rs`: 18 enum types converted (Edition, FieldType, FieldLabel, OptimizeMode, CType, JSType, OptionRetention, OptionTargetType, SymbolVisibility, FieldPresence, EnumType, RepeatedFieldEncoding, Utf8Validation, MessageEncoding, JsonFormat, EnforceNamingStyle, DefaultSymbolVisibility, IdempotencyLevel, Semantic)
-     - `plugin.rs`: Feature enum converted
-     - `feature_set.rs`: DefaultSymbolVisibility enum converted
-     - `extension_range_options.rs`: VerificationState enum converted
    - **Implementation pattern**:
      ```rust
      #[repr(transparent)]
@@ -137,11 +136,8 @@ This project aims to create a **language-neutral protobuf utility library** that
 
 9. **Module Structure Refactoring**
    - **Transition from mod.rs**: Stopped using legacy `mod.rs` files, adopted modern `<module-name>.rs` approach
-   - **Google namespace reorganization**: Moved `google/` directory to root level for better logical structure
    - **File organization**: 
      - `src/descriptor.rs` - descriptor traits and utilities
-     - `src/google/protobuf/` - protobuf package structures
-     - `src/google/protobuf/compiler/` - plugin-related structures
    - **Benefits**: Clearer namespace hierarchy, better maintainability, follows modern Rust practices
 
 10. **Feature Flag Implementation**
@@ -154,10 +150,10 @@ This project aims to create a **language-neutral protobuf utility library** that
     - **Benefits**: Users get basic functionality without additional configuration, while maintaining optional advanced features
 
 ### 🔄 Next Steps
-11. **Protobuf Message Implementation Design** - Design and implement message structures with proper encapsulation
-12. **Add fields to descriptor structures** 
-13. **Minimum error types** - Essential error handling for protobuf operations
-14. **Descriptor.proto and plugin.proto** - Complete implementations for code generation support
+11. **Add fields to descriptor structures** - Complete the basic descriptor type definitions
+12. **Enhanced error types** - Expand error handling for additional protobuf operations
+13. **Documentation improvements** - Add comprehensive examples and usage guides
+14. **Performance optimizations** - Optimize critical paths if needed
 
 ## Design Decisions
 
