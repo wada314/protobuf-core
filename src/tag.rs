@@ -4,9 +4,7 @@
 //! which combine field numbers with wire types.
 
 use crate::field_number::FieldNumber;
-use crate::wire_format::{
-    WireType, FIELD_NUMBER_SHIFT, MAX_FIELD_NUMBER, MIN_FIELD_NUMBER, WIRE_TYPE_MASK,
-};
+use crate::wire_format::{WireType, FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK};
 use crate::{ProtobufError, Result};
 use ::std::convert::TryFrom;
 
@@ -14,7 +12,7 @@ use ::std::convert::TryFrom;
 ///
 /// The tag is encoded as: (field_number << 3) | wire_type
 pub fn build_tag(field_number: FieldNumber, wire_type: WireType) -> u32 {
-    (field_number.get() << FIELD_NUMBER_SHIFT) | (wire_type as u32)
+    (Into::<u32>::into(field_number) << FIELD_NUMBER_SHIFT) | (wire_type as u32)
 }
 
 /// Parse a tag into field number and wire type.
@@ -23,14 +21,6 @@ pub fn build_tag(field_number: FieldNumber, wire_type: WireType) -> u32 {
 pub fn parse_tag(tag: u32) -> Result<(FieldNumber, WireType)> {
     let field_number_value = tag >> FIELD_NUMBER_SHIFT;
     let wire_type_value = tag & WIRE_TYPE_MASK;
-
-    // Check field number range
-    if field_number_value < MIN_FIELD_NUMBER.get() || field_number_value > MAX_FIELD_NUMBER.get() {
-        return Err(ProtobufError::MalformedTag {
-            field_number: field_number_value,
-            wire_type: wire_type_value as u8,
-        });
-    }
 
     // Create field number (this should succeed since we already validated the range)
     let field_number =

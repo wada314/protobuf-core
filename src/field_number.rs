@@ -142,34 +142,23 @@ mod tests {
     }
 
     #[test]
-    fn test_tag_encoded_size() {
+    fn test_encoded_size() {
         // Field 1: (1 << 3) | 7 = 8 | 7 = 15 (1 byte)
-        assert_eq!(FieldNumber::new(1).unwrap().tag_encoded_size(), 1);
+        assert_eq!(FieldNumber::new(1).unwrap().encoded_size(), 1);
 
         // Field 16: (16 << 3) | 7 = 128 | 7 = 135 (2 bytes)
-        assert_eq!(FieldNumber::new(16).unwrap().tag_encoded_size(), 2);
+        assert_eq!(FieldNumber::new(16).unwrap().encoded_size(), 2);
 
         // Field 100: (100 << 3) | 7 = 800 | 7 = 807 (2 bytes)
-        assert_eq!(FieldNumber::new(100).unwrap().tag_encoded_size(), 2);
+        assert_eq!(FieldNumber::new(100).unwrap().encoded_size(), 2);
 
         // Field 10000: (10000 << 3) | 7 = 80000 | 7 = 80007 (3 bytes)
-        assert_eq!(FieldNumber::new(10000).unwrap().tag_encoded_size(), 3);
+        assert_eq!(FieldNumber::new(10000).unwrap().encoded_size(), 3);
 
         // Field 1000000: (1000000 << 3) | 7 = 8000000 | 7 = 8000007 (4 bytes)
-        assert_eq!(FieldNumber::new(1000000).unwrap().tag_encoded_size(), 4);
+        assert_eq!(FieldNumber::new(1000000).unwrap().encoded_size(), 4);
 
         // Field 100000000: (100000000 << 3) | 7 = 800000000 | 7 = 800000007 (5 bytes)
-        assert_eq!(FieldNumber::new(100000000).unwrap().tag_encoded_size(), 5);
-    }
-
-    #[test]
-    fn test_encoded_size() {
-        // These are the sizes for field numbers alone (without wire type)
-        assert_eq!(FieldNumber::new(1).unwrap().encoded_size(), 1);
-        assert_eq!(FieldNumber::new(16).unwrap().encoded_size(), 1);
-        assert_eq!(FieldNumber::new(100).unwrap().encoded_size(), 1); // 100 = 0x64 (7 bits)
-        assert_eq!(FieldNumber::new(10000).unwrap().encoded_size(), 2); // 10000 = 0x2710 (14 bits)
-        assert_eq!(FieldNumber::new(1000000).unwrap().encoded_size(), 3); // 1000000 = 0xF4240 (20 bits)
-        assert_eq!(FieldNumber::new(100000000).unwrap().encoded_size(), 4); // 100000000 = 0x5F5E100 (27 bits)
+        assert_eq!(FieldNumber::new(100000000).unwrap().encoded_size(), 5);
     }
 }
