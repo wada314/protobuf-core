@@ -34,12 +34,8 @@ impl Tag {
         let field_number_value = encoded >> FIELD_NUMBER_SHIFT;
         let wire_type_value = encoded & WIRE_TYPE_MASK;
 
-        // Create field number (this should succeed since we already validated the range)
-        let field_number = FieldNumber::new(field_number_value).map_err(|_| {
-            ProtobufError::FieldNumberOutOfRange {
-                value: field_number_value,
-            }
-        })?;
+        // Create field number
+        let field_number = FieldNumber::new(field_number_value)?;
 
         // Parse wire type
         let wire_type = WireType::try_from(wire_type_value as u8).map_err(|_| {

@@ -42,3 +42,13 @@ pub enum ProtobufError {
 
 /// Custom Result type for protobuf operations
 pub type Result<T> = std::result::Result<T, ProtobufError>;
+
+impl From<field_number::FieldNumberError> for ProtobufError {
+    fn from(err: field_number::FieldNumberError) -> Self {
+        match err {
+            field_number::FieldNumberError::OutOfRange(value) => {
+                ProtobufError::FieldNumberOutOfRange { value }
+            }
+        }
+    }
+}
