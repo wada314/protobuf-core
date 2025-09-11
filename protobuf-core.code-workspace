@@ -5,6 +5,9 @@
         },
         {
             "path": "../protobuf"
+        },
+        {
+            "path": "../puroro"
         }
     ],
     "settings": {}
