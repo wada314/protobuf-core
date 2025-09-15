@@ -28,7 +28,9 @@ impl FieldNumber {
     /// Creates a new field number, validating the range.
     pub fn try_new(value: u32) -> Result<Self, ProtobufError> {
         if value < Self::MIN.0 || value > Self::MAX.0 {
-            return Err(ProtobufError::FieldNumberOutOfRange { value });
+            return Err(ProtobufError::FieldNumberOutOfRange {
+                value: value.to_string(),
+            });
         }
         Ok(Self(value))
     }
@@ -91,6 +93,20 @@ impl From<FieldNumber> for u32 {
     }
 }
 
+impl TryFrom<i32> for FieldNumber {
+    type Error = ProtobufError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        Self::try_new(
+            value
+                .try_into()
+                .map_err(|_| ProtobufError::FieldNumberOutOfRange {
+                    value: value.to_string(),
+                })?,
+        )
+    }
+}
+
 impl From<FieldNumber> for usize {
     fn from(field_number: FieldNumber) -> Self {
         field_number.0 as usize
@@ -130,7 +146,7 @@ mod tests {
         let result = FieldNumber::try_from(0);
         assert!(result.is_err());
         if let Err(ProtobufError::FieldNumberOutOfRange { value }) = result {
-            assert_eq!(value, 0);
+            assert_eq!(value, "0");
         } else {
             panic!("Expected FieldNumberOutOfRange error");
         }
