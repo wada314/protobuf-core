@@ -8,6 +8,9 @@
         },
         {
             "path": "../puroro"
+        },
+        {
+            "path": "../protoc-plugin-by-closure"
         }
     ],
     "settings": {}

@@ -50,7 +50,7 @@ where
 {
     use crate::variant::IteratorExtVariant;
 
-    let variant_result = iter.collect_variant()?;
+    let variant_result = iter.try_collect_variant()?;
     let Some(variant) = variant_result else {
         return Ok(None);
     };

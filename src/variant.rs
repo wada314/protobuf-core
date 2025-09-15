@@ -247,32 +247,6 @@ impl Variant {
 
         (bytes, bytes_written)
     }
-
-    // ============================================================================
-    // others
-    // ============================================================================
-
-    /// Create a Variant from a u64 value for debugging and testing purposes.
-    ///
-    /// This method is intended for creating test data and debugging scenarios.
-    /// It converts the u64 value to its little-endian byte representation.
-    ///
-    /// # Safety
-    /// This method is safe but should only be used in debug/test contexts.
-    /// For production code, use `read_variant` to decode actual varint data.
-    ///
-    /// # Example
-    /// ```
-    /// use protobuf_core::variant::Variant;
-    ///
-    /// let variant = Variant::debug_from_u64(150);
-    /// assert_eq!(variant.to_uint64(), 150);
-    /// ```
-    #[cfg(test)]
-    pub fn debug_from_u64(value: u64) -> Self {
-        let bytes = value.to_le_bytes();
-        Self(bytes)
-    }
 }
 
 /// Extension trait for collecting variants from byte iterators.
@@ -292,17 +266,17 @@ impl Variant {
 pub trait IteratorExtVariant {
     /// Collect a variant from this iterator.
     ///
-    /// Returns the Variant if successfully read.
+    /// Returns the Variant `Ok(Some(variant))` if successfully read.
     /// Returns `Ok(None)` if no input is available (empty iterator).
     /// Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
-    fn collect_variant(self) -> Result<Option<Variant>>;
+    fn try_collect_variant(self) -> Result<Option<Variant>>;
 }
 
 impl<I> IteratorExtVariant for I
 where
     I: Iterator<Item = u8>,
 {
-    fn collect_variant(self) -> Result<Option<Variant>> {
+    fn try_collect_variant(self) -> Result<Option<Variant>> {
         let mut bytes_read = 0;
         let mut decoded_value = 0u64;
         let mut shift = 0;
@@ -354,7 +328,7 @@ where
 pub trait ReadExtVariant {
     /// Read a variant from this reader.
     ///
-    /// Returns the Variant if successfully read.
+    /// Returns the Variant `Ok(Some(variant))` if successfully read.
     /// Returns `Ok(None)` if no input is available (EOF).
     /// Returns `Err(VariantError::TooLong)` if the variant exceeds MAX_VARINT_SIZE.
     /// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
@@ -503,7 +477,7 @@ mod tests {
     fn test_read_variant_from_iterator() {
         let input = [0x96, 0x01];
         let iter = input.iter().copied();
-        let variant = iter.collect_variant().unwrap().unwrap();
+        let variant = iter.try_collect_variant().unwrap().unwrap();
 
         assert_eq!(variant.to_uint64(), 150);
     }
@@ -542,7 +516,7 @@ mod tests {
     fn test_iterator_ext_variant_trait() {
         let bytes = vec![0x96, 0x01]; // 150 in varint encoding
         let iter = bytes.into_iter();
-        let variant = iter.collect_variant().unwrap().unwrap();
+        let variant = iter.try_collect_variant().unwrap().unwrap();
 
         assert_eq!(variant.to_uint64(), 150);
     }
@@ -551,7 +525,7 @@ mod tests {
     fn test_iterator_ext_variant_empty() {
         let bytes = vec![];
         let iter = bytes.into_iter();
-        let variant = iter.collect_variant().unwrap();
+        let variant = iter.try_collect_variant().unwrap();
 
         assert_eq!(variant, None);
     }
@@ -559,34 +533,34 @@ mod tests {
     #[test]
     fn test_write_variant() {
         // Test encoding small values
-        let variant = Variant::debug_from_u64(150);
+        let variant = Variant::from_uint64(150);
         let mut buffer = Vec::new();
         let bytes_written = buffer.write_variant(&variant).unwrap();
         assert_eq!(bytes_written, 2);
         assert_eq!(buffer, vec![0x96, 0x01]);
 
         // Test encoding single-byte values
-        let variant = Variant::debug_from_u64(127);
+        let variant = Variant::from_uint64(127);
         let mut buffer = Vec::new();
         let bytes_written = buffer.write_variant(&variant).unwrap();
         assert_eq!(bytes_written, 1);
         assert_eq!(buffer, vec![0x7F]);
 
         // Test encoding zero
-        let variant = Variant::debug_from_u64(0);
+        let variant = Variant::from_uint64(0);
         let mut buffer = Vec::new();
         let bytes_written = buffer.write_variant(&variant).unwrap();
         assert_eq!(bytes_written, 1);
         assert_eq!(buffer, vec![0x00]);
 
         // Test encoding large values
-        let variant = Variant::debug_from_u64(0x7FFFFFFFFFFFFFFF);
+        let variant = Variant::from_uint64(0x7FFFFFFFFFFFFFFF);
         let mut buffer = Vec::new();
         let bytes_written = buffer.write_variant(&variant).unwrap();
         assert_eq!(bytes_written, 9); // 9-byte varint
 
         // Test encoding maximum varint (10 bytes)
-        let variant = Variant::debug_from_u64(0xFFFFFFFFFFFFFFFF);
+        let variant = Variant::from_uint64(0xFFFFFFFFFFFFFFFF);
         let mut buffer = Vec::new();
         let bytes_written = buffer.write_variant(&variant).unwrap();
         assert_eq!(bytes_written, 10); // Maximum varint size
@@ -598,13 +572,13 @@ mod tests {
 
         for &value in &test_values {
             // Create Variant from the test value
-            let variant = Variant::debug_from_u64(value);
+            let variant = Variant::from_uint64(value);
 
             let mut buffer = Vec::new();
             buffer.write_variant(&variant).unwrap();
 
             let iter = buffer.iter().copied();
-            let decoded_variant = iter.collect_variant().unwrap().unwrap();
+            let decoded_variant = iter.try_collect_variant().unwrap().unwrap();
             let decoded_value = decoded_variant.to_uint64();
 
             assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
@@ -656,11 +630,11 @@ mod tests {
 
         for &value in &test_values {
             // Method 1: encode method
-            let variant = Variant::debug_from_u64(value);
+            let variant = Variant::from_uint64(value);
             let (array_bytes, array_count) = variant.encode();
 
             // Method 2: write_variant (std::io::Write)
-            let variant2 = Variant::debug_from_u64(value);
+            let variant2 = Variant::from_uint64(value);
             let mut vec_buffer = Vec::new();
             let vec_count = vec_buffer.write_variant(&variant2).unwrap();
 
@@ -729,7 +703,7 @@ mod tests {
     fn test_roundtrip_conversions() {
         // Test roundtrip for u64
         let original = 150u64;
-        let variant = Variant::debug_from_u64(original);
+        let variant = Variant::from_uint64(original);
         assert_eq!(variant.to_uint64(), original);
 
         // Test roundtrip for u32
