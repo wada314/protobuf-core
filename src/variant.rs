@@ -260,7 +260,7 @@ impl Variant {
 ///
 /// let bytes = vec![0x96, 0x01]; // 150 in varint encoding
 /// let mut iter = bytes.into_iter();
-/// let variant: Option<Variant> = iter.collect_variant().unwrap();
+/// let variant: Option<Variant> = iter.try_collect_variant().unwrap();
 /// assert_eq!(variant.unwrap().to_uint64(), 150);
 /// ```
 pub trait IteratorExtVariant {
