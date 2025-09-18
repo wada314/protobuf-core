@@ -12,13 +12,13 @@ use std::io::Read;
 /// A parsed field value
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue {
-    /// Variable-width integers (int32, int64, uint32, uint64, sint32, sint64, bool, enum)
+    /// Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum)
     Varint(Varint),
-    /// 32-bit fixed-width values (fixed32, sfixed32, float)
+    /// 32-bit fixed-width values (Fixed32, SFixed32, Float)
     I32([u8; 4]),
-    /// 64-bit fixed-width values (fixed64, sfixed64, double)
+    /// 64-bit fixed-width values (Fixed64, SFixed64, Double)
     I64([u8; 8]),
-    /// Length-delimited values (string, bytes, embedded messages, packed repeated fields)
+    /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields)
     Len(Vec<u8>),
 }
 
@@ -40,18 +40,21 @@ pub struct Field {
 /// use std::io::Cursor;
 /// use protobuf_core::parser::{parse_stream, Field, FieldValue};
 ///
-/// let data = vec![0x08, 0x96, 0x01]; // field 1: 150
-/// let reader = Cursor::new(data);
+/// fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let data = vec![0x08, 0x96, 0x01]; // field 1: 150
+///     let reader = Cursor::new(data);
 ///
-/// parse_stream(reader, |field| {
-///     match field.value {
-///         FieldValue::Varint(varint) => {
-///             println!("Field {}: {}", field.tag.field_number.as_u32(), varint.to_uint64());
-///         },
-///         _ => {}
-///     }
+///     parse_stream(reader, |field| {
+///         match field.value {
+///             FieldValue::Varint(varint) => {
+///                 println!("Field {}: {}", field.tag.field_number.as_u32(), varint.to_uint64());
+///             },
+///             _ => {}
+///         }
+///         Ok(())
+///     })?;
 ///     Ok(())
-/// })?;
+/// }
 /// ```
 pub fn parse_stream<R, F>(mut reader: R, mut field_handler: F) -> Result<()>
 where

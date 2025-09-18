@@ -14,17 +14,17 @@ use ::std::convert::TryFrom;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum WireType {
-    /// Variable-width integers (int32, int64, uint32, uint64, sint32, sint64, bool, enum)
+    /// Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum)
     Varint = 0,
-    /// 64-bit fixed-width values (fixed64, sfixed64, double)
+    /// 64-bit fixed-width values (Fixed64, SFixed64, Double)
     I64 = 1,
-    /// Length-delimited values (string, bytes, embedded messages, packed repeated fields)
+    /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields)
     Len = 2,
     /// Start group (deprecated feature)
     SGroup = 3,
     /// End group (deprecated feature)
     EGroup = 4,
-    /// 32-bit fixed-width values (fixed32, sfixed32, float)
+    /// 32-bit fixed-width values (Fixed32, SFixed32, Float)
     I32 = 5,
 }
 
