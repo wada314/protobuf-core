@@ -73,9 +73,8 @@ where
     R: Read,
 {
     // Read tag
-    let tag = match read_tag_from_reader(reader)? {
-        Some(tag) => tag,
-        None => return Ok(None),
+    let Some(tag) = read_tag_from_reader(reader)? else {
+        return Ok(None);
     };
 
     let value = match tag.wire_type {
