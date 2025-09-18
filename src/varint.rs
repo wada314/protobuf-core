@@ -3,42 +3,17 @@
 //! This module provides basic varint operations including encoding, decoding,
 //! and conversion to various protobuf integer types.
 //!
-//! # Implementation Philosophy
-//!
-//! This is a **reference implementation** designed for clarity and educational value.
-//! While functional and correct, it is not optimized for performance. Implementors
-//! are encouraged to:
-//! - Use platform-specific optimizations (e.g., SIMD instructions)
-//! - Replace manual loops with built-in methods where appropriate
-//! - Profile and optimize based on their specific use cases
-//!
-//! # Design Decisions
-//!
-//! ## read_varint function
-//! The function returns the Varint if successfully read.
-//! Returns `Ok(None)` if no input is available (empty iterator).
-//! Returns `Err(VarintError::TooLong)` if the varint exceeds MAX_VARINT_SIZE.
-//!
-//! ## Error Handling Strategy
-//! The read_varint function has two distinct failure scenarios:
-//! 1. **No input available**: The iterator is empty (no bytes to read) → `Ok(None)`
-//! 2. **Input too long**: The varint exceeds MAX_VARINT_SIZE bytes → `Err(VarintError::TooLong)`
-//!
-//! ## Conversion Method Design
-//! Conversion methods that can fail (e.g., when values exceed target type limits)
-//! return `Result<T, VarintError>` to make error handling explicit.
-//! Methods that cannot fail (like `to_uint64` and `to_bool`) return their values directly.
+//! This is a **reference implementation**. Not optimized for performance.
 
 use crate::wire_format::MAX_VARINT_SIZE;
 use crate::{ProtobufError, Result};
 use std::convert::TryFrom;
 use std::io::{Read, Write};
 
-/// A fixed-size array wrapper for varint values.
+/// A deserialized varint value.
 ///
-/// This type represents the intermediate 8-byte value from serialized bytes
-/// to protobuf integer types. It stores the raw bytes and provides conversion
-/// methods to various protobuf integer types.
+/// This type represents the decoded 8-byte value from serialized bytes
+/// to protobuf integer types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Varint([u8; 8]);
 
@@ -63,28 +38,19 @@ impl Varint {
     // from / to protobuf integer types
     // ============================================================================
 
-    /// Create a Varint from an unsigned 64-bit integer (u64).
-    ///
-    /// This method creates a Varint from a u64 value,
-    /// using the same encoding as the protobuf's `UInt64` type.
+    /// Create a Varint from `u64`, assuming `UInt64` protobuf type.
     pub fn from_uint64(value: u64) -> Self {
         let bytes = value.to_le_bytes();
         Self(bytes)
     }
 
-    /// Create a Varint from an unsigned 32-bit integer (u32).
-    ///
-    /// This method creates a Varint from a u32 value,
-    /// using the same encoding as the protobuf's `UInt32` type.
+    /// Create a Varint from `u32`, assuming `UInt32` protobuf type.
     pub fn from_uint32(value: u32) -> Self {
         let bytes = (value as u64).to_le_bytes();
         Self(bytes)
     }
 
-    /// Create a Varint from a signed 64-bit integer (i64) using ZigZag encoding.
-    ///
-    /// This method creates a Varint from an i64 value using ZigZag encoding,
-    /// using the same encoding as the protobuf's `SInt64` type.
+    /// Create a Varint from `i64`, assuming `SInt64` protobuf type.
     pub fn from_sint64(value: i64) -> Self {
         let zigzag_value = if value < 0 {
             ((-value) as u64) * 2 - 1
@@ -95,57 +61,37 @@ impl Varint {
         Self(bytes)
     }
 
-    /// Create a Varint from a signed 32-bit integer (i32) using ZigZag encoding.
-    ///
-    /// This method creates a Varint from an i32 value using ZigZag encoding,
-    /// using the same encoding as the protobuf's `SInt32` type.
+    /// Create a Varint from `i32`, assuming `SInt32` protobuf type.
     pub fn from_sint32(value: i32) -> Self {
         Self::from_sint64(value as i64)
     }
 
-    /// Create a Varint from a signed 64-bit integer (i64) without ZigZag encoding.
-    ///
-    /// This method creates a Varint from an i64 value without ZigZag encoding,
-    /// using the same encoding as the protobuf's `Int64` type.
+    /// Create a Varint from `i64`, assuming `Int64` protobuf type.
     pub fn from_int64(value: i64) -> Self {
         let bytes = (value as u64).to_le_bytes();
         Self(bytes)
     }
 
-    /// Create a Varint from a signed 32-bit integer (i32) without ZigZag encoding.
-    ///
-    /// This method creates a Varint from an i32 value without ZigZag encoding,
-    /// using the same encoding as the protobuf's `Int32` type.
+    /// Create a Varint from `i32`, assuming `Int32` protobuf type.
     pub fn from_int32(value: i32) -> Self {
         let bytes = (value as u64).to_le_bytes();
         Self(bytes)
     }
 
-    /// Create a Varint from a boolean.
-    ///
-    /// This method creates a Varint from a boolean value,
-    /// using the same encoding as the protobuf's `Bool` type.
+    /// Create a Varint from `bool`, assuming `Bool` protobuf type.
     pub fn from_bool(value: bool) -> Self {
         let bytes = (if value { 1u64 } else { 0u64 }).to_le_bytes();
         Self(bytes)
     }
 
-    /// Convert to protobuf UInt64 type (64-bit unsigned integer).
-    ///
-    /// Since the Varint contains the decoded value (not encoded varint),
-    /// this method simply converts the 8-byte array to u64 using little-endian interpretation,
-    /// using the same encoding as the protobuf's `UInt64` type.
+    /// Convert to `u64`, assuming `UInt64` protobuf type.
     pub fn to_uint64(&self) -> u64 {
-        // Use Rust's built-in method to convert bytes to u64
         u64::from_le_bytes(self.0)
     }
 
-    /// Convert to unsigned 32-bit integer (u32).
-    ///
-    /// This method interprets the varint value as an unsigned 32-bit integer,
-    /// using the same encoding as the protobuf's `UInt32` type.
-    /// Returns an error if the value is out of range for u32.
-    pub fn to_uint32(&self) -> Result<u32> {
+    /// Convert to `u32`, assuming `UInt32` protobuf type.
+    /// Returns an error if the value is out of range for `u32`.
+    pub fn try_to_uint32(&self) -> Result<u32> {
         let value = self.to_uint64();
         u32::try_from(value).map_err(|_| ProtobufError::VarintDowncastOutOfRange {
             value,
@@ -153,21 +99,15 @@ impl Varint {
         })
     }
 
-    /// Convert to signed 64-bit integer (i64) using ZigZag decoding.
-    ///
-    /// This method interprets the varint value as a ZigZag-encoded signed 64-bit integer,
-    /// using the same encoding as the protobuf's `SInt64` type.
+    /// Convert to `i64`, assuming `SInt64` protobuf type.
     pub fn to_sint64(&self) -> i64 {
         let value = self.to_uint64();
         ((value >> 1) as i64) ^ (-((value & 1) as i64))
     }
 
-    /// Convert to signed 32-bit integer (i32) using ZigZag decoding.
-    ///
-    /// This method interprets the varint value as a ZigZag-encoded signed 32-bit integer,
-    /// using the same encoding as the protobuf's `SInt32` type.
-    /// Returns an error if the value is out of range for i32.
-    pub fn to_sint32(&self) -> Result<i32> {
+    /// Convert to `i32`, assuming `SInt32` protobuf type.
+    /// Returns an error if the value is out of range for `i32`.
+    pub fn try_to_sint32(&self) -> Result<i32> {
         let sint64_value = self.to_sint64();
         i32::try_from(sint64_value).map_err(|_| ProtobufError::VarintDowncastOutOfRange {
             value: sint64_value as u64,
@@ -175,20 +115,14 @@ impl Varint {
         })
     }
 
-    /// Convert to signed 64-bit integer (i64) without ZigZag decoding.
-    ///
-    /// This method interprets the varint value as a regular signed 64-bit integer,
-    /// using the same encoding as the protobuf's `Int64` type.
+    /// Convert to `i64`, assuming `Int64` protobuf type.
     pub fn to_int64(&self) -> i64 {
         i64::from_le_bytes(self.0)
     }
 
-    /// Convert to signed 32-bit integer (i32) without ZigZag decoding.
-    ///
-    /// This method interprets the varint value as a regular signed 32-bit integer,
-    /// using the same encoding as the protobuf's `Int32` type.
-    /// Returns an error if the value is out of range for i32.
-    pub fn to_int32(&self) -> Result<i32> {
+    /// Convert to `i32`, assuming `Int32` protobuf type.
+    /// Returns an error if the value is out of range for `i32`.
+    pub fn try_to_int32(&self) -> Result<i32> {
         let value = self.to_int64();
         i32::try_from(value).map_err(|_| ProtobufError::VarintDowncastOutOfRange {
             value: value as u64,
@@ -196,11 +130,7 @@ impl Varint {
         })
     }
 
-    /// Convert to boolean.
-    ///
-    /// This method interprets the varint value as a boolean,
-    /// using the same encoding as the protobuf's `Bool` type.
-    /// Returns true if the value is non-zero, false otherwise.
+    /// Convert to `bool`, assuming `Bool` protobuf type.
     pub fn to_bool(&self) -> bool {
         self.to_uint64() != 0
     }
