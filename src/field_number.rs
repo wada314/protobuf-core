@@ -42,12 +42,12 @@ impl FieldNumber {
     }
 
     /// Checks if the field number is in a reserved range.
-    /// Protobuf reserves field numbers 19000-19999.
+    /// Protobuf reserves field numbers 19000-19999, inclusive.
     pub fn is_reserved(&self) -> bool {
         self.0 >= Self::RESERVED_RANGE_START && self.0 <= Self::RESERVED_RANGE_END
     }
 
-    /// Checks if the field number is in a specific range.
+    /// Checks if the field number is in a specific range, inclusive.
     pub fn is_in_range(&self, min: u32, max: u32) -> bool {
         self.0 >= min && self.0 <= max
     }
@@ -68,12 +68,17 @@ impl FieldNumber {
         }
     }
 
-    /// Returns the field number as a u32.
+    /// Returns the field number as a `u32`.
     pub fn as_u32(&self) -> u32 {
         self.0
     }
 
-    /// Returns the field number as a usize.
+    /// Returns the filed number as a `i32`
+    pub fn as_i32(&self) -> i32 {
+        self.0 as i32
+    }
+
+    /// Returns the field number as a `usize`.
     pub fn as_usize(&self) -> usize {
         self.0 as usize
     }
@@ -89,7 +94,7 @@ impl TryFrom<u32> for FieldNumber {
 
 impl From<FieldNumber> for u32 {
     fn from(field_number: FieldNumber) -> Self {
-        field_number.0
+        field_number.as_u32()
     }
 }
 
@@ -107,9 +112,15 @@ impl TryFrom<i32> for FieldNumber {
     }
 }
 
+impl From<FieldNumber> for i32 {
+    fn from(field_number: FieldNumber) -> Self {
+        field_number.as_i32()
+    }
+}
+
 impl From<FieldNumber> for usize {
     fn from(field_number: FieldNumber) -> Self {
-        field_number.0 as usize
+        field_number.as_usize()
     }
 }
 
