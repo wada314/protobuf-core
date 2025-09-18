@@ -5,7 +5,8 @@
 //!
 //! This module is only available when the `parser` feature is enabled.
 
-use crate::tag::{ReadExtTag, Tag};
+use crate::field_number::FieldNumber;
+use crate::tag::ReadExtTag;
 use crate::varint::Varint;
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
@@ -27,7 +28,7 @@ pub enum FieldValue {
 /// A parsed field
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
-    pub tag: Tag,
+    pub field_number: FieldNumber,
     pub value: FieldValue,
 }
 
@@ -49,7 +50,7 @@ pub struct Field {
 ///     parse_stream(reader, |field| {
 ///         match field.value {
 ///             FieldValue::Varint(varint) => {
-///                 println!("Field {}: {}", field.tag.field_number.as_u32(), varint.to_uint64());
+///                 println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
 ///             },
 ///             _ => {}
 ///         }
@@ -110,11 +111,14 @@ where
         _ => {
             return Err(ProtobufError::InvalidWireType {
                 value: tag.wire_type as u8,
-            })
+            });
         }
     };
 
-    Ok(Some(Field { tag, value }))
+    Ok(Some(Field {
+        field_number: tag.field_number,
+        value,
+    }))
 }
 
 #[cfg(test)]
@@ -129,7 +133,7 @@ mod tests {
 
         let mut fields = Vec::new();
         parse_stream(reader, |field| {
-            fields.push((field.tag.field_number.as_u32(), field.value));
+            fields.push((field.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
@@ -152,7 +156,7 @@ mod tests {
 
         let mut fields = Vec::new();
         parse_stream(reader, |field| {
-            fields.push((field.tag.field_number.as_u32(), field.value));
+            fields.push((field.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
@@ -175,7 +179,7 @@ mod tests {
 
         let mut fields = Vec::new();
         parse_stream(reader, |field| {
-            fields.push((field.tag.field_number.as_u32(), field.value));
+            fields.push((field.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
@@ -198,7 +202,7 @@ mod tests {
 
         let mut fields = Vec::new();
         parse_stream(reader, |field| {
-            fields.push((field.tag.field_number.as_u32(), field.value));
+            fields.push((field.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
@@ -224,7 +228,7 @@ mod tests {
 
         let mut fields = Vec::new();
         parse_stream(reader, |field| {
-            fields.push((field.tag.field_number.as_u32(), field.value));
+            fields.push((field.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
@@ -259,7 +263,7 @@ mod tests {
 
         let mut fields = Vec::new();
         parse_stream(reader, |field| {
-            fields.push((field.tag.field_number.as_u32(), field.value));
+            fields.push((field.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
