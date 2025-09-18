@@ -8,17 +8,17 @@ pub mod tag;
 pub mod varint;
 pub mod wire_format;
 
-pub use field_number::FieldNumber;
-pub use tag::{read_tag, Tag};
-pub use varint::{IteratorExtVarint, ReadExtVarint, Varint, WriteExtVarint};
-pub use wire_format::{WireType, MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER};
+pub use self::field_number::FieldNumber;
+pub use self::tag::{read_tag, Tag};
+pub use self::varint::{IteratorExtVarint, ReadExtVarint, Varint, WriteExtVarint};
+pub use self::wire_format::{WireType, MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER};
 
-use thiserror::Error;
+use ::thiserror::Error;
 
 /// Unified error type for all protobuf operations
 #[derive(Error, Debug)]
 pub enum ProtobufError {
-    #[error("Field number {value} is out of valid range [1, {}]", 2u32.pow(29) - 1)]
+    #[error("Field number {value} is out of valid range [1, 536_870_911]")]
     FieldNumberOutOfRange { value: String },
 
     #[error("Invalid wire type: {value} (must be 0-5)")]
@@ -41,4 +41,4 @@ pub enum ProtobufError {
 }
 
 /// Custom Result type for protobuf operations
-pub type Result<T> = std::result::Result<T, ProtobufError>;
+pub type Result<T> = ::std::result::Result<T, ProtobufError>;
