@@ -10,7 +10,7 @@ pub mod varint;
 pub mod wire_format;
 
 pub use self::field_number::FieldNumber;
-pub use self::parser::{parse_stream, FieldValue, ParseEvent};
+pub use self::parser::{parse_stream, Field, FieldValue};
 pub use self::tag::{read_tag, Tag};
 pub use self::varint::{IteratorExtVarint, ReadExtVarint, Varint, WriteExtVarint};
 pub use self::wire_format::{WireType, MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER};

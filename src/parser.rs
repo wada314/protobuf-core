@@ -22,58 +22,54 @@ pub enum FieldValue {
     Len(Vec<u8>),
 }
 
-/// A parsing event
+/// A parsed field
 #[derive(Debug, Clone, PartialEq)]
-pub enum ParseEvent {
-    /// A field was parsed
-    Field { tag: Tag, value: FieldValue },
+pub struct Field {
+    pub tag: Tag,
+    pub value: FieldValue,
 }
 
-/// Parse a protobuf stream and call the event handler for each field
+/// Parse a protobuf stream and call the field handler for each field
 ///
 /// # Arguments
 /// * `reader` - The input stream to parse
-/// * `event_handler` - A closure that will be called for each parsed field
+/// * `field_handler` - A closure that will be called for each parsed field
 ///
 /// # Example
 /// ```
 /// use std::io::Cursor;
-/// use protobuf_core::parser::{parse_stream, ParseEvent, FieldValue};
+/// use protobuf_core::parser::{parse_stream, Field, FieldValue};
 ///
 /// let data = vec![0x08, 0x96, 0x01]; // field 1: 150
 /// let reader = Cursor::new(data);
 ///
-/// parse_stream(reader, |event| {
-///     match event {
-///         ParseEvent::Field { tag, value } => {
-///             match value {
-///                 FieldValue::Varint(varint) => {
-///                     println!("Field {}: {}", tag.field_number.as_u32(), varint.to_uint64());
-///                 },
-///                 _ => {}
-///             }
-///         }
+/// parse_stream(reader, |field| {
+///     match field.value {
+///         FieldValue::Varint(varint) => {
+///             println!("Field {}: {}", field.tag.field_number.as_u32(), varint.to_uint64());
+///         },
+///         _ => {}
 ///     }
 ///     Ok(())
 /// })?;
 /// ```
-pub fn parse_stream<R, F>(mut reader: R, mut event_handler: F) -> Result<()>
+pub fn parse_stream<R, F>(mut reader: R, mut field_handler: F) -> Result<()>
 where
     R: Read,
-    F: FnMut(ParseEvent) -> Result<()>,
+    F: FnMut(Field) -> Result<()>,
 {
     loop {
-        let event = parse_next_event(&mut reader)?;
-        match event {
-            Some(event) => event_handler(event)?,
+        let field = parse_next_field(&mut reader)?;
+        match field {
+            Some(field) => field_handler(field)?,
             None => break, // EOF
         }
     }
     Ok(())
 }
 
-/// Parse a single event from the stream (private)
-fn parse_next_event<R>(reader: &mut R) -> Result<Option<ParseEvent>>
+/// Parse a single field from the stream (private)
+fn parse_next_field<R>(reader: &mut R) -> Result<Option<Field>>
 where
     R: Read,
 {
@@ -111,7 +107,7 @@ where
         }
     };
 
-    Ok(Some(ParseEvent::Field { tag, value }))
+    Ok(Some(Field { tag, value }))
 }
 
 /// Read a tag from the reader (private)
@@ -165,12 +161,8 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |event| {
-            match event {
-                ParseEvent::Field { tag, value } => {
-                    fields.push((tag.field_number.as_u32(), value));
-                }
-            }
+        parse_stream(reader, |field| {
+            fields.push((field.tag.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
@@ -192,12 +184,8 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |event| {
-            match event {
-                ParseEvent::Field { tag, value } => {
-                    fields.push((tag.field_number.as_u32(), value));
-                }
-            }
+        parse_stream(reader, |field| {
+            fields.push((field.tag.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
@@ -219,12 +207,8 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |event| {
-            match event {
-                ParseEvent::Field { tag, value } => {
-                    fields.push((tag.field_number.as_u32(), value));
-                }
-            }
+        parse_stream(reader, |field| {
+            fields.push((field.tag.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
@@ -246,12 +230,8 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |event| {
-            match event {
-                ParseEvent::Field { tag, value } => {
-                    fields.push((tag.field_number.as_u32(), value));
-                }
-            }
+        parse_stream(reader, |field| {
+            fields.push((field.tag.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
@@ -276,12 +256,8 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |event| {
-            match event {
-                ParseEvent::Field { tag, value } => {
-                    fields.push((tag.field_number.as_u32(), value));
-                }
-            }
+        parse_stream(reader, |field| {
+            fields.push((field.tag.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
@@ -315,12 +291,8 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |event| {
-            match event {
-                ParseEvent::Field { tag, value } => {
-                    fields.push((tag.field_number.as_u32(), value));
-                }
-            }
+        parse_stream(reader, |field| {
+            fields.push((field.tag.field_number.as_u32(), field.value));
             Ok(())
         })
         .unwrap();
