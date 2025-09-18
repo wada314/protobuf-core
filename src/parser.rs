@@ -79,7 +79,10 @@ where
 
     let value = match tag.wire_type {
         WireType::Varint => {
-            let varint = read_varint_from_reader(reader)?;
+            use crate::varint::ReadExtVarint;
+            let Some(varint) = reader.read_varint()? else {
+                return Err(ProtobufError::UnexpectedEof);
+            };
             FieldValue::Varint(varint)
         }
         WireType::I32 => {
@@ -93,7 +96,11 @@ where
             FieldValue::I64(bytes)
         }
         WireType::Len => {
-            let length = read_varint_from_reader(reader)?.try_to_uint32()? as usize;
+            use crate::varint::ReadExtVarint;
+            let Some(varint) = reader.read_varint()? else {
+                return Err(ProtobufError::UnexpectedEof);
+            };
+            let length = varint.try_to_uint32()? as usize;
             let mut data = vec![0u8; length];
             reader.read_exact(&mut data)?;
             FieldValue::Len(data)
@@ -106,20 +113,6 @@ where
     };
 
     Ok(Some(Field { tag, value }))
-}
-
-/// Read a varint from the reader (private)
-fn read_varint_from_reader<R>(reader: &mut R) -> Result<Varint>
-where
-    R: Read,
-{
-    use crate::varint::ReadExtVarint;
-    reader.read_varint()?.ok_or_else(|| {
-        ProtobufError::IoError(std::io::Error::new(
-            std::io::ErrorKind::UnexpectedEof,
-            "Unexpected EOF while reading varint",
-        ))
-    })
 }
 
 #[cfg(test)]

@@ -38,6 +38,9 @@ pub enum ProtobufError {
     #[error("Malformed tag: field_number={field_number}, wire_type={wire_type}")]
     MalformedTag { field_number: u32, wire_type: u8 },
 
+    #[error("Unexpected EOF while parsing field")]
+    UnexpectedEof,
+
     #[error("I/O error: {0}")]
     IoError(#[from] ::std::io::Error),
 }
