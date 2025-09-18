@@ -10,7 +10,7 @@ use crate::tag::ReadExtTag;
 use crate::varint::Varint;
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
-use std::io::Read;
+use ::std::io::Read;
 
 /// A parsed field value
 #[derive(Debug, Clone, PartialEq)]

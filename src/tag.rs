@@ -3,12 +3,12 @@
 //! This module provides functions for building and parsing protobuf tags,
 //! which combine field numbers with wire types.
 
+use crate::Result;
 use crate::field_number::FieldNumber;
 use crate::varint::Varint;
-use crate::wire_format::{WireType, FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK};
-use crate::Result;
+use crate::wire_format::{FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK, WireType};
 use ::std::convert::TryFrom;
-use std::io::Read;
+use ::std::io::Read;
 
 /// A protobuf tag containing field number and wire type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,8 +106,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wire_format::WireType;
     use crate::ProtobufError;
+    use crate::wire_format::WireType;
 
     #[test]
     fn test_tag_build_and_parse() {

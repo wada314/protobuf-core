@@ -7,8 +7,8 @@
 
 use crate::wire_format::MAX_VARINT_SIZE;
 use crate::{ProtobufError, Result};
-use std::convert::TryFrom;
-use std::io::{Read, Write};
+use ::std::convert::TryFrom;
+use ::std::io::{Read, Write};
 
 /// A deserialized varint value.
 ///
@@ -385,7 +385,7 @@ mod tests {
             Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
         }
         let varint = Varint::new(bytes); // Create new varint for next test
-                                         // 406 in ZigZag encoding represents 203 in signed value
+        // 406 in ZigZag encoding represents 203 in signed value
         assert_eq!(varint.to_sint64(), 203);
         let varint = Varint::new(bytes); // Create new varint for next test
         match varint.try_to_sint32() {

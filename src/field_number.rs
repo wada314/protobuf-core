@@ -1,5 +1,5 @@
 use crate::ProtobufError;
-use std::convert::TryFrom;
+use ::std::convert::TryFrom;
 /// A validated Protocol Buffers field number.
 ///
 /// Field numbers must be in the range [1, 2^29 - 1].
