@@ -3,7 +3,7 @@
 //! This module provides a simple streaming parser for Protocol Buffers messages.
 //! It uses an event-driven approach where a closure is called for each field.
 
-use crate::tag::Tag;
+use crate::tag::{ReadExtTag, Tag};
 use crate::varint::Varint;
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
@@ -73,7 +73,7 @@ where
     R: Read,
 {
     // Read tag
-    let Some(tag) = read_tag_from_reader(reader)? else {
+    let Some(tag) = reader.read_tag()? else {
         return Ok(None);
     };
 
@@ -106,32 +106,6 @@ where
     };
 
     Ok(Some(Field { tag, value }))
-}
-
-/// Read a tag from the reader (private)
-fn read_tag_from_reader<R>(reader: &mut R) -> Result<Option<Tag>>
-where
-    R: Read,
-{
-    use crate::tag::read_tag;
-
-    let mut buffer = Vec::new();
-    let mut byte = [0u8; 1];
-
-    // Read varint for tag
-    loop {
-        let n = reader.read(&mut byte)?;
-        if n == 0 {
-            return Ok(None); // EOF
-        }
-        buffer.push(byte[0]);
-        if (byte[0] & 0x80) == 0 {
-            break; // Last byte
-        }
-    }
-
-    let mut iter = buffer.into_iter();
-    read_tag(&mut iter)
 }
 
 /// Read a varint from the reader (private)

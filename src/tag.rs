@@ -8,6 +8,7 @@ use crate::varint::Varint;
 use crate::wire_format::{WireType, FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK};
 use crate::Result;
 use ::std::convert::TryFrom;
+use std::io::Read;
 
 /// A protobuf tag containing field number and wire type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +61,55 @@ where
     };
     let tag = Tag::from_encoded(varint)?;
     Ok(Some(tag))
+}
+
+/// Extension trait for reading tags from Read instances.
+///
+/// This trait provides a convenient method to read tags directly from
+/// any type that implements `std::io::Read`.
+///
+/// # Example
+/// ```
+/// use std::io::Cursor;
+/// use protobuf_core::tag::ReadExtTag;
+///
+/// let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
+/// let mut reader = Cursor::new(data);
+/// let tag = reader.read_tag().unwrap().unwrap();
+/// assert_eq!(tag.field_number.as_u32(), 1);
+/// ```
+pub trait ReadExtTag {
+    /// Read a tag from this reader.
+    ///
+    /// Returns the Tag `Ok(Some(tag))` if successfully read.
+    /// Returns `Ok(None)` if no input is available (EOF).
+    /// Returns `Err(ProtobufError)` if the tag is malformed.
+    fn read_tag(&mut self) -> Result<Option<Tag>>;
+}
+
+impl<R> ReadExtTag for R
+where
+    R: Read,
+{
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
+        let mut buffer = Vec::new();
+        let mut byte = [0u8; 1];
+
+        // Read varint for tag
+        loop {
+            let n = self.read(&mut byte)?;
+            if n == 0 {
+                return Ok(None); // EOF
+            }
+            buffer.push(byte[0]);
+            if (byte[0] & 0x80) == 0 {
+                break; // Last byte
+            }
+        }
+
+        let mut iter = buffer.into_iter();
+        read_tag(&mut iter)
+    }
 }
 
 #[cfg(test)]
