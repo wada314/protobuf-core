@@ -54,7 +54,7 @@ where
     let Some(varint) = varint_result else {
         return Ok(None);
     };
-    let tag_value = varint.to_uint32()?;
+    let tag_value = varint.try_to_uint32()?;
     let tag = Tag::from_encoded(tag_value)?;
     Ok(Some(tag))
 }

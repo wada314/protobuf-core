@@ -158,9 +158,6 @@ impl Varint {
     /// - bytes: fixed-size array containing the encoded varint
     /// - count: actual number of bytes used (1-10)
     ///
-    /// This is the most efficient method as it avoids any memory allocation
-    /// and returns a fixed-size array that can be easily copied or sliced.
-    ///
     /// # Example
     /// ```
     /// use protobuf_core::varint::Varint;
@@ -275,12 +272,6 @@ pub trait ReadExtVarint {
     /// Returns `Ok(None)` if no input is available (EOF).
     /// Returns `Err(VarintError::TooLong)` if the varint exceeds MAX_VARINT_SIZE.
     /// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
-    ///
-    /// # Error Cases
-    /// This method has three distinct failure scenarios:
-    /// 1. **No input available**: EOF reached → `Ok(None)`
-    /// 2. **Input too long**: The varint exceeds MAX_VARINT_SIZE bytes → `Err(VarintError::TooLong)`
-    /// 3. **I/O error**: Read operation failed → `Err(ProtobufError::IoError)`
     fn read_varint(&mut self) -> Result<Option<Varint>>;
 }
 
@@ -386,7 +377,7 @@ mod tests {
 
         // Test all integer conversions
         assert_eq!(varint.to_uint64(), 406);
-        match varint.to_uint32() {
+        match varint.try_to_uint32() {
             Ok(value) => assert_eq!(value, 406),
             Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
         }
@@ -394,7 +385,7 @@ mod tests {
                                          // 406 in ZigZag encoding represents 203 in signed value
         assert_eq!(varint.to_sint64(), 203);
         let varint = Varint::new(bytes); // Create new varint for next test
-        match varint.to_sint32() {
+        match varint.try_to_sint32() {
             Ok(value) => assert_eq!(value, 203),
             Err(e) => panic!("Expected Ok(203), got error: {:?}", e),
         }
@@ -410,7 +401,7 @@ mod tests {
 
         assert_eq!(varint.to_sint64(), -1);
         let varint = Varint::new(bytes); // Create new varint for next test
-        match varint.to_sint32() {
+        match varint.try_to_sint32() {
             Ok(value) => assert_eq!(value, -1),
             Err(e) => panic!("Expected Ok(-1), got error: {:?}", e),
         }
@@ -624,10 +615,10 @@ mod tests {
         let varint = Varint::new(bytes);
 
         // Test to_uint32
-        assert_eq!(varint.to_uint32().unwrap(), 150);
+        assert_eq!(varint.try_to_uint32().unwrap(), 150);
 
         // Test to_sint32 (150 in ZigZag encoding represents 75 in signed value)
-        assert_eq!(varint.to_sint32().unwrap(), 75);
+        assert_eq!(varint.try_to_sint32().unwrap(), 75);
 
         // Test to_sint64 (150 in ZigZag encoding represents 75 in signed value)
         assert_eq!(varint.to_sint64(), 75);
@@ -636,7 +627,7 @@ mod tests {
         assert_eq!(varint.to_bool(), true);
 
         // Test to_int32 (non-ZigZag)
-        assert_eq!(varint.to_int32().unwrap(), 150);
+        assert_eq!(varint.try_to_int32().unwrap(), 150);
 
         // Test to_int64 (non-ZigZag)
         assert_eq!(varint.to_int64(), 150);
@@ -652,7 +643,7 @@ mod tests {
         // Test roundtrip for u32
         let original = 150u32;
         let varint = Varint::from_uint32(original);
-        let converted = varint.to_uint32().unwrap();
+        let converted = varint.try_to_uint32().unwrap();
         assert_eq!(converted, original);
 
         // Test roundtrip for i64 (ZigZag)
@@ -670,7 +661,7 @@ mod tests {
         // Test roundtrip for i32 (non-ZigZag)
         let original = 150i32;
         let varint = Varint::from_int32(original);
-        let converted = varint.to_int32().unwrap();
+        let converted = varint.try_to_int32().unwrap();
         assert_eq!(converted, original);
 
         // Test roundtrip for bool
