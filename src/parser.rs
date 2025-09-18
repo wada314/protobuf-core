@@ -61,12 +61,8 @@ where
     R: Read,
     F: FnMut(Field) -> Result<()>,
 {
-    loop {
-        let field = parse_next_field(&mut reader)?;
-        match field {
-            Some(field) => field_handler(field)?,
-            None => break, // EOF
-        }
+    while let Some(field) = parse_next_field(&mut reader)? {
+        field_handler(field)?;
     }
     Ok(())
 }
