@@ -4,6 +4,7 @@
 //! which combine field numbers with wire types.
 
 use crate::field_number::FieldNumber;
+use crate::varint::Varint;
 use crate::wire_format::{WireType, FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK};
 use crate::Result;
 use ::std::convert::TryFrom;
@@ -16,15 +17,18 @@ pub struct Tag {
 }
 
 impl Tag {
-    /// Build the encoded tag value
-    pub fn to_encoded(self) -> u32 {
-        (Into::<u32>::into(self.field_number) << FIELD_NUMBER_SHIFT) | (self.wire_type as u32)
+    /// Build the encoded tag value as a `Varint`.
+    pub fn to_encoded(self) -> Varint {
+        let value: u32 =
+            (u32::from(self.field_number) << FIELD_NUMBER_SHIFT) | (self.wire_type as u32);
+        Varint::from_uint32(value)
     }
 
-    /// Parse a tag from an encoded value
-    pub fn from_encoded(encoded: u32) -> Result<Self> {
-        let field_number_value = encoded >> FIELD_NUMBER_SHIFT;
-        let wire_type_value = encoded & WIRE_TYPE_MASK;
+    /// Parse a tag from a `Varint` value.
+    pub fn from_encoded(encoded: Varint) -> Result<Self> {
+        let value = encoded.try_to_uint32()?;
+        let field_number_value = value >> FIELD_NUMBER_SHIFT;
+        let wire_type_value = value & WIRE_TYPE_MASK;
 
         // Create field number
         let field_number = FieldNumber::try_new(field_number_value)?;
@@ -54,8 +58,7 @@ where
     let Some(varint) = varint_result else {
         return Ok(None);
     };
-    let tag_value = varint.try_to_uint32()?;
-    let tag = Tag::from_encoded(tag_value)?;
+    let tag = Tag::from_encoded(varint)?;
     Ok(Some(tag))
 }
 
@@ -101,7 +104,7 @@ mod tests {
     #[test]
     fn test_parse_tag_invalid_field_number() {
         // Test with field number 0 (invalid)
-        let tag = 0; // field_number = 0, wire_type = 0
+        let tag = Varint::from_uint32(0); // field_number = 0, wire_type = 0
         let result = Tag::from_encoded(tag);
         assert!(result.is_err());
 
@@ -115,7 +118,7 @@ mod tests {
     #[test]
     fn test_parse_tag_invalid_wire_type() {
         // Test with invalid wire type 6
-        let tag = (1 << 3) | 6; // field_number = 1, wire_type = 6
+        let tag = Varint::from_uint32((1 << 3) | 6); // field_number = 1, wire_type = 6
         let result = Tag::from_encoded(tag);
         assert!(result.is_err());
 
