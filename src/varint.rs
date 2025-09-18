@@ -38,6 +38,7 @@ impl Varint {
     // from / to protobuf integer types
     // Important: Intending NOT from / to the Rust's integer types,
     // but from / to the protobuf integer types!
+    // Thus, we don't provide the `From` / `Into` traits for the Rust's integer types.
     // ============================================================================
 
     /// Create a Varint from `u64`, assuming `UInt64` protobuf type.
