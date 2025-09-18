@@ -5,12 +5,12 @@
 
 pub mod field_number;
 pub mod tag;
-pub mod variant;
+pub mod varint;
 pub mod wire_format;
 
 pub use field_number::FieldNumber;
 pub use tag::{read_tag, Tag};
-pub use variant::{IteratorExtVariant, ReadExtVariant, Variant, WriteExtVariant};
+pub use varint::{IteratorExtVarint, ReadExtVarint, Varint, WriteExtVarint};
 pub use wire_format::{WireType, MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER};
 
 use thiserror::Error;
@@ -24,8 +24,8 @@ pub enum ProtobufError {
     #[error("Invalid wire type: {value} (must be 0-5)")]
     InvalidWireType { value: u8 },
 
-    #[error("Variant value {value} is out of range for target type: {target_type}")]
-    VariantDowncastOutOfRange {
+    #[error("Varint value {value} is out of range for target type: {target_type}")]
+    VarintDowncastOutOfRange {
         value: u64,
         target_type: &'static str,
     },

@@ -48,13 +48,13 @@ pub fn read_tag<I>(iter: &mut I) -> Result<Option<Tag>>
 where
     I: Iterator<Item = u8>,
 {
-    use crate::variant::IteratorExtVariant;
+    use crate::varint::IteratorExtVarint;
 
-    let variant_result = iter.try_collect_variant()?;
-    let Some(variant) = variant_result else {
+    let varint_result = iter.try_collect_varint()?;
+    let Some(varint) = varint_result else {
         return Ok(None);
     };
-    let tag_value = variant.to_uint32()?;
+    let tag_value = varint.to_uint32()?;
     let tag = Tag::from_encoded(tag_value)?;
     Ok(Some(tag))
 }
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_read_tag_u64_overflow() {
         // Test case where the varint value exceeds u32::MAX
-        // This should trigger VariantDowncastOutOfRange error
+        // This should trigger VarintDowncastOutOfRange error
         // u32::MAX = 4,294,967,295 (0xFFFFFFFF)
         // Use 0x100000000 (4,294,967,296) which exceeds u32::MAX
         let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x10]; // Value: 0x100000000 (exceeds u32::MAX)
@@ -146,11 +146,11 @@ mod tests {
         let result = read_tag(&mut iter);
 
         assert!(result.is_err());
-        if let Err(ProtobufError::VariantDowncastOutOfRange { value, target_type }) = result {
+        if let Err(ProtobufError::VarintDowncastOutOfRange { value, target_type }) = result {
             assert_eq!(value, 0x100000000);
             assert_eq!(target_type, "u32");
         } else {
-            panic!("Expected VariantDowncastOutOfRange error");
+            panic!("Expected VarintDowncastOutOfRange error");
         }
     }
 }
