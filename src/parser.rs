@@ -2,6 +2,8 @@
 //!
 //! This module provides a simple streaming parser for Protocol Buffers messages.
 //! It uses an event-driven approach where a closure is called for each field.
+//!
+//! This module is only available when the `parser` feature is enabled.
 
 use crate::tag::{ReadExtTag, Tag};
 use crate::varint::Varint;

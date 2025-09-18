@@ -8,7 +8,5 @@ thiserror = "1.0"
 derive_more = "0.99"
 
 [features]
-default = ["descriptor-encode", "descriptor-decode"]
-descriptor-encode = []
-descriptor-decode = []
-descriptor-full = ["descriptor-encode", "descriptor-decode"]
+default = ["parser"]
+parser = []

@@ -4,12 +4,14 @@
 //! for implementing Protocol Buffers in Rust.
 
 pub mod field_number;
+#[cfg(feature = "parser")]
 pub mod parser;
 pub mod tag;
 pub mod varint;
 pub mod wire_format;
 
 pub use self::field_number::FieldNumber;
+#[cfg(feature = "parser")]
 pub use self::parser::{parse_stream, Field, FieldValue};
 pub use self::tag::{read_tag, ReadExtTag, Tag};
 pub use self::varint::{IteratorExtVarint, ReadExtVarint, Varint, WriteExtVarint};
