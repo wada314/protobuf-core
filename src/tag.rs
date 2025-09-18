@@ -92,23 +92,14 @@ where
     R: Read,
 {
     fn read_tag(&mut self) -> Result<Option<Tag>> {
-        let mut buffer = Vec::new();
-        let mut byte = [0u8; 1];
+        use crate::varint::ReadExtVarint;
 
-        // Read varint for tag
-        loop {
-            let n = self.read(&mut byte)?;
-            if n == 0 {
-                return Ok(None); // EOF
-            }
-            buffer.push(byte[0]);
-            if (byte[0] & 0x80) == 0 {
-                break; // Last byte
-            }
-        }
+        let Some(varint) = self.read_varint()? else {
+            return Ok(None);
+        };
 
-        let mut iter = buffer.into_iter();
-        read_tag(&mut iter)
+        let tag = Tag::from_encoded(varint)?;
+        Ok(Some(tag))
     }
 }
 
