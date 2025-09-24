@@ -92,7 +92,7 @@ pub const FIELD_NUMBER_SHIFT: u32 = 3;
 /// Maximum varint size in bytes.
 ///
 /// A varint can use anywhere between 1 and 10 bytes.
-pub const MAX_VARINT_SIZE: usize = 10;
+pub const MAX_VARINT_BYTES: usize = 10;
 
 /// Maximum variable-length integer value that can be encoded in 9 bytes.
 ///
@@ -136,12 +136,12 @@ pub const VARINT_PAYLOAD_MASK: u8 = 0x7F;
 /// Size of a 32-bit fixed-width value in bytes.
 ///
 /// Used for fixed32, sfixed32, and float types.
-pub const FIXED32_SIZE: usize = 4;
+pub const FIXED32_BYTES: usize = 4;
 
 /// Size of a 64-bit fixed-width value in bytes.
 ///
 /// Used for fixed64, sfixed64, and double types.
-pub const FIXED64_SIZE: usize = 8;
+pub const FIXED64_BYTES: usize = 8;
 
 #[cfg(test)]
 mod tests {
@@ -192,7 +192,7 @@ mod tests {
         assert_eq!(MAX_MESSAGE_SIZE, 2 * 1024 * 1024 * 1024);
         assert_eq!(WIRE_TYPE_MASK, 0b111);
         assert_eq!(FIELD_NUMBER_SHIFT, 3);
-        assert_eq!(MAX_VARINT_SIZE, 10);
+        assert_eq!(MAX_VARINT_BYTES, 10);
         assert_eq!(VARINT_CONTINUATION_BIT, 0x80);
         assert_eq!(VARINT_PAYLOAD_MASK, 0x7F);
     }
@@ -212,8 +212,8 @@ mod tests {
 
     #[test]
     fn test_fixed_size_constants() {
-        assert_eq!(FIXED32_SIZE, 4);
-        assert_eq!(FIXED64_SIZE, 8);
+        assert_eq!(FIXED32_BYTES, 4);
+        assert_eq!(FIXED64_BYTES, 8);
     }
 
     #[test]

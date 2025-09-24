@@ -19,7 +19,7 @@
 //!
 //! This is a **reference implementation**. Not optimized for performance.
 
-use crate::wire_format::MAX_VARINT_SIZE;
+use crate::wire_format::MAX_VARINT_BYTES;
 use crate::{ProtobufError, Result};
 use ::std::convert::TryFrom;
 use ::std::io::{Read, Write};
@@ -239,7 +239,7 @@ where
         let mut shift = 0;
 
         for byte in self {
-            if bytes_read >= MAX_VARINT_SIZE {
+            if bytes_read >= MAX_VARINT_BYTES {
                 return Err(ProtobufError::VarintDowncastOutOfRange {
                     value: 0,
                     target_type: "varint (too long)",
@@ -301,7 +301,7 @@ where
         let mut shift = 0;
         let mut buffer = [0u8; 1];
 
-        for _ in 0..MAX_VARINT_SIZE {
+        for _ in 0..MAX_VARINT_BYTES {
             let n = self.read(&mut buffer)?;
             if n == 0 {
                 return Ok(None); // EOF
