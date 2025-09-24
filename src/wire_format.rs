@@ -100,7 +100,7 @@ pub const MAX_VARINT_SIZE: usize = 10;
 pub const MAX_9_BYTE_VARINT: u64 = 0x7FFF_FFFF_FFFF_FFFF;
 
 /// Maximum variable-length integer value that can be encoded in 8 bytes.
-pub const MAX_8_BYTE_VARINT: u64 = 0xFFFF_FFFF_FFFF_FF;
+pub const MAX_8_BYTE_VARINT: u64 = 0xFF_FFFF_FFFF_FFFF;
 
 /// Maximum variable-length integer value that can be encoded in 7 bytes.
 pub const MAX_7_BYTE_VARINT: u64 = 0x1FFFF_FFFF_FFFF;
@@ -112,10 +112,10 @@ pub const MAX_6_BYTE_VARINT: u64 = 0x3FF_FFFF_FFFF;
 pub const MAX_5_BYTE_VARINT: u64 = 0x7_FFFF_FFFF;
 
 /// Maximum variable-length integer value that can be encoded in 4 bytes.
-pub const MAX_4_BYTE_VARINT: u64 = 0xFFFFFFF;
+pub const MAX_4_BYTE_VARINT: u64 = 0xFFF_FFFF;
 
 /// Maximum variable-length integer value that can be encoded in 3 bytes.
-pub const MAX_3_BYTE_VARINT: u64 = 0x1FFFFF;
+pub const MAX_3_BYTE_VARINT: u64 = 0x1F_FFFF;
 
 /// Maximum variable-length integer value that can be encoded in 2 bytes.
 pub const MAX_2_BYTE_VARINT: u64 = 0x3FFF;
