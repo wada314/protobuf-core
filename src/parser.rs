@@ -157,12 +157,12 @@ where
             };
             FieldValue::Varint(varint)
         }
-        WireType::I32 => {
+        WireType::Int32 => {
             let mut bytes = [0u8; 4];
             reader.read_exact(&mut bytes)?;
             FieldValue::I32(bytes)
         }
-        WireType::I64 => {
+        WireType::Int64 => {
             let mut bytes = [0u8; 8];
             reader.read_exact(&mut bytes)?;
             FieldValue::I64(bytes)
@@ -252,8 +252,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_i32_field() {
-        let reader = &[0x15, 0x00, 0x00, 0x00, 0x00][..]; // field 2: 0 (i32)
+    fn test_parse_int32_field() {
+        let reader = &[0x15, 0x78, 0x56, 0x34, 0x12][..]; // field 2: 0x12345678 (Int32)
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
@@ -265,15 +265,15 @@ mod tests {
         assert_eq!(field.field_number.as_u32(), 2);
         match &field.value {
             FieldValue::I32(bytes) => {
-                assert_eq!(*bytes, [0x00, 0x00, 0x00, 0x00]);
+                assert_eq!(*bytes, [0x78, 0x56, 0x34, 0x12]);
             }
-            _ => panic!("Expected I32 field"),
+            _ => panic!("Expected Int32 field"),
         }
     }
 
     #[test]
-    fn test_parse_i64_field() {
-        let reader = &[0x19, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]; // field 3: 0 (i64)
+    fn test_parse_int64_field() {
+        let reader = &[0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12][..]; // field 3: 0x1234567890ABCDEF (Int64)
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
@@ -285,9 +285,9 @@ mod tests {
         assert_eq!(field.field_number.as_u32(), 3);
         match &field.value {
             FieldValue::I64(bytes) => {
-                assert_eq!(*bytes, [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+                assert_eq!(*bytes, [0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]);
             }
-            _ => panic!("Expected I64 field"),
+            _ => panic!("Expected Int64 field"),
         }
     }
 
