@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Protocol Buffers streaming parser
+//! Protocol Buffers parser
 //!
-//! This module provides a simple streaming parser for Protocol Buffers messages.
-//! It uses an event-driven approach where a closure is called for each field.
+//! This module provides a simple parser for Protocol Buffers messages.
+//! It reads and parses protobuf fields from input sources that implement `std::io::Read`.
 //! The parser is provided as an extension trait `ReadExtProtobuf` for `std::io::Read` types.
 //!
 //! This module is only available when the `parser` feature is enabled.
@@ -47,7 +47,7 @@ pub struct Field {
     pub value: FieldValue,
 }
 
-/// Iterator over protobuf fields from a stream
+/// Iterator over protobuf fields from a reader
 pub struct ProtobufFieldIterator<R> {
     reader: R,
 }
@@ -67,12 +67,12 @@ where
     }
 }
 
-/// Extension trait for parsing Protocol Buffers streams from `Read` types
+/// Extension trait for parsing Protocol Buffers from `Read` types
 pub trait ReadExtProtobuf {
-    /// Read and parse a single protobuf field from the stream
+    /// Read and parse a single protobuf field from the reader
     ///
     /// Returns `Ok(Some(field))` if a field was successfully read,
-    /// `Ok(None)` if the stream has ended, or an error if parsing failed.
+    /// `Ok(None)` if the reader has reached end-of-input, or an error if parsing failed.
     ///
     /// # Example
     /// ```
@@ -96,7 +96,7 @@ pub trait ReadExtProtobuf {
     /// ```
     fn read_protobuf_field(&mut self) -> Result<Option<Field>>;
 
-    /// Read and parse all protobuf fields from the stream, returning an iterator
+    /// Read and parse all protobuf fields from the reader, returning an iterator
     ///
     /// # Example
     /// ```
@@ -143,7 +143,7 @@ where
     }
 }
 
-/// Parse a single field from the stream (private)
+/// Parse a single field from the reader (private)
 fn parse_next_field<R>(reader: &mut R) -> Result<Option<Field>>
 where
     R: Read,
@@ -213,7 +213,7 @@ mod tests {
             _ => panic!("Expected Varint field"),
         }
 
-        // Should return None for end of stream
+        // Should return None for end of input
         assert!(reader.read_protobuf_field().unwrap().is_none());
     }
 
