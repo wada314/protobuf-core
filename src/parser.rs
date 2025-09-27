@@ -16,6 +16,7 @@
 //!
 //! This module provides a simple streaming parser for Protocol Buffers messages.
 //! It uses an event-driven approach where a closure is called for each field.
+//! The parser is provided as an extension trait `ReadExtProtobuf` for `std::io::Read` types.
 //!
 //! This module is only available when the `parser` feature is enabled.
 
@@ -46,42 +47,52 @@ pub struct Field {
     pub value: FieldValue,
 }
 
-/// Parse a protobuf stream and call the field handler for each field
-///
-/// # Arguments
-/// * `reader` - The input stream to parse
-/// * `field_handler` - A closure that will be called for each parsed field
-///
-/// # Example
-/// ```
-/// use std::io::Cursor;
-/// use protobuf_core::parser::{parse_stream, Field, FieldValue};
-///
-/// fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let data = vec![0x08, 0x96, 0x01]; // field 1: 150
-///     let reader = Cursor::new(data);
-///
-///     parse_stream(reader, |field| {
-///         match field.value {
-///             FieldValue::Varint(varint) => {
-///                 println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
-///             },
-///             _ => {}
-///         }
-///         Ok(())
-///     })?;
-///     Ok(())
-/// }
-/// ```
-pub fn parse_stream<R, F>(mut reader: R, mut field_handler: F) -> Result<()>
+/// Extension trait for parsing Protocol Buffers streams from `Read` types
+pub trait ReadExtProtobuf {
+    /// Read and parse protobuf fields from the stream, calling the field handler for each field
+    ///
+    /// # Arguments
+    /// * `field_handler` - A closure that will be called for each parsed field
+    ///
+    /// # Example
+    /// ```
+    /// use std::io::Cursor;
+    /// use protobuf_core::parser::{ReadExtProtobuf, Field, FieldValue};
+    ///
+    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let data = vec![0x08, 0x96, 0x01]; // field 1: 150
+    ///     let reader = Cursor::new(data);
+    ///
+    ///     reader.read_protobuf_fields(|field| {
+    ///         match field.value {
+    ///             FieldValue::Varint(varint) => {
+    ///                 println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
+    ///             },
+    ///             _ => {}
+    ///         }
+    ///         Ok(())
+    ///     })?;
+    ///     Ok(())
+    /// }
+    /// ```
+    fn read_protobuf_fields<F>(self, field_handler: F) -> Result<()>
+    where
+        F: FnMut(Field) -> Result<()>;
+}
+
+impl<R> ReadExtProtobuf for R
 where
     R: Read,
-    F: FnMut(Field) -> Result<()>,
 {
-    while let Some(field) = parse_next_field(&mut reader)? {
-        field_handler(field)?;
+    fn read_protobuf_fields<F>(mut self, mut field_handler: F) -> Result<()>
+    where
+        F: FnMut(Field) -> Result<()>,
+    {
+        while let Some(field) = parse_next_field(&mut self)? {
+            field_handler(field)?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Parse a single field from the stream (private)
@@ -146,11 +157,12 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
+        reader
+            .read_protobuf_fields(|field| {
+                fields.push((field.field_number.as_u32(), field.value));
+                Ok(())
+            })
+            .unwrap();
 
         assert_eq!(fields.len(), 1);
         let (field_num, value) = &fields[0];
@@ -169,11 +181,12 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
+        reader
+            .read_protobuf_fields(|field| {
+                fields.push((field.field_number.as_u32(), field.value));
+                Ok(())
+            })
+            .unwrap();
 
         assert_eq!(fields.len(), 1);
         let (field_num, value) = &fields[0];
@@ -192,11 +205,12 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
+        reader
+            .read_protobuf_fields(|field| {
+                fields.push((field.field_number.as_u32(), field.value));
+                Ok(())
+            })
+            .unwrap();
 
         assert_eq!(fields.len(), 1);
         let (field_num, value) = &fields[0];
@@ -215,11 +229,12 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
+        reader
+            .read_protobuf_fields(|field| {
+                fields.push((field.field_number.as_u32(), field.value));
+                Ok(())
+            })
+            .unwrap();
 
         assert_eq!(fields.len(), 1);
         let (field_num, value) = &fields[0];
@@ -241,11 +256,12 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
+        reader
+            .read_protobuf_fields(|field| {
+                fields.push((field.field_number.as_u32(), field.value));
+                Ok(())
+            })
+            .unwrap();
 
         assert_eq!(fields.len(), 2);
 
@@ -276,11 +292,12 @@ mod tests {
         let reader = Cursor::new(data);
 
         let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
+        reader
+            .read_protobuf_fields(|field| {
+                fields.push((field.field_number.as_u32(), field.value));
+                Ok(())
+            })
+            .unwrap();
 
         assert_eq!(fields.len(), 0);
     }

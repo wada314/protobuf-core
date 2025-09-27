@@ -26,7 +26,7 @@ pub mod wire_format;
 
 pub use self::field_number::FieldNumber;
 #[cfg(feature = "parser")]
-pub use self::parser::{Field, FieldValue, parse_stream};
+pub use self::parser::{Field, FieldValue, ReadExtProtobuf};
 pub use self::tag::{ReadExtTag, Tag, read_tag};
 pub use self::varint::{IteratorExtVarint, ReadExtVarint, Varint, WriteExtVarint};
 pub use self::wire_format::{MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER, WireType};
