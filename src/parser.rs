@@ -252,8 +252,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_int32_field() {
-        let reader = &[0x15, 0x78, 0x56, 0x34, 0x12][..]; // field 2: 0x12345678 (Int32)
+    fn test_parse_i32_field() {
+        let reader = &[0x15, 0x78, 0x56, 0x34, 0x12][..]; // field 2: 0x12345678 (Fixed32)
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
@@ -267,13 +267,13 @@ mod tests {
             FieldValue::I32(bytes) => {
                 assert_eq!(*bytes, [0x78, 0x56, 0x34, 0x12]);
             }
-            _ => panic!("Expected Int32 field"),
+            _ => panic!("Expected I32 field"),
         }
     }
 
     #[test]
-    fn test_parse_int64_field() {
-        let reader = &[0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12][..]; // field 3: 0x1234567890ABCDEF (Int64)
+    fn test_parse_i64_field() {
+        let reader = &[0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12][..]; // field 3: 0x1234567890ABCDEF (Fixed64)
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
@@ -287,7 +287,7 @@ mod tests {
             FieldValue::I64(bytes) => {
                 assert_eq!(*bytes, [0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]);
             }
-            _ => panic!("Expected Int64 field"),
+            _ => panic!("Expected I64 field"),
         }
     }
 
