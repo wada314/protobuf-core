@@ -76,12 +76,10 @@ pub trait ReadExtProtobuf {
     ///
     /// # Example
     /// ```
-    /// use std::io::Cursor;
     /// use protobuf_core::parser::{ReadExtProtobuf, Field, FieldValue};
     ///
     /// fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let data = vec![0x08, 0x96, 0x01]; // field 1: 150
-    ///     let mut reader = Cursor::new(data);
+    ///     let mut reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
     ///
     ///     if let Some(field) = reader.read_protobuf_field()? {
     ///         match field.value {
@@ -100,12 +98,10 @@ pub trait ReadExtProtobuf {
     ///
     /// # Example
     /// ```
-    /// use std::io::Cursor;
     /// use protobuf_core::parser::{ReadExtProtobuf, Field, FieldValue};
     ///
     /// fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let data = vec![0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c];
-    ///     let reader = Cursor::new(data);
+    ///     let reader = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
     ///
     ///     for field in reader.read_protobuf_fields() {
     ///         let field = field?;
@@ -197,12 +193,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
 
     #[test]
     fn test_read_single_varint_field() {
-        let data = vec![0x08, 0x96, 0x01]; // field 1: 150
-        let mut reader = Cursor::new(data);
+        let mut reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
 
         let field = reader.read_protobuf_field().unwrap().unwrap();
         assert_eq!(field.field_number.as_u32(), 1);
@@ -219,8 +213,7 @@ mod tests {
 
     #[test]
     fn test_read_all_varint_fields() {
-        let data = vec![0x08, 0x96, 0x01]; // field 1: 150
-        let reader = Cursor::new(data);
+        let reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
@@ -240,8 +233,7 @@ mod tests {
 
     #[test]
     fn test_parse_len_field() {
-        let data = vec![0x12, 0x03, 0x48, 0x65, 0x6c]; // field 2: "Hel"
-        let reader = Cursor::new(data);
+        let reader = &[0x12, 0x03, 0x48, 0x65, 0x6c][..]; // field 2: "Hel"
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
@@ -261,8 +253,7 @@ mod tests {
 
     #[test]
     fn test_parse_i32_field() {
-        let data = vec![0x15, 0x00, 0x00, 0x00, 0x00]; // field 2: 0 (i32)
-        let reader = Cursor::new(data);
+        let reader = &[0x15, 0x00, 0x00, 0x00, 0x00][..]; // field 2: 0 (i32)
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
@@ -282,8 +273,7 @@ mod tests {
 
     #[test]
     fn test_parse_i64_field() {
-        let data = vec![0x19, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; // field 3: 0 (i64)
-        let reader = Cursor::new(data);
+        let reader = &[0x19, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]; // field 3: 0 (i64)
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
@@ -303,11 +293,10 @@ mod tests {
 
     #[test]
     fn test_parse_multiple_fields() {
-        let data = vec![
+        let reader = &[
             0x08, 0x96, 0x01, // field 1: 150
             0x12, 0x03, 0x48, 0x65, 0x6c, // field 2: "Hel"
-        ];
-        let reader = Cursor::new(data);
+        ][..];
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
@@ -338,8 +327,7 @@ mod tests {
 
     #[test]
     fn test_parse_empty_stream() {
-        let data = vec![];
-        let reader = Cursor::new(data);
+        let reader = &[][..];
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
