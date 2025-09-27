@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Protocol Buffers streaming parser
+//! Protocol Buffers parser
 //!
-//! This module provides a simple streaming parser for Protocol Buffers messages.
-//! It uses an event-driven approach where a closure is called for each field.
+//! This module provides a simple parser for Protocol Buffers messages.
+//! It reads and parses protobuf fields from input sources that implement `std::io::Read`.
+//! The parser is provided as an extension trait `ReadExtProtobuf` for `std::io::Read` types.
 //!
 //! This module is only available when the `parser` feature is enabled.
 
@@ -46,45 +47,99 @@ pub struct Field {
     pub value: FieldValue,
 }
 
-/// Parse a protobuf stream and call the field handler for each field
-///
-/// # Arguments
-/// * `reader` - The input stream to parse
-/// * `field_handler` - A closure that will be called for each parsed field
-///
-/// # Example
-/// ```
-/// use std::io::Cursor;
-/// use protobuf_core::parser::{parse_stream, Field, FieldValue};
-///
-/// fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let data = vec![0x08, 0x96, 0x01]; // field 1: 150
-///     let reader = Cursor::new(data);
-///
-///     parse_stream(reader, |field| {
-///         match field.value {
-///             FieldValue::Varint(varint) => {
-///                 println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
-///             },
-///             _ => {}
-///         }
-///         Ok(())
-///     })?;
-///     Ok(())
-/// }
-/// ```
-pub fn parse_stream<R, F>(mut reader: R, mut field_handler: F) -> Result<()>
-where
-    R: Read,
-    F: FnMut(Field) -> Result<()>,
-{
-    while let Some(field) = parse_next_field(&mut reader)? {
-        field_handler(field)?;
-    }
-    Ok(())
+/// Iterator over protobuf fields from a reader
+pub struct ProtobufFieldIterator<R> {
+    reader: R,
 }
 
-/// Parse a single field from the stream (private)
+impl<R> Iterator for ProtobufFieldIterator<R>
+where
+    R: Read,
+{
+    type Item = Result<Field>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match parse_next_field(&mut self.reader) {
+            Ok(Some(field)) => Some(Ok(field)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
+    }
+}
+
+/// Extension trait for parsing Protocol Buffers from `Read` types
+pub trait ReadExtProtobuf {
+    /// Read and parse a single protobuf field from the reader
+    ///
+    /// Returns `Ok(Some(field))` if a field was successfully read,
+    /// `Ok(None)` if the reader has reached end-of-input, or an error if parsing failed.
+    ///
+    /// # Example
+    /// ```
+    /// use protobuf_core::parser::{ReadExtProtobuf, Field, FieldValue};
+    ///
+    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let mut reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
+    ///
+    ///     if let Some(field) = reader.read_protobuf_field()? {
+    ///         match field.value {
+    ///             FieldValue::Varint(varint) => {
+    ///                 println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
+    ///             },
+    ///             _ => {}
+    ///         }
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    fn read_protobuf_field(&mut self) -> Result<Option<Field>>;
+
+    /// Read and parse all protobuf fields from the reader, returning an iterator
+    ///
+    /// # Example
+    /// ```
+    /// use protobuf_core::parser::{ReadExtProtobuf, Field, FieldValue};
+    ///
+    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let reader = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
+    ///
+    ///     for field in reader.read_protobuf_fields() {
+    ///         let field = field?;
+    ///         match field.value {
+    ///             FieldValue::Varint(varint) => {
+    ///                 println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
+    ///             },
+    ///             FieldValue::Len(data) => {
+    ///                 println!("Field {}: {:?}", field.field_number.as_u32(), data);
+    ///             },
+    ///             _ => {}
+    ///         }
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    fn read_protobuf_fields(self) -> ProtobufFieldIterator<Self>
+    where
+        Self: Sized;
+}
+
+impl<R> ReadExtProtobuf for R
+where
+    R: Read,
+{
+    fn read_protobuf_field(&mut self) -> Result<Option<Field>> {
+        parse_next_field(self)
+    }
+
+    fn read_protobuf_fields(self) -> ProtobufFieldIterator<Self>
+    where
+        Self: Sized,
+    {
+        ProtobufFieldIterator { reader: self }
+    }
+}
+
+/// Parse a single field from the reader (private)
 fn parse_next_field<R>(reader: &mut R) -> Result<Option<Field>>
 where
     R: Read,
@@ -102,12 +157,12 @@ where
             };
             FieldValue::Varint(varint)
         }
-        WireType::I32 => {
+        WireType::Int32 => {
             let mut bytes = [0u8; 4];
             reader.read_exact(&mut bytes)?;
             FieldValue::I32(bytes)
         }
-        WireType::I64 => {
+        WireType::Int64 => {
             let mut bytes = [0u8; 8];
             reader.read_exact(&mut bytes)?;
             FieldValue::I64(bytes)
@@ -138,24 +193,37 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
 
     #[test]
-    fn test_parse_varint_field() {
-        let data = vec![0x08, 0x96, 0x01]; // field 1: 150
-        let reader = Cursor::new(data);
+    fn test_read_single_varint_field() {
+        let mut reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
 
-        let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
+        let field = reader.read_protobuf_field().unwrap().unwrap();
+        assert_eq!(field.field_number.as_u32(), 1);
+        match field.value {
+            FieldValue::Varint(varint) => {
+                assert_eq!(varint.to_uint64(), 150);
+            }
+            _ => panic!("Expected Varint field"),
+        }
 
+        // Should return None for end of input
+        assert!(reader.read_protobuf_field().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_read_all_varint_fields() {
+        let reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
+
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(fields.len(), 1);
-        let (field_num, value) = &fields[0];
-        assert_eq!(*field_num, 1);
-        match value {
+
+        let field = &fields[0];
+        assert_eq!(field.field_number.as_u32(), 1);
+        match &field.value {
             FieldValue::Varint(varint) => {
                 assert_eq!(varint.to_uint64(), 150);
             }
@@ -165,20 +233,17 @@ mod tests {
 
     #[test]
     fn test_parse_len_field() {
-        let data = vec![0x12, 0x03, 0x48, 0x65, 0x6c]; // field 2: "Hel"
-        let reader = Cursor::new(data);
+        let reader = &[0x12, 0x03, 0x48, 0x65, 0x6c][..]; // field 2: "Hel"
 
-        let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
-
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(fields.len(), 1);
-        let (field_num, value) = &fields[0];
-        assert_eq!(*field_num, 2);
-        match value {
+
+        let field = &fields[0];
+        assert_eq!(field.field_number.as_u32(), 2);
+        match &field.value {
             FieldValue::Len(data) => {
                 assert_eq!(data, b"Hel");
             }
@@ -188,22 +253,19 @@ mod tests {
 
     #[test]
     fn test_parse_i32_field() {
-        let data = vec![0x15, 0x00, 0x00, 0x00, 0x00]; // field 2: 0 (i32)
-        let reader = Cursor::new(data);
+        let reader = &[0x15, 0x78, 0x56, 0x34, 0x12][..]; // field 2: 0x12345678 (Fixed32)
 
-        let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
-
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(fields.len(), 1);
-        let (field_num, value) = &fields[0];
-        assert_eq!(*field_num, 2);
-        match value {
+
+        let field = &fields[0];
+        assert_eq!(field.field_number.as_u32(), 2);
+        match &field.value {
             FieldValue::I32(bytes) => {
-                assert_eq!(*bytes, [0x00, 0x00, 0x00, 0x00]);
+                assert_eq!(*bytes, [0x78, 0x56, 0x34, 0x12]);
             }
             _ => panic!("Expected I32 field"),
         }
@@ -211,22 +273,19 @@ mod tests {
 
     #[test]
     fn test_parse_i64_field() {
-        let data = vec![0x19, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; // field 3: 0 (i64)
-        let reader = Cursor::new(data);
+        let reader = &[0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12][..]; // field 3: 0x1234567890ABCDEF (Fixed64)
 
-        let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
-
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(fields.len(), 1);
-        let (field_num, value) = &fields[0];
-        assert_eq!(*field_num, 3);
-        match value {
+
+        let field = &fields[0];
+        assert_eq!(field.field_number.as_u32(), 3);
+        match &field.value {
             FieldValue::I64(bytes) => {
-                assert_eq!(*bytes, [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+                assert_eq!(*bytes, [0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]);
             }
             _ => panic!("Expected I64 field"),
         }
@@ -234,25 +293,21 @@ mod tests {
 
     #[test]
     fn test_parse_multiple_fields() {
-        let data = vec![
+        let reader = &[
             0x08, 0x96, 0x01, // field 1: 150
             0x12, 0x03, 0x48, 0x65, 0x6c, // field 2: "Hel"
-        ];
-        let reader = Cursor::new(data);
+        ][..];
 
-        let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
-
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(fields.len(), 2);
 
         // Check first field
-        let (field_num, value) = &fields[0];
-        assert_eq!(*field_num, 1);
-        match value {
+        let field = &fields[0];
+        assert_eq!(field.field_number.as_u32(), 1);
+        match &field.value {
             FieldValue::Varint(varint) => {
                 assert_eq!(varint.to_uint64(), 150);
             }
@@ -260,9 +315,9 @@ mod tests {
         }
 
         // Check second field
-        let (field_num, value) = &fields[1];
-        assert_eq!(*field_num, 2);
-        match value {
+        let field = &fields[1];
+        assert_eq!(field.field_number.as_u32(), 2);
+        match &field.value {
             FieldValue::Len(data) => {
                 assert_eq!(data, b"Hel");
             }
@@ -272,16 +327,12 @@ mod tests {
 
     #[test]
     fn test_parse_empty_stream() {
-        let data = vec![];
-        let reader = Cursor::new(data);
+        let reader = &[][..];
 
-        let mut fields = Vec::new();
-        parse_stream(reader, |field| {
-            fields.push((field.field_number.as_u32(), field.value));
-            Ok(())
-        })
-        .unwrap();
-
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(fields.len(), 0);
     }
 }

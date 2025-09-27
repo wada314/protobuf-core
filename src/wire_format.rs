@@ -31,7 +31,7 @@ pub enum WireType {
     /// Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum)
     Varint = 0,
     /// 64-bit fixed-width values (Fixed64, SFixed64, Double)
-    I64 = 1,
+    Int64 = 1,
     /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields)
     Len = 2,
     /// Start group (deprecated feature)
@@ -39,7 +39,7 @@ pub enum WireType {
     /// End group (deprecated feature)
     EGroup = 4,
     /// 32-bit fixed-width values (Fixed32, SFixed32, Float)
-    I32 = 5,
+    Int32 = 5,
 }
 
 impl From<WireType> for u8 {
@@ -55,11 +55,11 @@ impl TryFrom<u8> for WireType {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(WireType::Varint),
-            1 => Ok(WireType::I64),
+            1 => Ok(WireType::Int64),
             2 => Ok(WireType::Len),
             3 => Ok(WireType::SGroup),
             4 => Ok(WireType::EGroup),
-            5 => Ok(WireType::I32),
+            5 => Ok(WireType::Int32),
             _ => Err(crate::ProtobufError::InvalidWireType { value }),
         }
     }
@@ -150,22 +150,22 @@ mod tests {
     #[test]
     fn test_wire_type_from_trait() {
         assert_eq!(u8::from(WireType::Varint), 0);
-        assert_eq!(u8::from(WireType::I64), 1);
+        assert_eq!(u8::from(WireType::Int64), 1);
         assert_eq!(u8::from(WireType::Len), 2);
         assert_eq!(u8::from(WireType::SGroup), 3);
         assert_eq!(u8::from(WireType::EGroup), 4);
-        assert_eq!(u8::from(WireType::I32), 5);
+        assert_eq!(u8::from(WireType::Int32), 5);
     }
 
     #[test]
     fn test_wire_type_try_from_trait() {
         // Test valid wire types
         assert_eq!(WireType::try_from(0).unwrap(), WireType::Varint);
-        assert_eq!(WireType::try_from(1).unwrap(), WireType::I64);
+        assert_eq!(WireType::try_from(1).unwrap(), WireType::Int64);
         assert_eq!(WireType::try_from(2).unwrap(), WireType::Len);
         assert_eq!(WireType::try_from(3).unwrap(), WireType::SGroup);
         assert_eq!(WireType::try_from(4).unwrap(), WireType::EGroup);
-        assert_eq!(WireType::try_from(5).unwrap(), WireType::I32);
+        assert_eq!(WireType::try_from(5).unwrap(), WireType::Int32);
 
         // Test invalid wire types
         let result = WireType::try_from(6);
