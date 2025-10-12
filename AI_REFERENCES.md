@@ -1,21 +1,18 @@
 # AI References for protobuf-core Project
 
 ## Project Overview
-This project aims to create a **language-neutral protobuf utility library** that provides common definitions, constants, enums, and trivial logic implementations. The goal is to minimize entry barriers for developers who want to implement Protocol Buffers in their preferred programming language.
+This project aims to create a **protobuf utility library** that provides common definitions, constants, enums, and trivial logic implementations. The goal is to minimize entry barriers for developers who want to implement Protocol Buffers.
 
 ## Implementation Language
 - **Primary implementation**: Rust
-- **Generated code**: Can target any programming language
 - **Focus**: Rust developers who want to implement protobuf functionality
 
 ## Project Goals
-- Provide common protobuf definitions that can be used across different language implementations
+- Provide common protobuf definitions that can be used across different implementations
 - Reduce the complexity and learning curve for new protobuf implementers
-- Enable more developers to enjoy implementing protobuf in their favorite languages
-- Create a reference implementation that can be ported to various programming languages
+- Enable more developers to enjoy implementing protobuf
 
 ## Key Concepts
-- **Language-neutral**: Not tied to any specific programming language
 - **Common definitions**: Constants, enums, and basic logic that are universal across protobuf implementations
 - **Entry barrier reduction**: Make it easier for developers to start protobuf implementation projects
 - **Educational value**: Help developers understand the core concepts of Protocol Buffers
@@ -24,8 +21,6 @@ This project aims to create a **language-neutral protobuf utility library** that
 1. **Wire format constants** - Basic protobuf wire format definitions
 2. **Integer (de)serialization logic** - Core encoding/decoding algorithms
 3. **Minimum error types** - Essential error handling for protobuf operations
-4. **Basic descriptor structures** - Core types and enums for protobuf descriptors
-5. **Edition support** - Support for different protobuf editions
 
 ## Scope Limitations
 - **No protobuf message implementations** - This library focuses on core utilities, not full message implementations
@@ -34,7 +29,6 @@ This project aims to create a **language-neutral protobuf utility library** that
 
 ## Technical Requirements
 - **Delivery format**: Rust library providing constants and trivial logic
-- **Protobuf version support**: All versions (proto2, proto3) and latest editions
 - **Relationship to existing implementations**: New base for new implementers (no compatibility concerns)
 - **External dependencies**: Minimize external dependencies, with exception for `thiserror` crate (de-facto standard for error handling)
 - **Performance approach**: Avoid performance optimizations, focus on constants and basic logic
