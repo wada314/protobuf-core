@@ -111,7 +111,7 @@ This project aims to create a **protobuf utility library** that provides common 
      - `src/tag.rs` - tag construction and parsing operations
      - `src/varint.rs` - varint encoding/decoding logic
      - `src/wire_format.rs` - wire format constants and definitions
-     - `src/parser.rs` - protobuf message parser (feature-gated)
+     - `src/parser.rs` - low-level field reading utilities (feature-gated)
    - **Benefits**: Clearer namespace hierarchy, better maintainability, follows modern Rust practices
 
 7. **Enhanced Varint I/O API** (`src/varint.rs`)
@@ -133,43 +133,69 @@ This project aims to create a **protobuf utility library** that provides common 
    - **Error Handling**: Added `ProtobufError::IoError` variant for I/O errors
    - **Comprehensive Testing**: All APIs tested with both unit tests and doc tests
 
-8. **Protocol Buffer Parser** (`src/parser.rs`) - **Feature-gated with `parser` feature**
-   - **FieldValue enum** - represents parsed field values:
+8. **Field Reading Utilities** (`src/parser.rs`) - **Feature-gated with `parser` feature**
+   - **Low-level primitives for reading protobuf fields** - not a complete message parser, but building blocks for parsing
+   - **FieldValue enum** - represents raw parsed field values:
      - `Varint(Varint)` - variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum)
      - `I32([u8; 4])` - 32-bit fixed-width values (Fixed32, SFixed32, Float)
      - `I64([u8; 8])` - 64-bit fixed-width values (Fixed64, SFixed64, Double)
      - `Len(Vec<u8>)` - length-delimited values (String, Bytes, embedded messages, packed repeated fields)
-   - **Field struct** - represents a parsed field with field number and value
+   - **Field struct** - represents a parsed field with field number and raw value
    - **ReadExtProtobuf trait** - extension trait for `std::io::Read` types:
-     - `read_protobuf_field()` - reads a single protobuf field
+     - `read_protobuf_field()` - reads a single protobuf field (tag + value)
      - `read_protobuf_fields()` - returns an iterator over all fields
-   - **ProtobufFieldIterator** - iterator for parsing protobuf fields from a reader
+   - **ProtobufFieldIterator** - iterator for reading protobuf fields sequentially from a reader
    - **Benefits**:
-     - Simple, low-level parsing API for protobuf messages
+     - Simple, low-level utilities for reading raw protobuf fields
      - Works with any `std::io::Read` source
      - Handles all wire types including deprecated group types
-     - Natural iterator-based API for processing multiple fields
+     - Natural iterator-based API for processing fields sequentially
      - Proper error handling with detailed error messages
+     - Building blocks for higher-level parsers
    - **Comprehensive Testing**: Covers all wire types and multiple field scenarios
 
 ### 🔄 Next Steps
 9. **Documentation improvements** - Add comprehensive examples and usage guides
 10. **Performance optimizations** - Optimize critical paths if needed
-11. **Additional parser features** - Add helper methods for common field value conversions
+11. **Additional field reading utilities** - Add helper methods for common field value conversions
 
 ## Design Decisions
 
-### Type Naming Convention
-- **Rust types**: Standard Rust integer types (u32, i64, etc.)
-- **Protobuf types**: Explicit protobuf type names (UInt32, SInt64, etc.)
-- **Conversion functions**: Always use protobuf type names to avoid confusion
+### Type Naming Convention - Avoiding Confusion Between Rust Types and Protobuf Types
+
+**Critical Principle**: Do NOT confuse Rust types with Protobuf types. Even though we must use Rust types (u32, i32, u64, i64, bool) in code to represent Protobuf types (UInt32, Int32, SInt32, UInt64, Int64, SInt64, Bool), they are **NOT in 1-to-1 correspondence**.
+
+**Key Differences**:
+- Rust `i32` can represent multiple different Protobuf types:
+  - `Int32` (varint, non-ZigZag encoding)
+  - `SInt32` (varint, ZigZag encoding)
+  - `SFixed32` (fixed 4-byte little-endian, wire type I32)
+  - `Enum` (varint encoding)
+- Rust `u32` can represent:
+  - `UInt32` (varint encoding)
+  - `Fixed32` (fixed 4-byte little-endian, wire type I32)
+- Rust `i64` can represent:
+  - `Int64` (varint, non-ZigZag encoding)
+  - `SInt64` (varint, ZigZag encoding)
+  - `SFixed64` (fixed 8-byte little-endian, wire type I64)
+- Rust `u64` can represent:
+  - `UInt64` (varint encoding)
+  - `Fixed64` (fixed 8-byte little-endian, wire type I64)
+- **Same Rust type, completely different wire encodings**: Protobuf types using the same Rust type can have entirely different wire formats (varint vs fixed-width, ZigZag vs non-ZigZag)
+
+**Conversion Function Naming**:
+- Always use explicit Protobuf type names in function names (e.g., `from_sint32()`, `to_uint64()`)
+- The Rust types are already clear from function signatures (return types or argument types)
+- Example: `to_sint32() -> Result<i32>` - the Rust type `i32` is obvious from the return type, but `sint32` clarifies it uses ZigZag decoding for the Protobuf `SInt32` type
+- Example: `from_int32(value: i32)` vs `from_sint32(value: i32)` - both take Rust `i32`, but represent different Protobuf types with different encodings
+
 
 ### File Organization
 - `wire_format.rs` - Core constants and wire type definitions
 - `varint.rs` - Varint encoding/decoding logic
 - `tag.rs` - Tag construction and parsing operations
 - `field_number.rs` - Field number validation and utilities
-- `parser.rs` - Protocol buffer message parser (feature-gated)
+- `parser.rs` - Low-level field reading utilities (feature-gated)
 
 
 ## Official Protocol Buffer Documentation:
