@@ -133,7 +133,7 @@ This project aims to create a **protobuf utility library** that provides common 
    - **Error Handling**: Added `ProtobufError::IoError` variant for I/O errors
    - **Comprehensive Testing**: All APIs tested with both unit tests and doc tests
 
-8. **Field Reading Utilities** (`src/parser.rs`) - **Feature-gated with `read` feature**
+8. **Field Reading Utilities** (`src/field/read.rs`) - **Feature-gated with `read` feature**
    - **Low-level primitives for reading protobuf fields** - not a complete message parser, but building blocks for parsing
    - **FieldValue enum** - represents raw parsed field values:
      - `Varint(Varint)` - variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum)
@@ -161,7 +161,7 @@ This project aims to create a **protobuf utility library** that provides common 
      - Building blocks for higher-level parsers
    - **Comprehensive Testing**: Covers all wire types and multiple field scenarios
 
-9. **Field Writing Utilities** (`src/parser.rs`) - **Feature-gated with `write` feature**
+9. **Field Writing Utilities** (`src/field/write.rs`) - **Feature-gated with `write` feature**
    - **Low-level primitives for writing protobuf fields** - not a complete message serializer, but building blocks for serialization
    - **WriteExtProtobuf trait** - extension trait for `std::io::Write` types:
      - `write_protobuf_field()` - writes a single protobuf field (tag + value), returns bytes written
@@ -173,7 +173,7 @@ This project aims to create a **protobuf utility library** that provides common 
    - **Feature Configuration**:
      - Both `read` and `write` features are enabled by default
      - Can be used independently: `--no-default-features --features read` or `--features write`
-     - The `parser` module is available when either feature is enabled
+     - The `field` module is available when either feature is enabled
      - `Field` and `FieldValue` types are available when the module is enabled
    - **Benefits**:
      - Simple, low-level utilities for writing raw protobuf fields
@@ -225,7 +225,11 @@ This project aims to create a **protobuf utility library** that provides common 
 - `varint.rs` - Varint encoding/decoding logic
 - `tag.rs` - Tag construction and parsing operations
 - `field_number.rs` - Field number validation and utilities
-- `parser.rs` - Low-level field I/O utilities (reading with `read` feature, writing with `write` feature)
+- `field/` - Field-level I/O utilities module
+  - `field.rs` - Module definition and re-exports
+  - `value.rs` - Field and FieldValue types (always available)
+  - `read.rs` - Field reading utilities (`read` feature)
+  - `write.rs` - Field writing utilities (`write` feature)
 
 
 ## Official Protocol Buffer Documentation:

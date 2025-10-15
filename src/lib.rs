@@ -17,20 +17,20 @@
 //! This library provides common definitions, constants, enums, and basic logic
 //! for implementing Protocol Buffers in Rust.
 
-pub mod field_number;
 #[cfg(any(feature = "read", feature = "write"))]
-pub mod parser;
+pub mod field;
+pub mod field_number;
 pub mod tag;
 pub mod varint;
 pub mod wire_format;
 
-pub use self::field_number::FieldNumber;
 #[cfg(feature = "write")]
-pub use self::parser::WriteExtProtobuf;
+pub use self::field::WriteExtProtobuf;
 #[cfg(any(feature = "read", feature = "write"))]
-pub use self::parser::{Field, FieldValue};
+pub use self::field::{Field, FieldValue};
 #[cfg(feature = "read")]
-pub use self::parser::{ProtobufFieldIterator, ReadExtProtobuf};
+pub use self::field::{ProtobufFieldIterator, ReadExtProtobuf};
+pub use self::field_number::FieldNumber;
 pub use self::tag::{ReadExtTag, Tag, read_tag};
 pub use self::varint::{IteratorExtVarint, ReadExtVarint, Varint, WriteExtVarint};
 pub use self::wire_format::{MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER, WireType};
