@@ -2,6 +2,10 @@
 name = "protobuf-core"
 version = "0.1.0"
 edition = "2024"
+description = "A primitive utility library for Protocol Buffers in Rust"
+license = "Apache-2.0"
+repository = "https://github.com/wada314/protobuf-core"
+documentation = "https://docs.rs/protobuf-core/"
 
 [dependencies]
 thiserror = "1.0"
