@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Protocol Buffers parser
+//! Low-level field reading utilities for Protocol Buffers
 //!
-//! This module provides a simple parser for Protocol Buffers messages.
-//! It reads and parses protobuf fields from input sources that implement `std::io::Read`.
-//! The parser is provided as an extension trait `ReadExtProtobuf` for `std::io::Read` types.
+//! This module provides primitive utilities for reading raw protobuf fields from byte streams.
+//! These are building blocks for constructing higher-level parsers, not a complete message parser.
+//!
+//! The utilities read fields sequentially from input sources that implement `std::io::Read`,
+//! returning raw field values (varint bytes, fixed-width bytes, or length-delimited bytes)
+//! without interpretation of the semantic meaning.
 //!
 //! This module is only available when the `parser` feature is enabled.
 
@@ -27,7 +30,11 @@ use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
 use ::std::io::Read;
 
-/// A parsed field value
+/// A raw field value read from the wire
+///
+/// This represents the raw bytes of a field value without semantic interpretation.
+/// The caller is responsible for converting these raw values to the appropriate types
+/// based on the field's schema definition.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue {
     /// Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum)
@@ -40,14 +47,17 @@ pub enum FieldValue {
     Len(Vec<u8>),
 }
 
-/// A parsed field
+/// A raw field read from the wire
+///
+/// Contains the field number and the raw field value.
+/// The caller must interpret the value based on the message schema.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
     pub field_number: FieldNumber,
     pub value: FieldValue,
 }
 
-/// Iterator over protobuf fields from a reader
+/// Iterator for reading raw protobuf fields sequentially from a reader
 pub struct ProtobufFieldIterator<R> {
     reader: R,
 }
@@ -67,12 +77,15 @@ where
     }
 }
 
-/// Extension trait for parsing Protocol Buffers from `Read` types
+/// Extension trait for reading raw Protocol Buffer fields from `Read` types
+///
+/// This trait provides low-level utilities for reading field-by-field from a byte stream.
+/// It does not provide semantic interpretation - that is the caller's responsibility.
 pub trait ReadExtProtobuf {
-    /// Read and parse a single protobuf field from the reader
+    /// Read a single raw protobuf field from the reader
     ///
     /// Returns `Ok(Some(field))` if a field was successfully read,
-    /// `Ok(None)` if the reader has reached end-of-input, or an error if parsing failed.
+    /// `Ok(None)` if the reader has reached end-of-input, or an error if reading failed.
     ///
     /// # Example
     /// ```
@@ -94,7 +107,10 @@ pub trait ReadExtProtobuf {
     /// ```
     fn read_protobuf_field(&mut self) -> Result<Option<Field>>;
 
-    /// Read and parse all protobuf fields from the reader, returning an iterator
+    /// Read raw protobuf fields from the reader, returning an iterator
+    ///
+    /// This consumes the reader and returns an iterator that yields fields sequentially.
+    /// Each field contains raw bytes that must be interpreted by the caller.
     ///
     /// # Example
     /// ```
@@ -139,7 +155,7 @@ where
     }
 }
 
-/// Parse a single field from the reader (private)
+/// Read a single raw field from the reader (private helper function)
 fn parse_next_field<R>(reader: &mut R) -> Result<Option<Field>>
 where
     R: Read,
