@@ -12,50 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Low-level field reading utilities for Protocol Buffers
+//! Field reading utilities for Protocol Buffers
 //!
-//! This module provides primitive utilities for reading raw protobuf fields from byte streams.
-//! These are building blocks for constructing higher-level parsers, not a complete message parser.
-//!
-//! The utilities read fields sequentially from input sources that implement `std::io::Read`,
-//! returning raw field values (varint bytes, fixed-width bytes, or length-delimited bytes)
-//! without interpretation of the semantic meaning.
-//!
-//! This module is only available when the `parser` feature is enabled.
+//! This module provides low-level utilities for reading raw protobuf fields from byte streams.
 
-use crate::field_number::FieldNumber;
+use crate::field::{Field, FieldValue};
 use crate::tag::ReadExtTag;
-use crate::varint::Varint;
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
 use ::std::io::Read;
-
-/// A raw field value read from the wire
-///
-/// This represents the raw bytes of a field value without semantic interpretation.
-/// The caller is responsible for converting these raw values to the appropriate types
-/// based on the field's schema definition.
-#[derive(Debug, Clone, PartialEq)]
-pub enum FieldValue {
-    /// Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum)
-    Varint(Varint),
-    /// 32-bit fixed-width values (Fixed32, SFixed32, Float)
-    I32([u8; 4]),
-    /// 64-bit fixed-width values (Fixed64, SFixed64, Double)
-    I64([u8; 8]),
-    /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields)
-    Len(Vec<u8>),
-}
-
-/// A raw field read from the wire
-///
-/// Contains the field number and the raw field value.
-/// The caller must interpret the value based on the message schema.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Field {
-    pub field_number: FieldNumber,
-    pub value: FieldValue,
-}
 
 /// Iterator for reading raw protobuf fields sequentially from a reader
 pub struct ProtobufFieldIterator<R> {
@@ -89,7 +54,7 @@ pub trait ReadExtProtobuf {
     ///
     /// # Example
     /// ```
-    /// use protobuf_core::parser::{ReadExtProtobuf, Field, FieldValue};
+    /// use protobuf_core::field::{ReadExtProtobuf, Field, FieldValue};
     ///
     /// fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let mut reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
@@ -114,7 +79,7 @@ pub trait ReadExtProtobuf {
     ///
     /// # Example
     /// ```
-    /// use protobuf_core::parser::{ReadExtProtobuf, Field, FieldValue};
+    /// use protobuf_core::field::{ReadExtProtobuf, Field, FieldValue};
     ///
     /// fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let reader = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
