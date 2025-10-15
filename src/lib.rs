@@ -18,18 +18,18 @@
 //! for implementing Protocol Buffers in Rust.
 
 pub mod field_number;
-#[cfg(any(feature = "parser", feature = "serializer"))]
+#[cfg(any(feature = "read", feature = "write"))]
 pub mod parser;
 pub mod tag;
 pub mod varint;
 pub mod wire_format;
 
 pub use self::field_number::FieldNumber;
-#[cfg(feature = "serializer")]
+#[cfg(feature = "write")]
 pub use self::parser::WriteExtProtobuf;
-#[cfg(any(feature = "parser", feature = "serializer"))]
+#[cfg(any(feature = "read", feature = "write"))]
 pub use self::parser::{Field, FieldValue};
-#[cfg(feature = "parser")]
+#[cfg(feature = "read")]
 pub use self::parser::{ProtobufFieldIterator, ReadExtProtobuf};
 pub use self::tag::{ReadExtTag, Tag, read_tag};
 pub use self::varint::{IteratorExtVarint, ReadExtVarint, Varint, WriteExtVarint};

@@ -18,34 +18,34 @@
 //! These are building blocks for constructing higher-level parsers and serializers,
 //! not a complete message parser or serializer.
 //!
-//! This module is available when either the `parser` or `serializer` feature is enabled.
+//! This module is available when either the `read` or `write` feature is enabled.
 //! The `Field` and `FieldValue` types are always available when the module is enabled.
 //!
 //! ## Reading (Deserialization)
-//! Available when the `parser` feature is enabled.
+//! Available when the `read` feature is enabled.
 //!
 //! The utilities read fields sequentially from input sources that implement `std::io::Read`,
 //! returning raw field values (varint bytes, fixed-width bytes, or length-delimited bytes)
 //! without interpretation of the semantic meaning.
 //!
 //! ## Writing (Serialization)
-//! Available when the `serializer` feature is enabled.
+//! Available when the `write` feature is enabled.
 //!
 //! The utilities write fields to output targets that implement `std::io::Write`,
 //! encoding field numbers, wire types, and values into the protobuf wire format.
 
-#[cfg(feature = "parser")]
+#[cfg(feature = "read")]
 use crate::ProtobufError;
 use crate::Result;
 use crate::field_number::FieldNumber;
-#[cfg(feature = "parser")]
+#[cfg(feature = "read")]
 use crate::tag::ReadExtTag;
 use crate::tag::Tag;
 use crate::varint::Varint;
 use crate::wire_format::WireType;
-#[cfg(feature = "parser")]
+#[cfg(feature = "read")]
 use ::std::io::Read;
-#[cfg(feature = "serializer")]
+#[cfg(feature = "write")]
 use ::std::io::Write;
 
 /// A raw field value read from the wire
@@ -212,12 +212,12 @@ impl Field {
 }
 
 /// Iterator for reading raw protobuf fields sequentially from a reader
-#[cfg(feature = "parser")]
+#[cfg(feature = "read")]
 pub struct ProtobufFieldIterator<R> {
     reader: R,
 }
 
-#[cfg(feature = "parser")]
+#[cfg(feature = "read")]
 impl<R> Iterator for ProtobufFieldIterator<R>
 where
     R: Read,
@@ -237,7 +237,7 @@ where
 ///
 /// This trait provides low-level utilities for reading field-by-field from a byte stream.
 /// It does not provide semantic interpretation - that is the caller's responsibility.
-#[cfg(feature = "parser")]
+#[cfg(feature = "read")]
 pub trait ReadExtProtobuf {
     /// Read a single raw protobuf field from the reader
     ///
@@ -296,7 +296,7 @@ pub trait ReadExtProtobuf {
         Self: Sized;
 }
 
-#[cfg(feature = "parser")]
+#[cfg(feature = "read")]
 impl<R> ReadExtProtobuf for R
 where
     R: Read,
@@ -314,7 +314,7 @@ where
 }
 
 /// Read a single raw field from the reader (private helper function)
-#[cfg(feature = "parser")]
+#[cfg(feature = "read")]
 fn parse_next_field<R>(reader: &mut R) -> Result<Option<Field>>
 where
     R: Read,
@@ -370,8 +370,8 @@ where
 /// This trait provides low-level utilities for writing fields to a byte stream.
 /// It is the counterpart to `ReadExtProtobuf` for serialization.
 ///
-/// This trait is only available when the `serializer` feature is enabled.
-#[cfg(feature = "serializer")]
+/// This trait is only available when the `write` feature is enabled.
+#[cfg(feature = "write")]
 pub trait WriteExtProtobuf {
     /// Write a single raw protobuf field to the writer (tag + value)
     ///
@@ -423,7 +423,7 @@ pub trait WriteExtProtobuf {
         I: IntoIterator<Item = &'a Field>;
 }
 
-#[cfg(feature = "serializer")]
+#[cfg(feature = "write")]
 impl<W> WriteExtProtobuf for W
 where
     W: Write,
@@ -490,7 +490,7 @@ mod tests {
     use super::*;
 
     // Parser (deserialization) tests
-    #[cfg(feature = "parser")]
+    #[cfg(feature = "read")]
     mod parser_tests {
         use super::*;
 
@@ -638,7 +638,7 @@ mod tests {
     }
 
     // Serialization tests
-    #[cfg(feature = "serializer")]
+    #[cfg(feature = "write")]
     mod serializer_tests {
         use super::*;
 
@@ -775,8 +775,8 @@ mod tests {
         }
     }
 
-    // Roundtrip tests (require both parser and serializer features)
-    #[cfg(all(feature = "parser", feature = "serializer"))]
+    // Roundtrip tests (require both read and write features)
+    #[cfg(all(feature = "read", feature = "write"))]
     mod roundtrip_tests {
         use super::*;
 

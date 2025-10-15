@@ -7,6 +7,6 @@ edition = "2024"
 thiserror = "1.0"
 
 [features]
-default = ["parser", "serializer"]
-parser = []
-serializer = []
+default = ["read", "write"]
+read = []
+write = []
