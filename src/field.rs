@@ -50,11 +50,11 @@ pub mod write;
 
 // Re-export read functionality
 #[cfg(feature = "read")]
-pub use read::{ProtobufFieldIterator, ReadExtProtobuf};
+pub use self::read::{ProtobufFieldIterator, ReadExtProtobuf};
 
 // Re-export write functionality
 #[cfg(feature = "write")]
-pub use write::WriteExtProtobuf;
+pub use self::write::WriteExtProtobuf;
 
 /// A raw field value read from the wire
 ///
