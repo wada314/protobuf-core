@@ -226,8 +226,7 @@ This project aims to create a **protobuf utility library** that provides common 
 - `tag.rs` - Tag construction and parsing operations
 - `field_number.rs` - Field number validation and utilities
 - `field/` - Field-level I/O utilities module
-  - `field.rs` - Module definition and re-exports
-  - `value.rs` - Field and FieldValue types (always available)
+  - `field.rs` - Module definition, Field and FieldValue types
   - `read.rs` - Field reading utilities (`read` feature)
   - `write.rs` - Field writing utilities (`write` feature)
 

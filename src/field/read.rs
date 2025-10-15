@@ -16,7 +16,7 @@
 //!
 //! This module provides low-level utilities for reading raw protobuf fields from byte streams.
 
-use crate::field::value::{Field, FieldValue};
+use crate::field::{Field, FieldValue};
 use crate::tag::ReadExtTag;
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};

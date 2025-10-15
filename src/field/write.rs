@@ -17,7 +17,7 @@
 //! This module provides low-level utilities for writing raw protobuf fields to byte streams.
 
 use crate::Result;
-use crate::field::value::{Field, FieldValue};
+use crate::field::{Field, FieldValue};
 use crate::tag::Tag;
 use crate::varint::{Varint, WriteExtVarint};
 use crate::wire_format::WireType;
