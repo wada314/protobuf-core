@@ -140,7 +140,14 @@ This project aims to create a **protobuf utility library** that provides common 
      - `I32([u8; 4])` - 32-bit fixed-width values (Fixed32, SFixed32, Float)
      - `I64([u8; 8])` - 64-bit fixed-width values (Fixed64, SFixed64, Double)
      - `Len(Vec<u8>)` - length-delimited values (String, Bytes, embedded messages, packed repeated fields)
+   - **FieldValue helper methods** - convenient constructors for all protobuf types:
+     - Varint types: `from_uint64()`, `from_uint32()`, `from_sint64()`, `from_sint32()`, `from_int64()`, `from_int32()`, `from_bool()`
+     - Fixed-width types: `from_fixed32()`, `from_sfixed32()`, `from_float()`, `from_fixed64()`, `from_sfixed64()`, `from_double()`
+     - Length-delimited types: `from_bytes()`, `from_string()`
+     - Size calculation: `encoded_size()` - calculates encoded size in bytes (excluding tag)
    - **Field struct** - represents a parsed field with field number and raw value
+     - `Field::new()` - creates a new field with given field number and value
+     - `Field::encoded_size()` - calculates total encoded size including tag
    - **ReadExtProtobuf trait** - extension trait for `std::io::Read` types:
      - `read_protobuf_field()` - reads a single protobuf field (tag + value)
      - `read_protobuf_fields()` - returns an iterator over all fields
@@ -154,10 +161,33 @@ This project aims to create a **protobuf utility library** that provides common 
      - Building blocks for higher-level parsers
    - **Comprehensive Testing**: Covers all wire types and multiple field scenarios
 
+9. **Field Writing Utilities** (`src/parser.rs`) - **Feature-gated with `serializer` feature**
+   - **Low-level primitives for writing protobuf fields** - not a complete message serializer, but building blocks for serialization
+   - **WriteExtProtobuf trait** - extension trait for `std::io::Write` types:
+     - `write_protobuf_field()` - writes a single protobuf field (tag + value), returns bytes written
+     - `write_protobuf_fields()` - writes multiple protobuf fields from an iterator, returns total bytes written
+   - **Symmetric API Design** - mirrors `ReadExtProtobuf` for consistency:
+     - Uses same `Field` and `FieldValue` types as reading operations
+     - Automatic wire type detection from field value
+     - Proper encoding of tags, varints, fixed-width values, and length-delimited data
+   - **Feature Configuration**:
+     - Both `parser` and `serializer` features are enabled by default
+     - Can be used independently: `--no-default-features --features parser` or `--features serializer`
+     - The `parser` module is available when either feature is enabled
+     - `Field` and `FieldValue` types are available when the module is enabled
+   - **Benefits**:
+     - Simple, low-level utilities for writing raw protobuf fields
+     - Works with any `std::io::Write` target (Vec<u8>, File, network streams, etc.)
+     - Handles all wire types (Varint, I32, I64, Len)
+     - Natural extension trait API: `writer.write_protobuf_field(&field)`
+     - Size calculation support for pre-allocating buffers
+     - Building blocks for higher-level serializers
+   - **Comprehensive Testing**: Includes roundtrip tests verifying read/write symmetry for all field types
+
 ### 🔄 Next Steps
-9. **Documentation improvements** - Add comprehensive examples and usage guides
-10. **Performance optimizations** - Optimize critical paths if needed
-11. **Additional field reading utilities** - Add helper methods for common field value conversions
+10. **Documentation improvements** - Add comprehensive examples and usage guides
+11. **Performance optimizations** - Optimize critical paths if needed
+12. **Additional utilities** - Add more helper methods for common field operations
 
 ## Design Decisions
 
@@ -195,7 +225,7 @@ This project aims to create a **protobuf utility library** that provides common 
 - `varint.rs` - Varint encoding/decoding logic
 - `tag.rs` - Tag construction and parsing operations
 - `field_number.rs` - Field number validation and utilities
-- `parser.rs` - Low-level field reading utilities (feature-gated)
+- `parser.rs` - Low-level field I/O utilities (reading with `parser` feature, writing with `serializer` feature)
 
 
 ## Official Protocol Buffer Documentation:
