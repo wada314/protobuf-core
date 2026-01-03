@@ -57,8 +57,10 @@ impl<'a> Iterator for ProtobufFieldSliceIterator<'a> {
 pub trait SliceExtProtobuf {
     /// Read a single raw protobuf field from the slice
     ///
-    /// Returns `Ok(Some((field, consumed_bytes)))` if a field was successfully read,
+    /// Returns `Ok(Some(field))` if a field was successfully read,
     /// `Ok(None)` if the slice is empty, or an error if reading failed.
+    ///
+    /// The slice is advanced to point after the consumed field.
     ///
     /// # Example
     /// ```
@@ -66,13 +68,13 @@ pub trait SliceExtProtobuf {
     ///
     /// let mut slice = &[0x08, 0x96, 0x01][..]; // field 1: 150
     ///
-    /// if let Some((field, consumed)) = slice.read_protobuf_field()? {
+    /// if let Some(field) = slice.read_protobuf_field()? {
     ///     assert_eq!(field.field_number.as_u32(), 1);
-    ///     assert_eq!(consumed, 3);
+    ///     // slice now points after the consumed field
     /// }
     /// # Ok::<(), protobuf_core::ProtobufError>(())
     /// ```
-    fn read_protobuf_field(&mut self) -> Result<Option<(Field<&[u8]>, usize)>>;
+    fn read_protobuf_field(&mut self) -> Result<Option<Field<&[u8]>>>;
 
     /// Read raw protobuf fields from the slice, returning an iterator
     ///
@@ -95,11 +97,11 @@ pub trait SliceExtProtobuf {
 }
 
 impl SliceExtProtobuf for &[u8] {
-    fn read_protobuf_field(&mut self) -> Result<Option<(Field<&[u8]>, usize)>> {
+    fn read_protobuf_field(&mut self) -> Result<Option<Field<&[u8]>>> {
         parse_field_from_slice(*self).map(|result| {
             if let Some((field, consumed)) = result {
                 *self = &self[consumed..];
-                Some((field, consumed))
+                Some(field)
             } else {
                 None
             }
@@ -278,9 +280,8 @@ mod tests {
     fn test_slice_ext_read_single_field() {
         let mut slice = &[0x08, 0x96, 0x01][..]; // field 1: 150
 
-        let (field, consumed) = slice.read_protobuf_field().unwrap().unwrap();
+        let field = slice.read_protobuf_field().unwrap().unwrap();
         assert_eq!(field.field_number.as_u32(), 1);
-        assert_eq!(consumed, 3);
         assert!(slice.is_empty());
 
         // Should return None for empty slice
