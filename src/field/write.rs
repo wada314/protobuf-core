@@ -21,7 +21,6 @@ use crate::field::{Field, FieldValue};
 use crate::tag::Tag;
 use crate::varint::{Varint, WriteExtVarint};
 use crate::wire_format::WireType;
-use ::std::borrow::Cow;
 use ::std::io::Write;
 
 /// Extension trait for writing raw Protocol Buffer fields to `Write` types
@@ -148,7 +147,7 @@ mod tests {
     fn test_write_single_varint_field() {
         let mut buffer = Vec::new();
 
-        let field: Field<Cow<'static, [u8]>> = Field::new(
+        let field: Field<Vec<u8>> = Field::new(
             FieldNumber::try_from(1).unwrap(),
             FieldValue::from_uint64(150),
         );
@@ -162,7 +161,7 @@ mod tests {
     fn test_write_len_field() {
         let mut buffer = Vec::new();
 
-        let field: Field<Cow<'static, [u8]>> = Field::new(
+        let field: Field<Vec<u8>> = Field::new(
             FieldNumber::try_from(2).unwrap(),
             FieldValue::from_string("Hel".to_string()),
         );
@@ -175,7 +174,7 @@ mod tests {
     fn test_write_i32_field() {
         let mut buffer = Vec::new();
 
-        let field: Field<Cow<'static, [u8]>> = Field::new(
+        let field: Field<Vec<u8>> = Field::new(
             FieldNumber::try_from(2).unwrap(),
             FieldValue::from_fixed32(0x12345678),
         );
@@ -188,7 +187,7 @@ mod tests {
     fn test_write_i64_field() {
         let mut buffer = Vec::new();
 
-        let field: Field<Cow<'static, [u8]>> = Field::new(
+        let field: Field<Vec<u8>> = Field::new(
             FieldNumber::try_from(3).unwrap(),
             FieldValue::from_fixed64(0x1234567890ABCDEF),
         );
@@ -204,7 +203,7 @@ mod tests {
     fn test_write_multiple_fields() {
         let mut buffer = Vec::new();
 
-        let fields: Vec<Field<Cow<'static, [u8]>>> = vec![
+        let fields: Vec<Field<Vec<u8>>> = vec![
             Field::new(
                 FieldNumber::try_from(1).unwrap(),
                 FieldValue::from_uint64(150),
@@ -227,13 +226,13 @@ mod tests {
 
     #[test]
     fn test_field_encoded_size() {
-        let field: Field<Cow<'static, [u8]>> = Field::new(
+        let field: Field<Vec<u8>> = Field::new(
             FieldNumber::try_from(1).unwrap(),
             FieldValue::from_uint64(150),
         );
         assert_eq!(field.encoded_size(), 3); // tag (1 byte) + value (2 bytes)
 
-        let field: Field<Cow<'static, [u8]>> = Field::new(
+        let field: Field<Vec<u8>> = Field::new(
             FieldNumber::try_from(2).unwrap(),
             FieldValue::from_string("Hello".to_string()),
         );
@@ -243,27 +242,27 @@ mod tests {
     #[test]
     fn test_fieldvalue_constructors() {
         // Varint types
-        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_uint64(42), FieldValue::Varint(_)));
-        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_uint32(42), FieldValue::Varint(_)));
+        assert!(matches!(FieldValue::<Vec<u8>>::from_uint64(42), FieldValue::Varint(_)));
+        assert!(matches!(FieldValue::<Vec<u8>>::from_uint32(42), FieldValue::Varint(_)));
         assert!(matches!(
-            FieldValue::<Cow<'static, [u8]>>::from_sint64(-42),
+            FieldValue::<Vec<u8>>::from_sint64(-42),
             FieldValue::Varint(_)
         ));
         assert!(matches!(
-            FieldValue::<Cow<'static, [u8]>>::from_sint32(-42),
+            FieldValue::<Vec<u8>>::from_sint32(-42),
             FieldValue::Varint(_)
         ));
-        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_int64(-42), FieldValue::Varint(_)));
-        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_int32(-42), FieldValue::Varint(_)));
-        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_bool(true), FieldValue::Varint(_)));
+        assert!(matches!(FieldValue::<Vec<u8>>::from_int64(-42), FieldValue::Varint(_)));
+        assert!(matches!(FieldValue::<Vec<u8>>::from_int32(-42), FieldValue::Varint(_)));
+        assert!(matches!(FieldValue::<Vec<u8>>::from_bool(true), FieldValue::Varint(_)));
 
         // Fixed-width types
-        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_fixed32(42), FieldValue::I32(_)));
-        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_sfixed32(-42), FieldValue::I32(_)));
-        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_float(3.14), FieldValue::I32(_)));
-        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_fixed64(42), FieldValue::I64(_)));
-        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_sfixed64(-42), FieldValue::I64(_)));
-        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_double(3.14), FieldValue::I64(_)));
+        assert!(matches!(FieldValue::<Vec<u8>>::from_fixed32(42), FieldValue::I32(_)));
+        assert!(matches!(FieldValue::<Vec<u8>>::from_sfixed32(-42), FieldValue::I32(_)));
+        assert!(matches!(FieldValue::<Vec<u8>>::from_float(3.14), FieldValue::I32(_)));
+        assert!(matches!(FieldValue::<Vec<u8>>::from_fixed64(42), FieldValue::I64(_)));
+        assert!(matches!(FieldValue::<Vec<u8>>::from_sfixed64(-42), FieldValue::I64(_)));
+        assert!(matches!(FieldValue::<Vec<u8>>::from_double(3.14), FieldValue::I64(_)));
 
         // Length-delimited types
         assert!(matches!(
@@ -287,7 +286,7 @@ mod tests {
             let mut buffer = Vec::new();
 
             // Write
-            let original_field: Field<Cow<'static, [u8]>> = Field::new(
+            let original_field: Field<Vec<u8>> = Field::new(
                 FieldNumber::try_from(1).unwrap(),
                 FieldValue::from_uint64(150),
             );
@@ -305,7 +304,7 @@ mod tests {
             let mut buffer = Vec::new();
 
             // Write
-            let original_field: Field<Cow<'static, [u8]>> = Field::new(
+            let original_field: Field<Vec<u8>> = Field::new(
                 FieldNumber::try_from(2).unwrap(),
                 FieldValue::from_string("Hello, Protocol Buffers!".to_string()),
             );
@@ -323,7 +322,7 @@ mod tests {
             let mut buffer = Vec::new();
 
             // Write
-            let original_fields: Vec<Field<Cow<'static, [u8]>>> = vec![
+            let original_fields: Vec<Field<Vec<u8>>> = vec![
                 Field::new(
                     FieldNumber::try_from(1).unwrap(),
                     FieldValue::from_uint64(150),

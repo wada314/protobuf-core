@@ -37,7 +37,6 @@
 //! The utilities write fields to output targets that implement `std::io::Write`,
 //! encoding field numbers, wire types, and values into the protobuf wire format.
 
-use std::borrow::Cow;
 
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
@@ -68,7 +67,7 @@ pub use self::write::WriteExtProtobuf;
 /// based on the field's schema definition.
 ///
 /// `L` is the type for length-delimited values (Len variant).
-/// For owned data (from `std::io::Read`): use `Cow<'static, [u8]>`
+/// For owned data (from `std::io::Read`): use `Vec<u8>`
 /// For borrowed data (from slices): use `&'a [u8]`
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
@@ -184,7 +183,7 @@ impl<L> FieldValue<L> {
 /// The caller must interpret the value based on the message schema.
 ///
 /// `L` is the type for length-delimited values (FieldValue::Len).
-/// For owned data (from `std::io::Read`): use `Cow<'static, [u8]>`
+/// For owned data (from `std::io::Read`): use `Vec<u8>`
 /// For borrowed data (from slices): use `&'a [u8]`
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
@@ -227,15 +226,15 @@ impl<L> Field<L> {
     }
 }
 
-// Convenience implementations for FieldValue<Cow<'static, [u8]>>
-impl FieldValue<Cow<'static, [u8]>> {
+// Convenience implementations for FieldValue<Vec<u8>>
+impl FieldValue<Vec<u8>> {
     /// Create a field value from raw bytes (Bytes protobuf type)
     pub fn from_bytes(data: Vec<u8>) -> Self {
-        Self::Len(Cow::Owned(data))
+        Self::Len(data)
     }
 
     /// Create a field value from a String protobuf type
     pub fn from_string(s: String) -> Self {
-        Self::Len(Cow::Owned(s.into_bytes()))
+        Self::Len(s.into_bytes())
     }
 }

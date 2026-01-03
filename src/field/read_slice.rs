@@ -138,7 +138,7 @@ impl SliceExtProtobuf for &[u8] {
 /// }
 /// # Ok::<(), protobuf_core::ProtobufError>(())
 /// ```
-fn parse_field_from_slice(data: &[u8]) -> Result<Option<(Field<&[u8]>, usize)>> {
+pub fn parse_field_from_slice(data: &[u8]) -> Result<Option<(Field<&[u8]>, usize)>> {
     if data.is_empty() {
         return Ok(None);
     }
