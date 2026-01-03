@@ -16,6 +16,8 @@
 //!
 //! This module provides low-level utilities for reading raw protobuf fields from byte streams.
 
+use std::borrow::Cow;
+
 use crate::field::{Field, FieldValue};
 use crate::tag::ReadExtTag;
 use crate::wire_format::WireType;
@@ -31,7 +33,7 @@ impl<R> Iterator for ProtobufFieldIterator<R>
 where
     R: Read,
 {
-    type Item = Result<Field>;
+    type Item = Result<Field<Cow<'static, [u8]>>>; // Owned data from Read
 
     fn next(&mut self) -> Option<Self::Item> {
         match parse_next_field(&mut self.reader) {
@@ -70,7 +72,7 @@ pub trait ReadExtProtobuf {
     ///     Ok(())
     /// }
     /// ```
-    fn read_protobuf_field(&mut self) -> Result<Option<Field>>;
+    fn read_protobuf_field(&mut self) -> Result<Option<Field<Cow<'static, [u8]>>>>;
 
     /// Read raw protobuf fields from the reader, returning an iterator
     ///
@@ -108,7 +110,7 @@ impl<R> ReadExtProtobuf for R
 where
     R: Read,
 {
-    fn read_protobuf_field(&mut self) -> Result<Option<Field>> {
+    fn read_protobuf_field(&mut self) -> Result<Option<Field<Cow<'static, [u8]>>>> {
         parse_next_field(self)
     }
 
@@ -121,7 +123,7 @@ where
 }
 
 /// Read a single raw field from the reader (private helper function)
-fn parse_next_field<R>(reader: &mut R) -> Result<Option<Field>>
+fn parse_next_field<R>(reader: &mut R) -> Result<Option<Field<Cow<'static, [u8]>>>>
 where
     R: Read,
 {
@@ -156,7 +158,7 @@ where
             let length = varint.try_to_uint32()? as usize;
             let mut data = vec![0u8; length];
             reader.read_exact(&mut data)?;
-            FieldValue::Len(data)
+            FieldValue::Len(Cow::Owned(data)) // 'static lifetime for owned data
         }
         _ => {
             return Err(ProtobufError::InvalidWireType {
@@ -226,7 +228,7 @@ mod tests {
         assert_eq!(field.field_number.as_u32(), 2);
         match &field.value {
             FieldValue::Len(data) => {
-                assert_eq!(data, b"Hel");
+                assert_eq!(data.as_ref(), b"Hel");
             }
             _ => panic!("Expected Len field"),
         }
@@ -300,7 +302,7 @@ mod tests {
         assert_eq!(field.field_number.as_u32(), 2);
         match &field.value {
             FieldValue::Len(data) => {
-                assert_eq!(data, b"Hel");
+                assert_eq!(data.as_ref(), b"Hel");
             }
             _ => panic!("Expected Len field"),
         }

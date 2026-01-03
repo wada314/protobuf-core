@@ -30,6 +30,8 @@ pub use self::field::WriteExtProtobuf;
 pub use self::field::{Field, FieldValue};
 #[cfg(feature = "read")]
 pub use self::field::{ProtobufFieldIterator, ReadExtProtobuf};
+#[cfg(feature = "read")]
+pub use self::field::read_slice::{ProtobufFieldSliceIterator, SliceExtProtobuf};
 pub use self::field_number::FieldNumber;
 pub use self::tag::{ReadExtTag, Tag, read_tag};
 pub use self::varint::{IteratorExtVarint, ReadExtVarint, Varint, WriteExtVarint};

@@ -21,6 +21,7 @@ use crate::field::{Field, FieldValue};
 use crate::tag::Tag;
 use crate::varint::{Varint, WriteExtVarint};
 use crate::wire_format::WireType;
+use ::std::borrow::Cow;
 use ::std::io::Write;
 
 /// Extension trait for writing raw Protocol Buffer fields to `Write` types
@@ -50,7 +51,7 @@ pub trait WriteExtProtobuf {
     ///     Ok(())
     /// }
     /// ```
-    fn write_protobuf_field(&mut self, field: &Field) -> Result<usize>;
+    fn write_protobuf_field<L: AsRef<[u8]>>(&mut self, field: &Field<L>) -> Result<usize>;
 
     /// Write multiple raw protobuf fields to the writer
     ///
@@ -73,16 +74,16 @@ pub trait WriteExtProtobuf {
     ///     Ok(())
     /// }
     /// ```
-    fn write_protobuf_fields<'a, I>(&mut self, fields: I) -> Result<usize>
+    fn write_protobuf_fields<'a, L: AsRef<[u8]> + 'a, I>(&mut self, fields: I) -> Result<usize>
     where
-        I: IntoIterator<Item = &'a Field>;
+        I: IntoIterator<Item = &'a Field<L>>;
 }
 
 impl<W> WriteExtProtobuf for W
 where
     W: Write,
 {
-    fn write_protobuf_field(&mut self, field: &Field) -> Result<usize> {
+    fn write_protobuf_field<L: AsRef<[u8]>>(&mut self, field: &Field<L>) -> Result<usize> {
         let mut bytes_written = 0;
 
         // Write tag
@@ -114,20 +115,21 @@ where
             }
             FieldValue::Len(data) => {
                 // Write length
-                let length_varint = Varint::from_uint64(data.len() as u64);
+                let data_slice = data.as_ref();
+                let length_varint = Varint::from_uint64(data_slice.len() as u64);
                 bytes_written += self.write_varint(&length_varint)?;
                 // Write data
-                self.write_all(data)?;
-                bytes_written += data.len();
+                self.write_all(data_slice)?;
+                bytes_written += data_slice.len();
             }
         }
 
         Ok(bytes_written)
     }
 
-    fn write_protobuf_fields<'a, I>(&mut self, fields: I) -> Result<usize>
+    fn write_protobuf_fields<'a, L: AsRef<[u8]> + 'a, I>(&mut self, fields: I) -> Result<usize>
     where
-        I: IntoIterator<Item = &'a Field>,
+        I: IntoIterator<Item = &'a Field<L>>,
     {
         let mut total_bytes = 0;
         for field in fields {
@@ -146,7 +148,7 @@ mod tests {
     fn test_write_single_varint_field() {
         let mut buffer = Vec::new();
 
-        let field = Field::new(
+        let field: Field<Cow<'static, [u8]>> = Field::new(
             FieldNumber::try_from(1).unwrap(),
             FieldValue::from_uint64(150),
         );
@@ -160,7 +162,7 @@ mod tests {
     fn test_write_len_field() {
         let mut buffer = Vec::new();
 
-        let field = Field::new(
+        let field: Field<Cow<'static, [u8]>> = Field::new(
             FieldNumber::try_from(2).unwrap(),
             FieldValue::from_string("Hel".to_string()),
         );
@@ -173,7 +175,7 @@ mod tests {
     fn test_write_i32_field() {
         let mut buffer = Vec::new();
 
-        let field = Field::new(
+        let field: Field<Cow<'static, [u8]>> = Field::new(
             FieldNumber::try_from(2).unwrap(),
             FieldValue::from_fixed32(0x12345678),
         );
@@ -186,7 +188,7 @@ mod tests {
     fn test_write_i64_field() {
         let mut buffer = Vec::new();
 
-        let field = Field::new(
+        let field: Field<Cow<'static, [u8]>> = Field::new(
             FieldNumber::try_from(3).unwrap(),
             FieldValue::from_fixed64(0x1234567890ABCDEF),
         );
@@ -202,7 +204,7 @@ mod tests {
     fn test_write_multiple_fields() {
         let mut buffer = Vec::new();
 
-        let fields = vec![
+        let fields: Vec<Field<Cow<'static, [u8]>>> = vec![
             Field::new(
                 FieldNumber::try_from(1).unwrap(),
                 FieldValue::from_uint64(150),
@@ -225,13 +227,13 @@ mod tests {
 
     #[test]
     fn test_field_encoded_size() {
-        let field = Field::new(
+        let field: Field<Cow<'static, [u8]>> = Field::new(
             FieldNumber::try_from(1).unwrap(),
             FieldValue::from_uint64(150),
         );
         assert_eq!(field.encoded_size(), 3); // tag (1 byte) + value (2 bytes)
 
-        let field = Field::new(
+        let field: Field<Cow<'static, [u8]>> = Field::new(
             FieldNumber::try_from(2).unwrap(),
             FieldValue::from_string("Hello".to_string()),
         );
@@ -241,27 +243,27 @@ mod tests {
     #[test]
     fn test_fieldvalue_constructors() {
         // Varint types
-        assert!(matches!(FieldValue::from_uint64(42), FieldValue::Varint(_)));
-        assert!(matches!(FieldValue::from_uint32(42), FieldValue::Varint(_)));
+        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_uint64(42), FieldValue::Varint(_)));
+        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_uint32(42), FieldValue::Varint(_)));
         assert!(matches!(
-            FieldValue::from_sint64(-42),
+            FieldValue::<Cow<'static, [u8]>>::from_sint64(-42),
             FieldValue::Varint(_)
         ));
         assert!(matches!(
-            FieldValue::from_sint32(-42),
+            FieldValue::<Cow<'static, [u8]>>::from_sint32(-42),
             FieldValue::Varint(_)
         ));
-        assert!(matches!(FieldValue::from_int64(-42), FieldValue::Varint(_)));
-        assert!(matches!(FieldValue::from_int32(-42), FieldValue::Varint(_)));
-        assert!(matches!(FieldValue::from_bool(true), FieldValue::Varint(_)));
+        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_int64(-42), FieldValue::Varint(_)));
+        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_int32(-42), FieldValue::Varint(_)));
+        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_bool(true), FieldValue::Varint(_)));
 
         // Fixed-width types
-        assert!(matches!(FieldValue::from_fixed32(42), FieldValue::I32(_)));
-        assert!(matches!(FieldValue::from_sfixed32(-42), FieldValue::I32(_)));
-        assert!(matches!(FieldValue::from_float(3.14), FieldValue::I32(_)));
-        assert!(matches!(FieldValue::from_fixed64(42), FieldValue::I64(_)));
-        assert!(matches!(FieldValue::from_sfixed64(-42), FieldValue::I64(_)));
-        assert!(matches!(FieldValue::from_double(3.14), FieldValue::I64(_)));
+        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_fixed32(42), FieldValue::I32(_)));
+        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_sfixed32(-42), FieldValue::I32(_)));
+        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_float(3.14), FieldValue::I32(_)));
+        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_fixed64(42), FieldValue::I64(_)));
+        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_sfixed64(-42), FieldValue::I64(_)));
+        assert!(matches!(FieldValue::<Cow<'static, [u8]>>::from_double(3.14), FieldValue::I64(_)));
 
         // Length-delimited types
         assert!(matches!(
@@ -285,7 +287,7 @@ mod tests {
             let mut buffer = Vec::new();
 
             // Write
-            let original_field = Field::new(
+            let original_field: Field<Cow<'static, [u8]>> = Field::new(
                 FieldNumber::try_from(1).unwrap(),
                 FieldValue::from_uint64(150),
             );
@@ -303,7 +305,7 @@ mod tests {
             let mut buffer = Vec::new();
 
             // Write
-            let original_field = Field::new(
+            let original_field: Field<Cow<'static, [u8]>> = Field::new(
                 FieldNumber::try_from(2).unwrap(),
                 FieldValue::from_string("Hello, Protocol Buffers!".to_string()),
             );
@@ -321,7 +323,7 @@ mod tests {
             let mut buffer = Vec::new();
 
             // Write
-            let original_fields = vec![
+            let original_fields: Vec<Field<Cow<'static, [u8]>>> = vec![
                 Field::new(
                     FieldNumber::try_from(1).unwrap(),
                     FieldValue::from_uint64(150),
