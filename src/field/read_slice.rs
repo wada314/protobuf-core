@@ -162,9 +162,10 @@ fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [
         }
         WireType::Len => {
             // Read length prefix (varint)
-            let length_varint = slice.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-            // After read_varint, slice points to the start of the value
-            let length = length_varint.try_to_uint32()? as usize;
+            let length = slice
+                .read_varint()?
+                .ok_or(ProtobufError::UnexpectedEof)?
+                .try_to_uint32()? as usize;
             let (value_slice, remaining) = slice
                 .split_at_checked(length)
                 .ok_or(ProtobufError::UnexpectedEof)?;
