@@ -322,6 +322,71 @@ where
     }
 }
 
+/// Extension trait for reading varints from slices.
+///
+/// This trait provides a convenient method to read varints directly from
+/// byte slices.
+///
+/// # Example
+/// ```
+/// use protobuf_core::varint::{SliceExtVarint, Varint};
+///
+/// let data = [0x96, 0x01]; // 150 in varint encoding
+/// let mut slice = &data[..];
+/// let (varint, bytes_consumed) = slice.read_varint().unwrap().unwrap();
+/// assert_eq!(varint.to_uint64(), 150);
+/// assert_eq!(bytes_consumed, 2);
+/// ```
+pub trait SliceExtVarint {
+    /// Read a varint from this slice, returning the varint and the number of bytes consumed.
+    ///
+    /// Returns `Ok(Some((varint, bytes_consumed)))` if successfully read.
+    /// Returns `Ok(None)` if no input is available (empty slice).
+    /// Returns `Err(VarintError::TooLong)` if the varint exceeds MAX_VARINT_SIZE.
+    fn read_varint(&mut self) -> Result<Option<(Varint, usize)>>;
+}
+
+impl SliceExtVarint for &[u8] {
+    fn read_varint(&mut self) -> Result<Option<(Varint, usize)>> {
+        if self.is_empty() {
+            return Ok(None);
+        }
+
+        let mut bytes_read = 0;
+        let mut decoded_value = 0u64;
+        let mut shift = 0;
+
+        for &byte in self.iter().take(MAX_VARINT_BYTES) {
+            if bytes_read >= MAX_VARINT_BYTES {
+                return Err(ProtobufError::VarintDowncastOutOfRange {
+                    value: 0,
+                    target_type: "varint (too long)",
+                });
+            }
+
+            let value = (byte & 0x7F) as u64;
+            decoded_value |= value << shift;
+            bytes_read += 1;
+
+            if byte & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+        }
+
+        if bytes_read == 0 {
+            return Ok(None);
+        }
+
+        // Advance the slice: create a new slice reference and assign it
+        let remaining = &self[bytes_read..];
+        *self = remaining;
+
+        let result_bytes = decoded_value.to_le_bytes();
+        Ok(Some((Varint::new(result_bytes), bytes_read)))
+    }
+}
+
 /// Extension trait for writing varints to Write instances.
 ///
 /// This trait provides a convenient method to write varints directly to

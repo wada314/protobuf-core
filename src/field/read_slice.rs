@@ -20,7 +20,7 @@
 
 use crate::field::{Field, FieldValue};
 use crate::tag::read_tag;
-use crate::varint::IteratorExtVarint;
+use crate::varint::SliceExtVarint;
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
@@ -96,7 +96,7 @@ pub trait SliceExtProtobuf: AsRef<[u8]> {
     ///
     /// # Example
     /// ```
-    /// use protobuf_core::field::read_slice::SliceExtProtobuf;
+    /// use protobuf_core::SliceExtProtobuf;
     ///
     /// let mut slice = &[0x08, 0x96, 0x01][..]; // field 1: 150
     ///
@@ -119,7 +119,7 @@ pub trait SliceExtProtobuf: AsRef<[u8]> {
     ///
     /// # Example
     /// ```
-    /// use protobuf_core::field::read_slice::SliceExtProtobuf;
+    /// use protobuf_core::SliceExtProtobuf;
     ///
     /// let slice = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
     ///
@@ -153,31 +153,7 @@ impl SliceExtProtobuf for &[u8] {
     }
 }
 
-/// Parse a single field from a byte slice, returning the field and the number of bytes consumed.
-///
-/// This function reads a field from the beginning of the slice and returns:
-/// - `Ok(Some((field, consumed_bytes)))` if a field was successfully parsed
-/// - `Ok(None)` if the slice is empty (no field to parse)
-/// - `Err(err)` if parsing failed
-///
-/// The returned `Field<&'a [u8]>` contains references to the input slice,
-/// so the field's lifetime is tied to the input slice.
-///
-/// # Example
-/// ```
-/// use protobuf_core::field::read_slice::parse_field_from_slice;
-///
-/// let data = &[0x08, 0x96, 0x01][..]; // field 1: 150
-/// match parse_field_from_slice(data)? {
-///     Some((field, consumed)) => {
-///         assert_eq!(field.field_number.as_u32(), 1);
-///         assert_eq!(consumed, 3);
-///     }
-///     None => {}
-/// }
-/// # Ok::<(), protobuf_core::ProtobufError>(())
-/// ```
-pub fn parse_field_from_slice(data: &[u8]) -> Result<Option<(Field<&[u8]>, usize)>> {
+fn parse_field_from_slice(data: &[u8]) -> Result<Option<(Field<&[u8]>, usize)>> {
     if data.is_empty() {
         return Ok(None);
     }
@@ -197,13 +173,12 @@ pub fn parse_field_from_slice(data: &[u8]) -> Result<Option<(Field<&[u8]>, usize
 
     let value = match tag.wire_type {
         WireType::Varint => {
-            let varint_iter = remaining_after_tag.iter().copied();
-            let varint = match varint_iter.try_collect_varint() {
-                Ok(Some(v)) => v,
-                Ok(None) => {
+            let mut slice_ref = remaining_after_tag;
+            let (varint, _varint_bytes) = match (&mut slice_ref).read_varint()? {
+                Some(v) => v,
+                None => {
                     return Err(ProtobufError::UnexpectedEof);
                 }
-                Err(e) => return Err(e),
             };
             FieldValue::Varint(varint)
         }
@@ -225,16 +200,14 @@ pub fn parse_field_from_slice(data: &[u8]) -> Result<Option<(Field<&[u8]>, usize
         }
         WireType::Len => {
             // Read length prefix (varint)
-            let length_iter = remaining_after_tag.iter().copied();
-            let length_varint = match length_iter.try_collect_varint() {
-                Ok(Some(v)) => v,
-                Ok(None) => {
+            let mut slice_ref = remaining_after_tag;
+            let (length_varint, length_bytes) = match (&mut slice_ref).read_varint()? {
+                Some(v) => v,
+                None => {
                     return Err(ProtobufError::UnexpectedEof);
                 }
-                Err(e) => return Err(e),
             };
             let length = length_varint.try_to_uint32()? as usize;
-            let length_bytes = length_varint.varint_size();
             let value_start = tag_bytes + length_bytes;
             let value_end = value_start + length;
             if value_end > data.len() {
