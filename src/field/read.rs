@@ -17,7 +17,8 @@
 //! This module provides low-level utilities for reading raw protobuf fields from byte streams.
 
 use crate::field::{Field, FieldValue};
-use crate::tag::ReadExtTag;
+use crate::tag::{IteratorExtTag, ReadExtTag};
+use crate::varint::IteratorExtVarint;
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
 use ::std::io::Read;
@@ -39,6 +40,38 @@ where
             Ok(None) => None,
             Err(err) => Some(Err(err)),
         }
+    }
+}
+
+/// Extension trait for reading raw Protocol Buffer fields from byte iterators.
+///
+/// This trait provides a convenient method to read fields directly from
+/// any iterator that yields bytes.
+///
+/// # Example
+/// ```
+/// use protobuf_core::field::IteratorExtProtobuf;
+///
+/// let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
+/// let mut iter = bytes.into_iter();
+/// let field = iter.read_protobuf_field().unwrap().unwrap();
+/// assert_eq!(field.field_number.as_u32(), 1);
+/// ```
+pub trait IteratorExtProtobuf {
+    /// Read a single raw protobuf field from the iterator.
+    ///
+    /// Returns the Field `Ok(Some(field))` if successfully read.
+    /// Returns `Ok(None)` if no input is available (empty iterator).
+    /// Returns `Err(ProtobufError)` if reading failed.
+    fn read_protobuf_field(&mut self) -> Result<Option<Field<Vec<u8>>>>;
+}
+
+impl<I> IteratorExtProtobuf for I
+where
+    I: Iterator<Item = u8>,
+{
+    fn read_protobuf_field(&mut self) -> Result<Option<Field<Vec<u8>>>> {
+        parse_field_from_iterator(self)
     }
 }
 
@@ -118,6 +151,61 @@ where
     {
         ProtobufFieldIterator { reader: self }
     }
+}
+
+/// Read a single raw field from an iterator (private helper function)
+fn parse_field_from_iterator<I>(iter: &mut I) -> Result<Option<Field<Vec<u8>>>>
+where
+    I: Iterator<Item = u8>,
+{
+    // Read tag
+    let Some(tag) = iter.read_tag()? else {
+        return Ok(None);
+    };
+
+    let value = match tag.wire_type {
+        WireType::Varint => {
+            let Some(varint) = iter.try_collect_varint()? else {
+                return Err(ProtobufError::UnexpectedEof);
+            };
+            FieldValue::Varint(varint)
+        }
+        WireType::Int32 => {
+            let mut bytes = [0u8; 4];
+            for byte in bytes.iter_mut() {
+                *byte = iter.next().ok_or(ProtobufError::UnexpectedEof)?;
+            }
+            FieldValue::I32(bytes)
+        }
+        WireType::Int64 => {
+            let mut bytes = [0u8; 8];
+            for byte in bytes.iter_mut() {
+                *byte = iter.next().ok_or(ProtobufError::UnexpectedEof)?;
+            }
+            FieldValue::I64(bytes)
+        }
+        WireType::Len => {
+            let Some(varint) = iter.try_collect_varint()? else {
+                return Err(ProtobufError::UnexpectedEof);
+            };
+            let length = varint.try_to_uint32()? as usize;
+            let mut data = Vec::with_capacity(length);
+            for _ in 0..length {
+                data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
+            }
+            FieldValue::Len(data)
+        }
+        _ => {
+            return Err(ProtobufError::InvalidWireType {
+                value: tag.wire_type as u8,
+            });
+        }
+    };
+
+    Ok(Some(Field {
+        field_number: tag.field_number,
+        value,
+    }))
 }
 
 /// Read a single raw field from the reader (private helper function)
@@ -315,5 +403,58 @@ mod tests {
             .collect::<std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 0);
+    }
+
+    #[test]
+    fn test_iterator_ext_read_single_field() {
+        use super::IteratorExtProtobuf;
+
+        let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
+        let mut iter = bytes.into_iter();
+        let field = iter.read_protobuf_field().unwrap().unwrap();
+        assert_eq!(field.field_number.as_u32(), 1);
+        match field.value {
+            FieldValue::Varint(varint) => {
+                assert_eq!(varint.to_uint64(), 150);
+            }
+            _ => panic!("Expected Varint field"),
+        }
+
+        // Should return None for empty iterator
+        assert!(iter.read_protobuf_field().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_iterator_ext_read_multiple_fields() {
+        use super::IteratorExtProtobuf;
+
+        let bytes = vec![
+            0x08, 0x96, 0x01, // field 1: 150
+            0x12, 0x03, 0x48, 0x65, 0x6c, // field 2: "Hel"
+        ];
+        let mut iter = bytes.into_iter();
+
+        // Read first field
+        let field1 = iter.read_protobuf_field().unwrap().unwrap();
+        assert_eq!(field1.field_number.as_u32(), 1);
+        match field1.value {
+            FieldValue::Varint(varint) => {
+                assert_eq!(varint.to_uint64(), 150);
+            }
+            _ => panic!("Expected Varint field"),
+        }
+
+        // Read second field
+        let field2 = iter.read_protobuf_field().unwrap().unwrap();
+        assert_eq!(field2.field_number.as_u32(), 2);
+        match field2.value {
+            FieldValue::Len(data) => {
+                assert_eq!(&data[..], b"Hel");
+            }
+            _ => panic!("Expected Len field"),
+        }
+
+        // Should return None for empty iterator
+        assert!(iter.read_protobuf_field().unwrap().is_none());
     }
 }

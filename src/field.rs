@@ -53,7 +53,7 @@ pub mod write;
 
 // Re-export read functionality
 #[cfg(feature = "read")]
-pub use self::read::{ProtobufFieldIterator, ReadExtProtobuf};
+pub use self::read::{IteratorExtProtobuf, ProtobufFieldIterator, ReadExtProtobuf};
 
 // Re-export write functionality
 #[cfg(feature = "write")]
