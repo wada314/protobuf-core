@@ -180,11 +180,10 @@ fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [
             };
             // After read_varint, slice points to the start of the value
             let length = length_varint.try_to_uint32()? as usize;
-            if slice.len() < length {
-                return Err(ProtobufError::UnexpectedEof);
-            }
-            let value_slice = &slice[..length];
-            *slice = &slice[length..];
+            let (value_slice, remaining) = slice
+                .split_at_checked(length)
+                .ok_or(ProtobufError::UnexpectedEof)?;
+            *slice = remaining;
             FieldValue::Len(value_slice)
         }
         _ => {
