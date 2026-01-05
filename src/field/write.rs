@@ -242,8 +242,14 @@ mod tests {
     #[test]
     fn test_fieldvalue_constructors() {
         // Varint types
-        assert!(matches!(FieldValue::<Vec<u8>>::from_uint64(42), FieldValue::Varint(_)));
-        assert!(matches!(FieldValue::<Vec<u8>>::from_uint32(42), FieldValue::Varint(_)));
+        assert!(matches!(
+            FieldValue::<Vec<u8>>::from_uint64(42),
+            FieldValue::Varint(_)
+        ));
+        assert!(matches!(
+            FieldValue::<Vec<u8>>::from_uint32(42),
+            FieldValue::Varint(_)
+        ));
         assert!(matches!(
             FieldValue::<Vec<u8>>::from_sint64(-42),
             FieldValue::Varint(_)
@@ -252,17 +258,44 @@ mod tests {
             FieldValue::<Vec<u8>>::from_sint32(-42),
             FieldValue::Varint(_)
         ));
-        assert!(matches!(FieldValue::<Vec<u8>>::from_int64(-42), FieldValue::Varint(_)));
-        assert!(matches!(FieldValue::<Vec<u8>>::from_int32(-42), FieldValue::Varint(_)));
-        assert!(matches!(FieldValue::<Vec<u8>>::from_bool(true), FieldValue::Varint(_)));
+        assert!(matches!(
+            FieldValue::<Vec<u8>>::from_int64(-42),
+            FieldValue::Varint(_)
+        ));
+        assert!(matches!(
+            FieldValue::<Vec<u8>>::from_int32(-42),
+            FieldValue::Varint(_)
+        ));
+        assert!(matches!(
+            FieldValue::<Vec<u8>>::from_bool(true),
+            FieldValue::Varint(_)
+        ));
 
         // Fixed-width types
-        assert!(matches!(FieldValue::<Vec<u8>>::from_fixed32(42), FieldValue::I32(_)));
-        assert!(matches!(FieldValue::<Vec<u8>>::from_sfixed32(-42), FieldValue::I32(_)));
-        assert!(matches!(FieldValue::<Vec<u8>>::from_float(3.14), FieldValue::I32(_)));
-        assert!(matches!(FieldValue::<Vec<u8>>::from_fixed64(42), FieldValue::I64(_)));
-        assert!(matches!(FieldValue::<Vec<u8>>::from_sfixed64(-42), FieldValue::I64(_)));
-        assert!(matches!(FieldValue::<Vec<u8>>::from_double(3.14), FieldValue::I64(_)));
+        assert!(matches!(
+            FieldValue::<Vec<u8>>::from_fixed32(42),
+            FieldValue::I32(_)
+        ));
+        assert!(matches!(
+            FieldValue::<Vec<u8>>::from_sfixed32(-42),
+            FieldValue::I32(_)
+        ));
+        assert!(matches!(
+            FieldValue::<Vec<u8>>::from_float(3.14),
+            FieldValue::I32(_)
+        ));
+        assert!(matches!(
+            FieldValue::<Vec<u8>>::from_fixed64(42),
+            FieldValue::I64(_)
+        ));
+        assert!(matches!(
+            FieldValue::<Vec<u8>>::from_sfixed64(-42),
+            FieldValue::I64(_)
+        ));
+        assert!(matches!(
+            FieldValue::<Vec<u8>>::from_double(3.14),
+            FieldValue::I64(_)
+        ));
 
         // Length-delimited types
         assert!(matches!(

@@ -37,7 +37,6 @@
 //! The utilities write fields to output targets that implement `std::io::Write`,
 //! encoding field numbers, wire types, and values into the protobuf wire format.
 
-
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
