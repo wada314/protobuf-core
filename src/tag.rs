@@ -59,23 +59,43 @@ impl Tag {
     }
 }
 
-/// Read a tag from a byte iterator.
+/// Extension trait for reading tags from byte iterators.
 ///
-/// Returns the tag containing field number and wire type.
-/// Returns `Ok(None)` if no input is available.
-/// Returns `Err(ProtobufError)` if the tag is malformed.
-pub fn read_tag<I>(iter: &mut I) -> Result<Option<Tag>>
+/// This trait provides a convenient method to read tags directly from
+/// any iterator that yields bytes.
+///
+/// # Example
+/// ```
+/// use protobuf_core::tag::IteratorExtTag;
+///
+/// let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
+/// let mut iter = bytes.into_iter();
+/// let tag = iter.read_tag().unwrap().unwrap();
+/// assert_eq!(tag.field_number.as_u32(), 1);
+/// ```
+pub trait IteratorExtTag {
+    /// Read a tag from this iterator.
+    ///
+    /// Returns the Tag `Ok(Some(tag))` if successfully read.
+    /// Returns `Ok(None)` if no input is available (empty iterator).
+    /// Returns `Err(ProtobufError)` if the tag is malformed.
+    fn read_tag(&mut self) -> Result<Option<Tag>>;
+}
+
+impl<I> IteratorExtTag for I
 where
     I: Iterator<Item = u8>,
 {
-    use crate::varint::IteratorExtVarint;
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
+        use crate::varint::IteratorExtVarint;
 
-    let varint_result = iter.try_collect_varint()?;
-    let Some(varint) = varint_result else {
-        return Ok(None);
-    };
-    let tag = Tag::from_encoded(varint)?;
-    Ok(Some(tag))
+        let varint_result = self.try_collect_varint()?;
+        let Some(varint) = varint_result else {
+            return Ok(None);
+        };
+        let tag = Tag::from_encoded(varint)?;
+        Ok(Some(tag))
+    }
 }
 
 /// Extension trait for reading tags from Read instances.
@@ -229,22 +249,26 @@ mod tests {
 
     #[test]
     fn test_read_tag() {
+        use super::IteratorExtTag;
+
         let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
         let mut iter = bytes.into_iter();
-        let tag = read_tag(&mut iter).unwrap().unwrap();
+        let tag = iter.read_tag().unwrap().unwrap();
         assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
         assert_eq!(tag.wire_type, WireType::Varint);
     }
 
     #[test]
     fn test_read_tag_u64_overflow() {
+        use super::IteratorExtTag;
+
         // Test case where the varint value exceeds u32::MAX
         // This should trigger VarintDowncastOutOfRange error
         // u32::MAX = 4,294,967,295 (0xFFFFFFFF)
         // Use 0x100000000 (4,294,967,296) which exceeds u32::MAX
         let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x10]; // Value: 0x100000000 (exceeds u32::MAX)
         let mut iter = bytes.into_iter();
-        let result = read_tag(&mut iter);
+        let result = iter.read_tag();
 
         assert!(result.is_err());
         if let Err(ProtobufError::VarintDowncastOutOfRange { value, target_type }) = result {

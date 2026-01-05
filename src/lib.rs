@@ -35,7 +35,7 @@ pub use self::field::{Field, FieldValue};
 pub use self::field::{ProtobufFieldIterator, ReadExtProtobuf};
 pub use self::field_number::FieldNumber;
 pub use self::slice::SliceAdvance;
-pub use self::tag::{ReadExtTag, SliceExtTag, Tag, read_tag};
+pub use self::tag::{IteratorExtTag, ReadExtTag, SliceExtTag, Tag};
 pub use self::varint::{IteratorExtVarint, ReadExtVarint, SliceExtVarint, Varint, WriteExtVarint};
 pub use self::wire_format::{MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER, WireType};
 
