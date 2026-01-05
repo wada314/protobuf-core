@@ -19,39 +19,12 @@
 //! this module works directly with slices and returns references to sub-slices.
 
 use crate::field::{Field, FieldValue};
+use crate::slice::SliceAdvance;
 use crate::tag::read_tag;
 use crate::varint::SliceExtVarint;
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
-use ::std::io::Cursor;
-
-/// Trait for types that can advance by consuming bytes.
-///
-/// This trait allows types to "progress" forward in a slice or buffer,
-/// which is necessary for `read_protobuf_field` to work.
-pub trait SliceAdvance {
-    /// Advance by `consumed` bytes.
-    ///
-    /// This conceptually advances the position in the slice or buffer
-    /// by the given number of bytes.
-    fn advance(&mut self, consumed: usize);
-}
-
-/// Implementation for `&[u8]` - advances by reassigning the reference.
-impl SliceAdvance for &[u8] {
-    fn advance(&mut self, consumed: usize) {
-        *self = &self[consumed..];
-    }
-}
-
-/// Implementation for `Cursor<T>` where `T: AsRef<[u8]>` - advances by updating position.
-impl<T: AsRef<[u8]>> SliceAdvance for Cursor<T> {
-    fn advance(&mut self, consumed: usize) {
-        let current_pos = self.position();
-        self.set_position(current_pos + consumed as u64);
-    }
-}
 
 /// Iterator for reading raw protobuf fields sequentially from a slice
 pub struct ProtobufFieldSliceIterator<'a> {

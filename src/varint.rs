@@ -19,9 +19,10 @@
 //!
 //! This is a **reference implementation**. Not optimized for performance.
 
+use crate::slice::SliceAdvance;
 use crate::wire_format::MAX_VARINT_BYTES;
 use crate::{ProtobufError, Result};
-use ::std::convert::TryFrom;
+use ::std::convert::{AsRef, TryFrom};
 use ::std::io::{Read, Write};
 
 /// A deserialized varint value.
@@ -342,15 +343,19 @@ pub trait SliceExtVarint {
     fn read_varint(&mut self) -> Result<Option<Varint>>;
 }
 
-impl SliceExtVarint for &[u8] {
+impl<S> SliceExtVarint for S
+where
+    S: AsRef<[u8]> + SliceAdvance,
+{
     fn read_varint(&mut self) -> Result<Option<Varint>> {
-        if self.is_empty() {
+        let slice = self.as_ref();
+        if slice.is_empty() {
             return Ok(None);
         }
 
         // Track the number of bytes read by enumerating the iterator
         let mut bytes_read = 0;
-        let mut iter = self.iter().copied().enumerate();
+        let mut iter = slice.iter().copied().enumerate();
         let result = decode_varint_from_bytes(
             iter.by_ref()
                 .map(|(idx, b)| {
@@ -362,9 +367,8 @@ impl SliceExtVarint for &[u8] {
 
         match result {
             Some(varint) => {
-                // Advance the slice: create a new slice reference and assign it
-                let remaining = &self[bytes_read..];
-                *self = remaining;
+                // Advance using SliceAdvance
+                self.advance(bytes_read);
                 Ok(Some(varint))
             }
             None => Ok(None),

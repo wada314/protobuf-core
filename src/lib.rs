@@ -20,6 +20,7 @@
 #[cfg(any(feature = "read", feature = "write"))]
 pub mod field;
 pub mod field_number;
+pub mod slice;
 pub mod tag;
 pub mod varint;
 pub mod wire_format;
@@ -28,12 +29,13 @@ pub mod wire_format;
 pub use self::field::WriteExtProtobuf;
 #[cfg(feature = "read")]
 pub use self::field::read_slice::{ProtobufFieldSliceIterator, SliceExtProtobuf};
+pub use self::slice::SliceAdvance;
 #[cfg(any(feature = "read", feature = "write"))]
 pub use self::field::{Field, FieldValue};
 #[cfg(feature = "read")]
 pub use self::field::{ProtobufFieldIterator, ReadExtProtobuf};
 pub use self::field_number::FieldNumber;
-pub use self::tag::{ReadExtTag, Tag, read_tag};
+pub use self::tag::{ReadExtTag, SliceExtTag, Tag, read_tag};
 pub use self::varint::{IteratorExtVarint, ReadExtVarint, SliceExtVarint, Varint, WriteExtVarint};
 pub use self::wire_format::{MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER, WireType};
 

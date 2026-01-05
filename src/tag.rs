@@ -19,9 +19,10 @@
 
 use crate::Result;
 use crate::field_number::FieldNumber;
+use crate::slice::SliceAdvance;
 use crate::varint::Varint;
 use crate::wire_format::{FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK, WireType};
-use ::std::convert::TryFrom;
+use ::std::convert::{AsRef, TryFrom};
 use ::std::io::Read;
 
 /// A protobuf tag containing field number and wire type
@@ -107,6 +108,48 @@ where
 {
     fn read_tag(&mut self) -> Result<Option<Tag>> {
         use crate::varint::ReadExtVarint;
+
+        let Some(varint) = self.read_varint()? else {
+            return Ok(None);
+        };
+
+        let tag = Tag::from_encoded(varint)?;
+        Ok(Some(tag))
+    }
+}
+
+/// Extension trait for reading tags from slices.
+///
+/// This trait provides a convenient method to read tags directly from
+/// byte slices. The slice is automatically advanced after reading.
+///
+/// # Example
+/// ```
+/// use protobuf_core::tag::SliceExtTag;
+///
+/// let data = [0x08]; // tag 1:0 (field 1, wire type 0)
+/// let mut slice = &data[..];
+/// let tag = slice.read_tag().unwrap().unwrap();
+/// assert_eq!(tag.field_number.as_u32(), 1);
+/// ```
+pub trait SliceExtTag {
+    /// Read a tag from this slice.
+    ///
+    /// The slice is automatically advanced to point to the byte after the tag.
+    /// To get the number of bytes consumed, compare the slice length before and after.
+    ///
+    /// Returns `Ok(Some(tag))` if successfully read.
+    /// Returns `Ok(None)` if no input is available (empty slice).
+    /// Returns `Err(ProtobufError)` if the tag is malformed.
+    fn read_tag(&mut self) -> Result<Option<Tag>>;
+}
+
+impl<S> SliceExtTag for S
+where
+    S: AsRef<[u8]> + SliceAdvance,
+{
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
+        use crate::varint::SliceExtVarint;
 
         let Some(varint) = self.read_varint()? else {
             return Ok(None);
@@ -210,5 +253,42 @@ mod tests {
         } else {
             panic!("Expected VarintDowncastOutOfRange error");
         }
+    }
+
+    #[test]
+    fn test_slice_ext_read_tag() {
+        use super::SliceExtTag;
+
+        let data = [0x08]; // tag 1:0 (field 1, wire type 0)
+        let mut slice = &data[..];
+        let tag = SliceExtTag::read_tag(&mut slice).unwrap().unwrap();
+        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
+        assert_eq!(tag.wire_type, WireType::Varint);
+        assert!(slice.is_empty());
+
+        // Should return None for empty slice
+        assert!(SliceExtTag::read_tag(&mut slice).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_slice_ext_read_tag_multiple_bytes() {
+        use super::SliceExtTag;
+
+        // Create a tag with field number 2 and encode it
+        let field_number = FieldNumber::try_new(2).unwrap();
+        let wire_type = WireType::Varint;
+        let tag = Tag {
+            field_number,
+            wire_type,
+        };
+        let encoded = tag.to_encoded();
+        let (bytes, count) = encoded.encode();
+
+        // Read the tag from the encoded bytes
+        let mut slice = &bytes[..count];
+        let decoded_tag = SliceExtTag::read_tag(&mut slice).unwrap().unwrap();
+        assert_eq!(decoded_tag.field_number, field_number);
+        assert_eq!(decoded_tag.wire_type, wire_type);
+        assert!(slice.is_empty());
     }
 }
