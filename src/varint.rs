@@ -22,7 +22,7 @@
 use crate::slice::SliceAdvance;
 use crate::wire_format::MAX_VARINT_BYTES;
 use crate::{ProtobufError, Result};
-use ::std::convert::{AsRef, TryFrom};
+use ::std::convert::{AsRef, Infallible, TryFrom};
 use ::std::io::{Read, Write};
 
 /// A deserialized varint value.
@@ -277,7 +277,7 @@ where
     I: Iterator<Item = u8>,
 {
     fn try_collect_varint(self) -> Result<Option<Varint>> {
-        decode_varint_from_bytes(self.map(|b| Ok::<u8, std::convert::Infallible>(b)))
+        decode_varint_from_bytes(self.map(|b| Ok::<u8, Infallible>(b)))
     }
 }
 
@@ -360,7 +360,7 @@ where
             iter.by_ref()
                 .map(|(idx, b)| {
                     bytes_read = idx + 1;
-                    Ok::<u8, std::convert::Infallible>(b)
+                    Ok::<u8, Infallible>(b)
                 })
                 .take(MAX_VARINT_BYTES),
         )?;

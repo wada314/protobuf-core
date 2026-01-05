@@ -39,6 +39,7 @@ pub use self::tag::{ReadExtTag, SliceExtTag, Tag, read_tag};
 pub use self::varint::{IteratorExtVarint, ReadExtVarint, SliceExtVarint, Varint, WriteExtVarint};
 pub use self::wire_format::{MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER, WireType};
 
+use ::std::convert::Infallible;
 use ::thiserror::Error;
 
 /// Unified error type for all protobuf operations
@@ -69,8 +70,8 @@ pub enum ProtobufError {
     IoError(#[from] ::std::io::Error),
 }
 
-impl From<::std::convert::Infallible> for ProtobufError {
-    fn from(_: ::std::convert::Infallible) -> Self {
+impl From<Infallible> for ProtobufError {
+    fn from(_: Infallible) -> Self {
         unreachable!()
     }
 }
