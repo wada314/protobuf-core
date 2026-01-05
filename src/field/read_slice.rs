@@ -20,7 +20,7 @@
 
 use crate::field::{Field, FieldValue};
 use crate::slice::SliceAdvance;
-use crate::tag::read_tag;
+use crate::tag::SliceExtTag;
 use crate::varint::SliceExtVarint;
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
@@ -127,20 +127,12 @@ fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [
     }
 
     // Read tag
-    let mut iter = slice.iter().copied();
-    let tag = match read_tag(&mut iter) {
-        Ok(Some(tag)) => tag,
-        Ok(None) => {
+    let tag = match slice.read_tag()? {
+        Some(tag) => tag,
+        None => {
             return Ok(None);
         }
-        Err(e) => return Err(e),
     };
-
-    let tag_bytes = tag.to_encoded().varint_size();
-    if slice.len() < tag_bytes {
-        return Err(ProtobufError::UnexpectedEof);
-    }
-    *slice = &slice[tag_bytes..];
 
     let value = match tag.wire_type {
         WireType::Varint => {
