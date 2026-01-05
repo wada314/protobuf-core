@@ -319,7 +319,7 @@ where
 /// Extension trait for reading varints from slices.
 ///
 /// This trait provides a convenient method to read varints directly from
-/// byte slices.
+/// byte slices. The slice is automatically advanced after reading.
 ///
 /// # Example
 /// ```
@@ -327,21 +327,23 @@ where
 ///
 /// let data = [0x96, 0x01]; // 150 in varint encoding
 /// let mut slice = &data[..];
-/// let (varint, bytes_consumed) = slice.read_varint().unwrap().unwrap();
+/// let varint = slice.read_varint().unwrap().unwrap();
 /// assert_eq!(varint.to_uint64(), 150);
-/// assert_eq!(bytes_consumed, 2);
 /// ```
 pub trait SliceExtVarint {
-    /// Read a varint from this slice, returning the varint and the number of bytes consumed.
+    /// Read a varint from this slice.
     ///
-    /// Returns `Ok(Some((varint, bytes_consumed)))` if successfully read.
+    /// The slice is automatically advanced to point to the byte after the varint.
+    /// To get the number of bytes consumed, compare the slice length before and after.
+    ///
+    /// Returns `Ok(Some(varint))` if successfully read.
     /// Returns `Ok(None)` if no input is available (empty slice).
     /// Returns `Err(VarintError::TooLong)` if the varint exceeds MAX_VARINT_SIZE.
-    fn read_varint(&mut self) -> Result<Option<(Varint, usize)>>;
+    fn read_varint(&mut self) -> Result<Option<Varint>>;
 }
 
 impl SliceExtVarint for &[u8] {
-    fn read_varint(&mut self) -> Result<Option<(Varint, usize)>> {
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
         if self.is_empty() {
             return Ok(None);
         }
@@ -363,7 +365,7 @@ impl SliceExtVarint for &[u8] {
                 // Advance the slice: create a new slice reference and assign it
                 let remaining = &self[bytes_read..];
                 *self = remaining;
-                Ok(Some((varint, bytes_read)))
+                Ok(Some(varint))
             }
             None => Ok(None),
         }

@@ -67,9 +67,11 @@ impl<'a> Iterator for ProtobufFieldSliceIterator<'a> {
             return None;
         }
 
-        let remaining = &self.slice[self.position..];
-        match parse_field_from_slice(remaining) {
-            Ok(Some((field, consumed))) => {
+        let mut remaining = &self.slice[self.position..];
+        match parse_field_from_slice(&mut remaining) {
+            Ok(Some(field)) => {
+                // Update position based on how much slice was advanced
+                let consumed = self.slice.len() - remaining.len() - self.position;
                 self.position += consumed;
                 Some(Ok(field))
             }
@@ -142,24 +144,17 @@ impl SliceExtProtobuf for &[u8] {
     where
         Self: SliceAdvance,
     {
-        parse_field_from_slice(*self).map(|result| {
-            if let Some((field, consumed)) = result {
-                self.advance(consumed);
-                Some(field)
-            } else {
-                None
-            }
-        })
+        parse_field_from_slice(self)
     }
 }
 
-fn parse_field_from_slice(data: &[u8]) -> Result<Option<(Field<&[u8]>, usize)>> {
-    if data.is_empty() {
+fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [u8]>>> {
+    if slice.is_empty() {
         return Ok(None);
     }
 
     // Read tag
-    let mut iter = data.iter().copied();
+    let mut iter = slice.iter().copied();
     let tag = match read_tag(&mut iter) {
         Ok(Some(tag)) => tag,
         Ok(None) => {
@@ -169,12 +164,14 @@ fn parse_field_from_slice(data: &[u8]) -> Result<Option<(Field<&[u8]>, usize)>> 
     };
 
     let tag_bytes = tag.to_encoded().varint_size();
-    let remaining_after_tag = &data[tag_bytes..];
+    if slice.len() < tag_bytes {
+        return Err(ProtobufError::UnexpectedEof);
+    }
+    *slice = &slice[tag_bytes..];
 
     let value = match tag.wire_type {
         WireType::Varint => {
-            let mut slice_ref = remaining_after_tag;
-            let (varint, _varint_bytes) = match (&mut slice_ref).read_varint()? {
+            let varint = match slice.read_varint()? {
                 Some(v) => v,
                 None => {
                     return Err(ProtobufError::UnexpectedEof);
@@ -183,37 +180,39 @@ fn parse_field_from_slice(data: &[u8]) -> Result<Option<(Field<&[u8]>, usize)>> 
             FieldValue::Varint(varint)
         }
         WireType::Int32 => {
-            if remaining_after_tag.len() < 4 {
+            if slice.len() < 4 {
                 return Err(ProtobufError::UnexpectedEof);
             }
             let mut bytes = [0u8; 4];
-            bytes.copy_from_slice(&remaining_after_tag[..4]);
+            bytes.copy_from_slice(&slice[..4]);
+            *slice = &slice[4..];
             FieldValue::I32(bytes)
         }
         WireType::Int64 => {
-            if remaining_after_tag.len() < 8 {
+            if slice.len() < 8 {
                 return Err(ProtobufError::UnexpectedEof);
             }
             let mut bytes = [0u8; 8];
-            bytes.copy_from_slice(&remaining_after_tag[..8]);
+            bytes.copy_from_slice(&slice[..8]);
+            *slice = &slice[8..];
             FieldValue::I64(bytes)
         }
         WireType::Len => {
             // Read length prefix (varint)
-            let mut slice_ref = remaining_after_tag;
-            let (length_varint, length_bytes) = match (&mut slice_ref).read_varint()? {
+            let length_varint = match slice.read_varint()? {
                 Some(v) => v,
                 None => {
                     return Err(ProtobufError::UnexpectedEof);
                 }
             };
+            // After read_varint, slice points to the start of the value
             let length = length_varint.try_to_uint32()? as usize;
-            let value_start = tag_bytes + length_bytes;
-            let value_end = value_start + length;
-            if value_end > data.len() {
+            if slice.len() < length {
                 return Err(ProtobufError::UnexpectedEof);
             }
-            FieldValue::Len(&data[value_start..value_end])
+            let value_slice = &slice[..length];
+            *slice = &slice[length..];
+            FieldValue::Len(value_slice)
         }
         _ => {
             return Err(ProtobufError::InvalidWireType {
@@ -227,8 +226,7 @@ fn parse_field_from_slice(data: &[u8]) -> Result<Option<(Field<&[u8]>, usize)>> 
         value,
     };
 
-    let consumed = field.encoded_size();
-    Ok(Some((field, consumed)))
+    Ok(Some(field))
 }
 
 #[cfg(test)]
@@ -239,9 +237,11 @@ mod tests {
     fn test_parse_varint_field_from_slice() {
         let data = &[0x08, 0x96, 0x01][..]; // field 1: 150
 
-        let (field, consumed) = parse_field_from_slice(data).unwrap().unwrap();
+        let mut slice = data;
+        let field = parse_field_from_slice(&mut slice).unwrap().unwrap();
         assert_eq!(field.field_number.as_u32(), 1);
-        assert_eq!(consumed, 3);
+        assert_eq!(data.len() - slice.len(), 3);
+        assert!(slice.is_empty());
         match field.value {
             FieldValue::Varint(varint) => {
                 assert_eq!(varint.to_uint64(), 150);
@@ -254,9 +254,11 @@ mod tests {
     fn test_parse_len_field_from_slice() {
         let data = &[0x12, 0x03, 0x48, 0x65, 0x6c][..]; // field 2: "Hel"
 
-        let (field, consumed) = parse_field_from_slice(data).unwrap().unwrap();
+        let mut slice = data;
+        let field = parse_field_from_slice(&mut slice).unwrap().unwrap();
         assert_eq!(field.field_number.as_u32(), 2);
-        assert_eq!(consumed, 5);
+        assert_eq!(data.len() - slice.len(), 5);
+        assert!(slice.is_empty());
         match field.value {
             FieldValue::Len(data_slice) => {
                 assert_eq!(data_slice, b"Hel");
@@ -269,9 +271,11 @@ mod tests {
     fn test_parse_i32_field_from_slice() {
         let data = &[0x15, 0x78, 0x56, 0x34, 0x12][..]; // field 2: 0x12345678
 
-        let (field, consumed) = parse_field_from_slice(data).unwrap().unwrap();
+        let mut slice = data;
+        let field = parse_field_from_slice(&mut slice).unwrap().unwrap();
         assert_eq!(field.field_number.as_u32(), 2);
-        assert_eq!(consumed, 5);
+        assert_eq!(data.len() - slice.len(), 5);
+        assert!(slice.is_empty());
         match field.value {
             FieldValue::I32(bytes) => {
                 assert_eq!(bytes, [0x78, 0x56, 0x34, 0x12]);
@@ -282,8 +286,8 @@ mod tests {
 
     #[test]
     fn test_parse_empty_slice() {
-        let data = &[][..];
-        assert!(parse_field_from_slice(data).unwrap().is_none());
+        let mut data = &[][..];
+        assert!(parse_field_from_slice(&mut data).unwrap().is_none());
     }
 
     #[test]
