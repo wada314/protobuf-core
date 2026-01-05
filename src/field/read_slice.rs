@@ -28,23 +28,20 @@ use ::std::convert::AsRef;
 /// Iterator for reading raw protobuf fields sequentially from a slice
 pub struct ProtobufFieldSliceIterator<'a> {
     slice: &'a [u8],
-    position: usize,
 }
 
 impl<'a> Iterator for ProtobufFieldSliceIterator<'a> {
     type Item = Result<Field<&'a [u8]>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.position >= self.slice.len() {
+        if self.slice.is_empty() {
             return None;
         }
 
-        let mut remaining = &self.slice[self.position..];
+        let mut remaining = self.slice;
         match parse_field_from_slice(&mut remaining) {
             Ok(Some(field)) => {
-                // Update position based on how much slice was advanced
-                let consumed = self.slice.len() - remaining.len() - self.position;
-                self.position += consumed;
+                self.slice = remaining;
                 Some(Ok(field))
             }
             Ok(None) => None,
@@ -80,7 +77,6 @@ pub trait SliceExtProtobuf: AsRef<[u8]> {
     fn read_protobuf_fields(&self) -> ProtobufFieldSliceIterator<'_> {
         ProtobufFieldSliceIterator {
             slice: self.as_ref(),
-            position: 0,
         }
     }
 }
