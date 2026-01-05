@@ -19,7 +19,6 @@
 //! this module works directly with slices and returns references to sub-slices.
 
 use crate::field::{Field, FieldValue};
-use crate::slice::SliceAdvance;
 use crate::tag::SliceExtTag;
 use crate::varint::SliceExtVarint;
 use crate::wire_format::WireType;
@@ -59,32 +58,6 @@ impl<'a> Iterator for ProtobufFieldSliceIterator<'a> {
 /// This trait provides low-level utilities for reading field-by-field from a byte slice.
 /// It does not provide semantic interpretation - that is the caller's responsibility.
 pub trait SliceExtProtobuf: AsRef<[u8]> {
-    /// Read a single raw protobuf field from the slice
-    ///
-    /// Returns `Ok(Some(field))` if a field was successfully read,
-    /// `Ok(None)` if the slice is empty, or an error if reading failed.
-    ///
-    /// The slice is advanced to point after the consumed field.
-    ///
-    /// This method requires `Self: SliceAdvance`. Typical types implementing
-    /// `SliceAdvance` are `&[u8]` or `Cursor<T>` where `T: AsRef<[u8]>`.
-    ///
-    /// # Example
-    /// ```
-    /// use protobuf_core::SliceExtProtobuf;
-    ///
-    /// let mut slice = &[0x08, 0x96, 0x01][..]; // field 1: 150
-    ///
-    /// if let Some(field) = slice.read_protobuf_field()? {
-    ///     assert_eq!(field.field_number.as_u32(), 1);
-    ///     // slice now points after the consumed field
-    /// }
-    /// # Ok::<(), protobuf_core::ProtobufError>(())
-    /// ```
-    fn read_protobuf_field(&mut self) -> Result<Option<Field<&[u8]>>>
-    where
-        Self: SliceAdvance;
-
     /// Read raw protobuf fields from the slice, returning an iterator
     ///
     /// This returns an iterator that yields fields sequentially.
@@ -112,14 +85,7 @@ pub trait SliceExtProtobuf: AsRef<[u8]> {
     }
 }
 
-impl SliceExtProtobuf for &[u8] {
-    fn read_protobuf_field(&mut self) -> Result<Option<Field<&[u8]>>>
-    where
-        Self: SliceAdvance,
-    {
-        parse_field_from_slice(self)
-    }
-}
+impl<T> SliceExtProtobuf for T where T: AsRef<[u8]> {}
 
 fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [u8]>>> {
     if slice.is_empty() {
@@ -240,14 +206,20 @@ mod tests {
 
     #[test]
     fn test_slice_ext_read_single_field() {
-        let mut slice = &[0x08, 0x96, 0x01][..]; // field 1: 150
+        let slice = &[0x08, 0x96, 0x01][..]; // field 1: 150
 
-        let field = slice.read_protobuf_field().unwrap().unwrap();
-        assert_eq!(field.field_number.as_u32(), 1);
-        assert!(slice.is_empty());
-
-        // Should return None for empty slice
-        assert!(slice.read_protobuf_field().unwrap().is_none());
+        let fields: Vec<_> = slice
+            .read_protobuf_fields()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        match &fields[0].value {
+            FieldValue::Varint(varint) => {
+                assert_eq!(varint.to_uint64(), 150);
+            }
+            _ => panic!("Expected Varint field"),
+        }
     }
 
     #[test]

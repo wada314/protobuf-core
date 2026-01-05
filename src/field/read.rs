@@ -43,9 +43,29 @@ where
     }
 }
 
+/// Iterator for reading raw protobuf fields sequentially from a byte iterator
+pub struct ProtobufFieldIteratorFromBytes<I> {
+    iter: I,
+}
+
+impl<I> Iterator for ProtobufFieldIteratorFromBytes<I>
+where
+    I: Iterator<Item = u8>,
+{
+    type Item = Result<Field<Vec<u8>>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match parse_field_from_iterator(&mut self.iter) {
+            Ok(Some(field)) => Some(Ok(field)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
+    }
+}
+
 /// Extension trait for reading raw Protocol Buffer fields from byte iterators.
 ///
-/// This trait provides a convenient method to read fields directly from
+/// This trait provides convenient methods to read fields directly from
 /// any iterator that yields bytes.
 ///
 /// # Example
@@ -53,25 +73,29 @@ where
 /// use protobuf_core::field::IteratorExtProtobuf;
 ///
 /// let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
-/// let mut iter = bytes.into_iter();
-/// let field = iter.read_protobuf_field().unwrap().unwrap();
-/// assert_eq!(field.field_number.as_u32(), 1);
+/// let iter = bytes.into_iter();
+/// let fields: Vec<_> = iter.protobuf_fields().collect::<std::result::Result<Vec<_>, _>>().unwrap();
+/// assert_eq!(fields[0].field_number.as_u32(), 1);
 /// ```
 pub trait IteratorExtProtobuf {
-    /// Read a single raw protobuf field from the iterator.
+    /// Convert this iterator into an iterator of protobuf fields.
     ///
-    /// Returns the Field `Ok(Some(field))` if successfully read.
-    /// Returns `Ok(None)` if no input is available (empty iterator).
-    /// Returns `Err(ProtobufError)` if reading failed.
-    fn read_protobuf_field(&mut self) -> Result<Option<Field<Vec<u8>>>>;
+    /// Returns an iterator that yields `Result<Field<Vec<u8>>>`.
+    /// Each field is parsed from the byte stream sequentially.
+    fn protobuf_fields(self) -> ProtobufFieldIteratorFromBytes<Self>
+    where
+        Self: Sized;
 }
 
 impl<I> IteratorExtProtobuf for I
 where
     I: Iterator<Item = u8>,
 {
-    fn read_protobuf_field(&mut self) -> Result<Option<Field<Vec<u8>>>> {
-        parse_field_from_iterator(self)
+    fn protobuf_fields(self) -> ProtobufFieldIteratorFromBytes<Self>
+    where
+        Self: Sized,
+    {
+        ProtobufFieldIteratorFromBytes { iter: self }
     }
 }
 
@@ -80,31 +104,6 @@ where
 /// This trait provides low-level utilities for reading field-by-field from a byte stream.
 /// It does not provide semantic interpretation - that is the caller's responsibility.
 pub trait ReadExtProtobuf {
-    /// Read a single raw protobuf field from the reader
-    ///
-    /// Returns `Ok(Some(field))` if a field was successfully read,
-    /// `Ok(None)` if the reader has reached end-of-input, or an error if reading failed.
-    ///
-    /// # Example
-    /// ```
-    /// use protobuf_core::field::{ReadExtProtobuf, Field, FieldValue};
-    ///
-    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let mut reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
-    ///
-    ///     if let Some(field) = reader.read_protobuf_field()? {
-    ///         match field.value {
-    ///             FieldValue::Varint(varint) => {
-    ///                 println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
-    ///             },
-    ///             _ => {}
-    ///         }
-    ///     }
-    ///     Ok(())
-    /// }
-    /// ```
-    fn read_protobuf_field(&mut self) -> Result<Option<Field<Vec<u8>>>>;
-
     /// Read raw protobuf fields from the reader, returning an iterator
     ///
     /// This consumes the reader and returns an iterator that yields fields sequentially.
@@ -141,10 +140,6 @@ impl<R> ReadExtProtobuf for R
 where
     R: Read,
 {
-    fn read_protobuf_field(&mut self) -> Result<Option<Field<Vec<u8>>>> {
-        parse_next_field(self)
-    }
-
     fn read_protobuf_fields(self) -> ProtobufFieldIterator<Self>
     where
         Self: Sized,
@@ -265,19 +260,20 @@ mod tests {
 
     #[test]
     fn test_read_single_varint_field() {
-        let mut reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
+        let reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
 
-        let field = reader.read_protobuf_field().unwrap().unwrap();
-        assert_eq!(field.field_number.as_u32(), 1);
-        match field.value {
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        match &fields[0].value {
             FieldValue::Varint(varint) => {
                 assert_eq!(varint.to_uint64(), 150);
             }
             _ => panic!("Expected Varint field"),
         }
-
-        // Should return None for end of input
-        assert!(reader.read_protobuf_field().unwrap().is_none());
     }
 
     #[test]
@@ -410,18 +406,19 @@ mod tests {
         use super::IteratorExtProtobuf;
 
         let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
-        let mut iter = bytes.into_iter();
-        let field = iter.read_protobuf_field().unwrap().unwrap();
-        assert_eq!(field.field_number.as_u32(), 1);
-        match field.value {
+        let iter = bytes.into_iter();
+        let fields: Vec<_> = iter
+            .protobuf_fields()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        match &fields[0].value {
             FieldValue::Varint(varint) => {
                 assert_eq!(varint.to_uint64(), 150);
             }
             _ => panic!("Expected Varint field"),
         }
-
-        // Should return None for empty iterator
-        assert!(iter.read_protobuf_field().unwrap().is_none());
     }
 
     #[test]
@@ -432,29 +429,29 @@ mod tests {
             0x08, 0x96, 0x01, // field 1: 150
             0x12, 0x03, 0x48, 0x65, 0x6c, // field 2: "Hel"
         ];
-        let mut iter = bytes.into_iter();
+        let iter = bytes.into_iter();
+        let fields: Vec<_> = iter
+            .protobuf_fields()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 2);
 
-        // Read first field
-        let field1 = iter.read_protobuf_field().unwrap().unwrap();
-        assert_eq!(field1.field_number.as_u32(), 1);
-        match field1.value {
+        // Check first field
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        match &fields[0].value {
             FieldValue::Varint(varint) => {
                 assert_eq!(varint.to_uint64(), 150);
             }
             _ => panic!("Expected Varint field"),
         }
 
-        // Read second field
-        let field2 = iter.read_protobuf_field().unwrap().unwrap();
-        assert_eq!(field2.field_number.as_u32(), 2);
-        match field2.value {
+        // Check second field
+        assert_eq!(fields[1].field_number.as_u32(), 2);
+        match &fields[1].value {
             FieldValue::Len(data) => {
                 assert_eq!(&data[..], b"Hel");
             }
             _ => panic!("Expected Len field"),
         }
-
-        // Should return None for empty iterator
-        assert!(iter.read_protobuf_field().unwrap().is_none());
     }
 }
