@@ -144,40 +144,25 @@ fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [
 
     let value = match tag.wire_type {
         WireType::Varint => {
-            let varint = match slice.read_varint()? {
-                Some(v) => v,
-                None => {
-                    return Err(ProtobufError::UnexpectedEof);
-                }
-            };
-            FieldValue::Varint(varint)
+            FieldValue::Varint(slice.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?)
         }
         WireType::Int32 => {
-            if slice.len() < 4 {
-                return Err(ProtobufError::UnexpectedEof);
-            }
-            let mut bytes = [0u8; 4];
-            bytes.copy_from_slice(&slice[..4]);
-            *slice = &slice[4..];
-            FieldValue::I32(bytes)
+            let (bytes, remaining) = slice
+                .split_first_chunk()
+                .ok_or(ProtobufError::UnexpectedEof)?;
+            *slice = remaining;
+            FieldValue::I32(*bytes)
         }
         WireType::Int64 => {
-            if slice.len() < 8 {
-                return Err(ProtobufError::UnexpectedEof);
-            }
-            let mut bytes = [0u8; 8];
-            bytes.copy_from_slice(&slice[..8]);
-            *slice = &slice[8..];
-            FieldValue::I64(bytes)
+            let (bytes, remaining) = slice
+                .split_first_chunk()
+                .ok_or(ProtobufError::UnexpectedEof)?;
+            *slice = remaining;
+            FieldValue::I64(*bytes)
         }
         WireType::Len => {
             // Read length prefix (varint)
-            let length_varint = match slice.read_varint()? {
-                Some(v) => v,
-                None => {
-                    return Err(ProtobufError::UnexpectedEof);
-                }
-            };
+            let length_varint = slice.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
             // After read_varint, slice points to the start of the value
             let length = length_varint.try_to_uint32()? as usize;
             let (value_slice, remaining) = slice
