@@ -67,5 +67,11 @@ pub enum ProtobufError {
     IoError(#[from] ::std::io::Error),
 }
 
+impl From<::std::convert::Infallible> for ProtobufError {
+    fn from(_: ::std::convert::Infallible) -> Self {
+        unreachable!()
+    }
+}
+
 /// Custom Result type for protobuf operations
 pub type Result<T> = ::std::result::Result<T, ProtobufError>;

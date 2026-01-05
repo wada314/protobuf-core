@@ -206,6 +206,48 @@ impl Varint {
     }
 }
 
+/// Decode a varint from a sequence of bytes.
+///
+/// This is a helper function that implements the core varint decoding logic.
+/// It reads bytes from the iterator until it finds a byte with the continuation bit cleared.
+///
+/// Returns `Ok(Some(Varint))` if successfully decoded.
+/// Returns `Ok(None)` if no bytes were read (empty iterator).
+/// Returns `Err(ProtobufError::VarintDowncastOutOfRange)` if the varint exceeds MAX_VARINT_SIZE.
+/// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
+fn decode_varint_from_bytes<I, E>(bytes: I) -> Result<Option<Varint>>
+where
+    I: Iterator<Item = std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    let mut decoded_value = 0u64;
+    let mut shift = 0;
+    let mut has_data = false;
+
+    for byte_result in bytes.take(MAX_VARINT_BYTES) {
+        let byte = byte_result.map_err(Into::into)?;
+        has_data = true;
+
+        let value = (byte & 0x7F) as u64;
+        decoded_value |= value << shift;
+
+        if byte & 0x80 == 0 {
+            let result_bytes = decoded_value.to_le_bytes();
+            return Ok(Some(Varint::new(result_bytes)));
+        }
+        shift += 7;
+    }
+
+    if !has_data {
+        return Ok(None);
+    }
+
+    Err(ProtobufError::VarintDowncastOutOfRange {
+        value: decoded_value,
+        target_type: "varint (too long)",
+    })
+}
+
 /// Extension trait for collecting varints from byte iterators.
 ///
 /// This trait provides convenient methods to collect varints directly from
@@ -234,36 +276,7 @@ where
     I: Iterator<Item = u8>,
 {
     fn try_collect_varint(self) -> Result<Option<Varint>> {
-        let mut bytes_read = 0;
-        let mut decoded_value = 0u64;
-        let mut shift = 0;
-
-        for byte in self {
-            if bytes_read >= MAX_VARINT_BYTES {
-                return Err(ProtobufError::VarintDowncastOutOfRange {
-                    value: 0,
-                    target_type: "varint (too long)",
-                }); // Varint too long
-            }
-
-            let value = (byte & 0x7F) as u64;
-            decoded_value |= value << shift;
-            bytes_read += 1;
-
-            if byte & 0x80 == 0 {
-                break;
-            }
-            shift += 7;
-        }
-
-        if bytes_read == 0 {
-            return Ok(None); // No bytes read
-        }
-
-        // Convert the decoded u64 value to 8-byte array (little-endian)
-        let result_bytes = decoded_value.to_le_bytes();
-
-        Ok(Some(Varint::new(result_bytes)))
+        decode_varint_from_bytes(self.map(|b| Ok::<u8, std::convert::Infallible>(b)))
     }
 }
 
@@ -297,28 +310,9 @@ where
     R: Read,
 {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
-        let mut decoded_value = 0u64;
-        let mut shift = 0;
-        let mut buffer = [0u8; 1];
-
-        for _ in 0..MAX_VARINT_BYTES {
-            let n = self.read(&mut buffer)?;
-            if n == 0 {
-                return Ok(None); // EOF
-            }
-
-            let byte = buffer[0];
-            let value = (byte & 0x7F) as u64;
-            decoded_value |= value << shift;
-
-            if byte & 0x80 == 0 {
-                break;
-            }
-            shift += 7;
-        }
-
-        let result_bytes = decoded_value.to_le_bytes();
-        Ok(Some(Varint::new(result_bytes)))
+        // Use Bytes iterator which returns Iterator<Item = Result<u8, io::Error>>
+        // decode_varint_from_bytes will handle errors and stop when varint ends
+        decode_varint_from_bytes(self.bytes().take(MAX_VARINT_BYTES))
     }
 }
 
@@ -352,38 +346,27 @@ impl SliceExtVarint for &[u8] {
             return Ok(None);
         }
 
+        // Track the number of bytes read by enumerating the iterator
         let mut bytes_read = 0;
-        let mut decoded_value = 0u64;
-        let mut shift = 0;
+        let mut iter = self.iter().copied().enumerate();
+        let result = decode_varint_from_bytes(
+            iter.by_ref()
+                .map(|(idx, b)| {
+                    bytes_read = idx + 1;
+                    Ok::<u8, std::convert::Infallible>(b)
+                })
+                .take(MAX_VARINT_BYTES),
+        )?;
 
-        for &byte in self.iter().take(MAX_VARINT_BYTES) {
-            if bytes_read >= MAX_VARINT_BYTES {
-                return Err(ProtobufError::VarintDowncastOutOfRange {
-                    value: 0,
-                    target_type: "varint (too long)",
-                });
+        match result {
+            Some(varint) => {
+                // Advance the slice: create a new slice reference and assign it
+                let remaining = &self[bytes_read..];
+                *self = remaining;
+                Ok(Some((varint, bytes_read)))
             }
-
-            let value = (byte & 0x7F) as u64;
-            decoded_value |= value << shift;
-            bytes_read += 1;
-
-            if byte & 0x80 == 0 {
-                break;
-            }
-            shift += 7;
+            None => Ok(None),
         }
-
-        if bytes_read == 0 {
-            return Ok(None);
-        }
-
-        // Advance the slice: create a new slice reference and assign it
-        let remaining = &self[bytes_read..];
-        *self = remaining;
-
-        let result_bytes = decoded_value.to_le_bytes();
-        Ok(Some((Varint::new(result_bytes), bytes_read)))
     }
 }
 
