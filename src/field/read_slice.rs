@@ -134,8 +134,6 @@ fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [
         }
     };
 
-    // We can't use FieldValueReader trait here because of lifetime issues with slices.
-    // Instead, we inline the logic but keep it consistent with the pattern.
     let value = match tag.wire_type {
         WireType::Varint => {
             FieldValue::Varint(slice.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?)
