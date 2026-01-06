@@ -281,6 +281,42 @@ where
     }
 }
 
+/// Extension trait for collecting varints from byte iterators that yield `Result<u8, E>`.
+///
+/// This trait provides convenient methods to collect varints directly from
+/// any iterator that yields `Result<u8, E>`, allowing proper error propagation
+/// from I/O operations.
+///
+/// # Example
+/// ```
+/// use std::io::Cursor;
+/// use protobuf_core::varint::{TryIteratorExtVarint, Varint};
+///
+/// let data = vec![0x96, 0x01]; // 150 in varint encoding
+/// let mut reader = Cursor::new(data);
+/// let iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
+/// let varint = iter.try_collect_varint().unwrap().unwrap();
+/// assert_eq!(varint.to_uint64(), 150);
+/// ```
+pub trait TryIteratorExtVarint {
+    /// Collect a varint from this iterator.
+    ///
+    /// Returns the Varint `Ok(Some(varint))` if successfully read.
+    /// Returns `Ok(None)` if no input is available (empty iterator).
+    /// Returns `Err(ProtobufError)` if the varint exceeds MAX_VARINT_SIZE or an I/O error occurs.
+    fn try_collect_varint(self) -> Result<Option<Varint>>;
+}
+
+impl<I, E> TryIteratorExtVarint for I
+where
+    I: Iterator<Item = std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    fn try_collect_varint(self) -> Result<Option<Varint>> {
+        decode_varint_from_bytes(self)
+    }
+}
+
 /// Extension trait for reading varints from Read instances.
 ///
 /// This trait provides a convenient method to read varints directly from
@@ -528,9 +564,11 @@ mod tests {
 
     #[test]
     fn test_iterator_ext_varint_empty() {
+        use super::IteratorExtVarint;
+
         let bytes = vec![];
         let iter = bytes.into_iter();
-        let varint = iter.try_collect_varint().unwrap();
+        let varint = IteratorExtVarint::try_collect_varint(iter).unwrap();
 
         assert_eq!(varint, None);
     }
@@ -740,5 +778,29 @@ mod tests {
         let varint = Varint::from_bool(original);
         let converted = varint.to_bool();
         assert_eq!(converted, original);
+    }
+
+    #[test]
+    fn test_try_iterator_ext_varint() {
+        use std::io::Cursor;
+        use super::TryIteratorExtVarint;
+
+        let data = vec![0x96, 0x01]; // 150 in varint encoding
+        let reader = Cursor::new(data);
+        let iter = reader.bytes();
+        let varint = TryIteratorExtVarint::try_collect_varint(iter).unwrap().unwrap();
+        assert_eq!(varint.to_uint64(), 150);
+    }
+
+    #[test]
+    fn test_try_iterator_ext_varint_empty() {
+        use std::io::Cursor;
+        use super::TryIteratorExtVarint;
+
+        let data = vec![];
+        let reader = Cursor::new(data);
+        let iter = reader.bytes();
+        let varint = TryIteratorExtVarint::try_collect_varint(iter).unwrap();
+        assert_eq!(varint, None);
     }
 }

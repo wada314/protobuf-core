@@ -17,6 +17,7 @@
 //! This module provides functions for building and parsing protobuf tags,
 //! which combine field numbers with wire types.
 
+use crate::ProtobufError;
 use crate::Result;
 use crate::field_number::FieldNumber;
 use crate::slice::SliceAdvance;
@@ -88,6 +89,49 @@ where
 {
     fn read_tag(&mut self) -> Result<Option<Tag>> {
         use crate::varint::IteratorExtVarint;
+
+        let varint_result = self.try_collect_varint()?;
+        let Some(varint) = varint_result else {
+            return Ok(None);
+        };
+        let tag = Tag::from_encoded(varint)?;
+        Ok(Some(tag))
+    }
+}
+
+/// Extension trait for reading tags from byte iterators that yield `Result<u8, E>`.
+///
+/// This trait provides a convenient method to read tags directly from
+/// any iterator that yields `Result<u8, E>`, allowing proper error propagation
+/// from I/O operations.
+///
+/// # Example
+/// ```
+/// use std::io::Cursor;
+/// use protobuf_core::tag::TryIteratorExtTag;
+///
+/// let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
+/// let mut reader = Cursor::new(data);
+/// let iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
+/// let tag = iter.read_tag().unwrap().unwrap();
+/// assert_eq!(tag.field_number.as_u32(), 1);
+/// ```
+pub trait TryIteratorExtTag {
+    /// Read a tag from this iterator.
+    ///
+    /// Returns the Tag `Ok(Some(tag))` if successfully read.
+    /// Returns `Ok(None)` if no input is available (empty iterator).
+    /// Returns `Err(ProtobufError)` if the tag is malformed or an I/O error occurs.
+    fn read_tag(&mut self) -> Result<Option<Tag>>;
+}
+
+impl<I, E> TryIteratorExtTag for I
+where
+    I: Iterator<Item = std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
+        use crate::varint::TryIteratorExtVarint;
 
         let varint_result = self.try_collect_varint()?;
         let Some(varint) = varint_result else {
@@ -314,5 +358,30 @@ mod tests {
         assert_eq!(decoded_tag.field_number, field_number);
         assert_eq!(decoded_tag.wire_type, wire_type);
         assert!(slice.is_empty());
+    }
+
+    #[test]
+    fn test_try_iterator_ext_read_tag() {
+        use super::TryIteratorExtTag;
+        use std::io::Cursor;
+
+        let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
+        let reader = Cursor::new(data);
+        let mut iter = reader.bytes();
+        let tag = iter.read_tag().unwrap().unwrap();
+        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
+        assert_eq!(tag.wire_type, WireType::Varint);
+    }
+
+    #[test]
+    fn test_try_iterator_ext_read_tag_empty() {
+        use super::TryIteratorExtTag;
+        use std::io::Cursor;
+
+        let data = vec![];
+        let reader = Cursor::new(data);
+        let mut iter = reader.bytes();
+        let tag = iter.read_tag().unwrap();
+        assert_eq!(tag, None);
     }
 }
