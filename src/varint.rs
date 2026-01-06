@@ -215,7 +215,7 @@ impl Varint {
 /// Returns `Ok(Some(Varint))` if successfully decoded.
 /// Returns `Ok(None)` if no bytes were read (empty iterator).
 /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
-/// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
+/// Returns `Err(ProtobufError)` if an error occurs while reading bytes (the error type `E` is converted via `Into<ProtobufError>`).
 fn decode_varint_from_bytes<I, E>(bytes: I) -> Result<Option<Varint>>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
@@ -281,8 +281,8 @@ where
 /// Extension trait for collecting varints from byte iterators that yield `Result<u8, E>`.
 ///
 /// This trait provides convenient methods to collect varints directly from
-/// any iterator that yields `Result<u8, E>`, allowing proper error propagation
-/// from I/O operations.
+/// any iterator that yields `Result<u8, E>`, allowing proper error propagation.
+/// The error type `E` must implement `Into<ProtobufError>`.
 ///
 /// # Example
 /// ```
@@ -301,7 +301,7 @@ pub trait TryIteratorExtVarint {
     /// Returns the Varint `Ok(Some(varint))` if successfully read.
     /// Returns `Ok(None)` if no input is available (empty iterator).
     /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
-    /// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
+    /// Returns `Err(ProtobufError)` if an error occurs while reading bytes (the error type `E` is converted via `Into<ProtobufError>`).
     fn try_collect_varint(self) -> Result<Option<Varint>>;
 }
 
