@@ -24,6 +24,7 @@ use crate::wire_format::{MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLO
 use crate::{ProtobufError, Result};
 use ::std::convert::{AsRef, Infallible, TryFrom};
 use ::std::io::{Read, Write};
+use ::std::iter::Iterator;
 
 /// A deserialized varint value.
 ///
@@ -40,20 +41,19 @@ impl Varint {
     /// Create a new Varint from raw bytes.
     ///
     /// The bytes given are, essentially, a little-endian encoded u64.
+    /// Note that this is NOT the "protobuf encoded" varint bytes.
     pub fn new(bytes: [u8; 8]) -> Self {
         Self(bytes)
     }
 
     /// Get the underlying byte array, the little-endian encoded u64.
+    /// Note that this is NOT the "protobuf encoded" varint bytes.
     pub fn as_bytes(&self) -> &[u8; 8] {
         &self.0
     }
 
     // ============================================================================
-    // from / to protobuf integer types
-    // Important: Intending NOT from / to the Rust's integer types,
-    // but from / to the protobuf integer types!
-    // Thus, we don't provide the `From` / `Into` traits for the Rust's integer types.
+    // from / to rust integer types, using certain protobuf integer types formats.
     // ============================================================================
 
     /// Create a Varint from `u64`, assuming `UInt64` protobuf type.
@@ -207,6 +207,126 @@ impl Varint {
     }
 }
 
+/// Iterator that reads multiple varints from a byte iterator.
+///
+/// This iterator yields `Result<Varint>` for each varint read from the underlying iterator.
+/// It stops when there are no more bytes available or an error occurs.
+pub struct VarintIterator<I: Iterator> {
+    bytes: ::std::iter::Peekable<I>,
+}
+
+/// Iterator adapter that converts `Iterator<Item = u8>` to `Iterator<Item = Result<u8, Infallible>>`.
+///
+/// This wraps each `u8` value from the inner iterator with `Ok()`.
+pub struct ToResultIterator<I> {
+    inner: I,
+}
+
+impl<I> Iterator for ToResultIterator<I>
+where
+    I: Iterator<Item = u8>,
+{
+    type Item = ::std::result::Result<u8, Infallible>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(Ok)
+    }
+}
+
+impl<I, E> VarintIterator<I>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    fn new(bytes: I) -> Self {
+        Self {
+            bytes: bytes.peekable(),
+        }
+    }
+}
+
+impl<I, E> Iterator for VarintIterator<I>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    type Item = Result<Varint>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Check if there are any bytes available
+        if self.bytes.peek().is_none() {
+            return None;
+        }
+
+        // Collect bytes for one varint
+        let mut varint_bytes = Vec::new();
+        let mut found_end = false;
+
+        // Read up to MAX_VARINT_BYTES bytes or until we find the end of varint
+        for _ in 0..MAX_VARINT_BYTES {
+            match self.bytes.next() {
+                Some(Ok(byte)) => {
+                    varint_bytes.push(byte);
+                    if byte & VARINT_CONTINUATION_BIT == 0 {
+                        found_end = true;
+                        break;
+                    }
+                }
+                Some(Err(e)) => return Some(Err(e.into())),
+                None => break, // EOF reached
+            }
+        }
+
+        if varint_bytes.is_empty() {
+            return None;
+        }
+
+        if !found_end && varint_bytes.len() == MAX_VARINT_BYTES {
+            return Some(Err(ProtobufError::VarintTooLong));
+        }
+
+        // Decode the varint from collected bytes
+        match decode_varint_from_bytes(varint_bytes.into_iter().map(|b| Ok::<u8, Infallible>(b))) {
+            Ok(Some(varint)) => Some(Ok(varint)),
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+/// Iterator that reads multiple varints from a slice.
+///
+/// This iterator yields `Result<Varint>` for each varint read from the slice.
+/// The slice is automatically advanced as varints are read.
+/// It stops when there are no more bytes available or an error occurs.
+pub struct SliceVarintIterator<'a, S> {
+    slice: &'a mut S,
+}
+
+impl<'a, S> SliceVarintIterator<'a, S>
+where
+    S: AsRef<[u8]> + SliceAdvance,
+{
+    fn new(slice: &'a mut S) -> Self {
+        Self { slice }
+    }
+}
+
+impl<'a, S> Iterator for SliceVarintIterator<'a, S>
+where
+    S: AsRef<[u8]> + SliceAdvance,
+{
+    type Item = Result<Varint>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.slice.read_varint() {
+            Ok(Some(varint)) => Some(Ok(varint)),
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
 /// Decode a varint from a sequence of bytes.
 ///
 /// This is a helper function that implements the core varint decoding logic.
@@ -267,6 +387,26 @@ pub trait IteratorExtVarint {
     /// Returns `Ok(None)` if no input is available (empty iterator).
     /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
     fn try_collect_varint(self) -> Result<Option<Varint>>;
+
+    /// Create an iterator that reads multiple varints from this iterator.
+    ///
+    /// Returns an iterator that yields `Result<Varint>` for each varint read.
+    /// The iterator stops when there are no more bytes available or an error occurs.
+    ///
+    /// # Example
+    /// ```
+    /// use ::protobuf_core::{IteratorExtVarint, Varint};
+    ///
+    /// let bytes = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
+    /// let iter = bytes.into_iter();
+    /// let varints: Vec<Varint> = iter.try_collect_varints().collect::<Result<Vec<_>>>().unwrap();
+    /// assert_eq!(varints.len(), 2);
+    /// assert_eq!(varints[0].to_uint64(), 150);
+    /// assert_eq!(varints[1].to_uint64(), 127);
+    /// ```
+    fn try_collect_varints(self) -> VarintIterator<ToResultIterator<Self>>
+    where
+        Self: Sized + Iterator<Item = u8>;
 }
 
 impl<I> IteratorExtVarint for I
@@ -275,6 +415,13 @@ where
 {
     fn try_collect_varint(self) -> Result<Option<Varint>> {
         decode_varint_from_bytes(self.map(|b| Ok::<u8, Infallible>(b)))
+    }
+
+    fn try_collect_varints(self) -> VarintIterator<ToResultIterator<Self>>
+    where
+        Self: Sized,
+    {
+        VarintIterator::new(ToResultIterator { inner: self })
     }
 }
 
@@ -303,6 +450,28 @@ pub trait TryIteratorExtVarint {
     /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
     /// Returns `Err(ProtobufError)` if an error occurs while reading bytes (the error type `E` is converted via `Into<ProtobufError>`).
     fn try_collect_varint(self) -> Result<Option<Varint>>;
+
+    /// Create an iterator that reads multiple varints from this iterator.
+    ///
+    /// Returns an iterator that yields `Result<Varint>` for each varint read.
+    /// The iterator stops when there are no more bytes available or an error occurs.
+    ///
+    /// # Example
+    /// ```
+    /// use ::std::io::{Cursor, Read};
+    /// use ::protobuf_core::{TryIteratorExtVarint, Varint};
+    ///
+    /// let data = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
+    /// let reader = Cursor::new(data);
+    /// let iter = reader.bytes();
+    /// let varints: Vec<Varint> = iter.try_collect_varints().collect::<Result<Vec<_>>>().unwrap();
+    /// assert_eq!(varints.len(), 2);
+    /// assert_eq!(varints[0].to_uint64(), 150);
+    /// assert_eq!(varints[1].to_uint64(), 127);
+    /// ```
+    fn try_collect_varints(self) -> VarintIterator<Self>
+    where
+        Self: Sized + Iterator;
 }
 
 impl<I, E> TryIteratorExtVarint for I
@@ -312,6 +481,13 @@ where
 {
     fn try_collect_varint(self) -> Result<Option<Varint>> {
         decode_varint_from_bytes(self)
+    }
+
+    fn try_collect_varints(self) -> VarintIterator<Self>
+    where
+        Self: Sized,
+    {
+        VarintIterator::new(self)
     }
 }
 
@@ -338,6 +514,27 @@ pub trait ReadExtVarint {
     /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
     /// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
     fn read_varint(&mut self) -> Result<Option<Varint>>;
+
+    /// Create an iterator that reads multiple varints from this reader.
+    ///
+    /// Returns an iterator that yields `Result<Varint>` for each varint read.
+    /// The iterator stops when there are no more bytes available (EOF) or an error occurs.
+    ///
+    /// # Example
+    /// ```
+    /// use ::std::io::Cursor;
+    /// use ::protobuf_core::{ReadExtVarint, Varint};
+    ///
+    /// let data = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
+    /// let mut reader = Cursor::new(data);
+    /// let varints: Vec<Varint> = reader.read_varints().collect::<Result<Vec<_>>>().unwrap();
+    /// assert_eq!(varints.len(), 2);
+    /// assert_eq!(varints[0].to_uint64(), 150);
+    /// assert_eq!(varints[1].to_uint64(), 127);
+    /// ```
+    fn read_varints(&mut self) -> VarintIterator<::std::io::Bytes<&mut Self>>
+    where
+        Self: ::std::io::Read;
 }
 
 impl<R> ReadExtVarint for R
@@ -348,6 +545,10 @@ where
         // Use Bytes iterator which returns Iterator<Item = Result<u8, io::Error>>
         // decode_varint_from_bytes will handle errors and stop when varint ends
         decode_varint_from_bytes(self.bytes().take(MAX_VARINT_BYTES))
+    }
+
+    fn read_varints(&mut self) -> VarintIterator<::std::io::Bytes<&mut Self>> {
+        VarintIterator::new(self.bytes())
     }
 }
 
@@ -375,6 +576,27 @@ pub trait SliceExtVarint {
     /// Returns `Ok(None)` if no input is available (empty slice).
     /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
     fn read_varint(&mut self) -> Result<Option<Varint>>;
+
+    /// Create an iterator that reads multiple varints from this slice.
+    ///
+    /// The slice is automatically advanced as varints are read.
+    /// Returns an iterator that yields `Result<Varint>` for each varint read.
+    /// The iterator stops when there are no more bytes available or an error occurs.
+    ///
+    /// # Example
+    /// ```
+    /// use ::protobuf_core::{SliceExtVarint, Varint};
+    ///
+    /// let data = [0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
+    /// let mut slice = &data[..];
+    /// let varints: Vec<Varint> = slice.read_varints().collect::<Result<Vec<_>>>().unwrap();
+    /// assert_eq!(varints.len(), 2);
+    /// assert_eq!(varints[0].to_uint64(), 150);
+    /// assert_eq!(varints[1].to_uint64(), 127);
+    /// ```
+    fn read_varints(&mut self) -> SliceVarintIterator<'_, Self>
+    where
+        Self: Sized;
 }
 
 impl<S> SliceExtVarint for S
@@ -407,6 +629,13 @@ where
             }
             None => Ok(None),
         }
+    }
+
+    fn read_varints(&mut self) -> SliceVarintIterator<'_, Self>
+    where
+        Self: Sized,
+    {
+        SliceVarintIterator::new(self)
     }
 }
 
@@ -802,5 +1031,68 @@ mod tests {
         let iter = reader.bytes();
         let varint = TryIteratorExtVarint::try_collect_varint(iter).unwrap();
         assert_eq!(varint, None);
+    }
+
+    #[test]
+    fn test_iterator_ext_varint_try_collect_varints() {
+        use super::IteratorExtVarint;
+
+        let bytes = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
+        let iter = bytes.into_iter();
+        let varints: Vec<Varint> = iter
+            .try_collect_varints()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(varints.len(), 3);
+        assert_eq!(varints[0].to_uint64(), 150);
+        assert_eq!(varints[1].to_uint64(), 127);
+        assert_eq!(varints[2].to_uint64(), 1);
+    }
+
+    #[test]
+    fn test_try_iterator_ext_varint_try_collect_varints() {
+        use super::TryIteratorExtVarint;
+        use ::std::io::Cursor;
+
+        let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
+        let reader = Cursor::new(data);
+        let iter = reader.bytes();
+        let varints: Vec<Varint> = iter
+            .try_collect_varints()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(varints.len(), 3);
+        assert_eq!(varints[0].to_uint64(), 150);
+        assert_eq!(varints[1].to_uint64(), 127);
+        assert_eq!(varints[2].to_uint64(), 1);
+    }
+
+    #[test]
+    fn test_read_ext_varint_read_varints() {
+        use super::ReadExtVarint;
+        use ::std::io::Cursor;
+
+        let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
+        let mut reader = Cursor::new(data);
+        let varints: Vec<Varint> = reader.read_varints().collect::<Result<Vec<_>>>().unwrap();
+        assert_eq!(varints.len(), 3);
+        assert_eq!(varints[0].to_uint64(), 150);
+        assert_eq!(varints[1].to_uint64(), 127);
+        assert_eq!(varints[2].to_uint64(), 1);
+    }
+
+    #[test]
+    fn test_slice_ext_varint_read_varints() {
+        use super::SliceExtVarint;
+
+        let data = [0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
+        let mut slice = &data[..];
+        let varints: Vec<Varint> = SliceExtVarint::read_varints(&mut slice)
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(varints.len(), 3);
+        assert_eq!(varints[0].to_uint64(), 150);
+        assert_eq!(varints[1].to_uint64(), 127);
+        assert_eq!(varints[2].to_uint64(), 1);
     }
 }
