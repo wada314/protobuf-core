@@ -91,7 +91,7 @@ where
 ///
 /// # Example
 /// ```
-/// use ::protobuf_core::field::IteratorExtProtobuf;
+/// use ::protobuf_core::IteratorExtProtobuf;
 ///
 /// let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
 /// let iter = bytes.into_iter();
@@ -173,7 +173,7 @@ pub trait ReadExtProtobuf {
     ///
     /// # Example
     /// ```
-    /// use ::protobuf_core::field::{ReadExtProtobuf, Field, FieldValue};
+    /// use ::protobuf_core::{ReadExtProtobuf, Field, FieldValue};
     ///
     /// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
     ///     let reader = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];

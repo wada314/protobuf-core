@@ -34,8 +34,7 @@ pub trait WriteExtProtobuf {
     ///
     /// # Example
     /// ```
-    /// use ::protobuf_core::field::{WriteExtProtobuf, Field, FieldValue};
-    /// use ::protobuf_core::field_number::FieldNumber;
+    /// use ::protobuf_core::{WriteExtProtobuf, Field, FieldValue, FieldNumber};
     ///
     /// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
     ///     let mut buffer = Vec::new();
@@ -58,8 +57,7 @@ pub trait WriteExtProtobuf {
     ///
     /// # Example
     /// ```
-    /// use ::protobuf_core::field::{WriteExtProtobuf, Field, FieldValue};
-    /// use ::protobuf_core::field_number::FieldNumber;
+    /// use ::protobuf_core::{WriteExtProtobuf, Field, FieldValue, FieldNumber};
     ///
     /// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
     ///     let mut buffer = Vec::new();
