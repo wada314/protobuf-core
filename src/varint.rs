@@ -20,7 +20,7 @@
 //! This is a **reference implementation**. Not optimized for performance.
 
 use crate::slice::SliceAdvance;
-use crate::wire_format::MAX_VARINT_BYTES;
+use crate::wire_format::{MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK};
 use crate::{ProtobufError, Result};
 use ::std::convert::{AsRef, Infallible, TryFrom};
 use ::std::io::{Read, Write};
@@ -174,7 +174,7 @@ impl Varint {
     ///
     /// Returns a tuple of (bytes, count) where:
     /// - bytes: fixed-size array containing the encoded varint
-    /// - count: actual number of bytes used (1-10)
+    /// - count: actual number of bytes used (1-MAX_VARINT_BYTES)
     ///
     /// # Example
     /// ```
@@ -185,21 +185,21 @@ impl Varint {
     /// assert_eq!(count, 2);
     /// assert_eq!(&bytes[..count], &[0x96, 0x01]);
     /// ```
-    pub fn encode(&self) -> ([u8; 10], usize) {
+    pub fn encode(&self) -> ([u8; MAX_VARINT_BYTES], usize) {
         let value = self.to_uint64();
-        let mut bytes = [0u8; 10];
+        let mut bytes = [0u8; MAX_VARINT_BYTES];
         let mut bytes_written = 0;
         let mut remaining_value = value;
 
         for byte in bytes.iter_mut() {
-            *byte = (remaining_value & 0x7F) as u8;
+            *byte = (remaining_value & VARINT_PAYLOAD_MASK as u64) as u8;
             remaining_value >>= 7;
             bytes_written += 1;
 
             if remaining_value == 0 {
                 break;
             } else {
-                *byte |= 0x80; // continuation bit
+                *byte |= VARINT_CONTINUATION_BIT; // continuation bit
             }
         }
 
@@ -229,10 +229,10 @@ where
         let byte = byte_result.map_err(Into::into)?;
         has_data = true;
 
-        let value = (byte & 0x7F) as u64;
+        let value = (byte & VARINT_PAYLOAD_MASK) as u64;
         decoded_value |= value << shift;
 
-        if byte & 0x80 == 0 {
+        if byte & VARINT_CONTINUATION_BIT == 0 {
             let result_bytes = decoded_value.to_le_bytes();
             return Ok(Some(Varint::new(result_bytes)));
         }
@@ -602,11 +602,11 @@ mod tests {
         let bytes_written = buffer.write_varint(&varint).unwrap();
         assert_eq!(bytes_written, 9); // 9-byte varint
 
-        // Test encoding maximum varint (10 bytes)
+        // Test encoding maximum varint (MAX_VARINT_BYTES bytes)
         let varint = Varint::from_uint64(0xFFFFFFFFFFFFFFFF);
         let mut buffer = Vec::new();
         let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, 10); // Maximum varint size
+        assert_eq!(bytes_written, MAX_VARINT_BYTES); // Maximum varint size
     }
 
     #[test]
@@ -657,10 +657,10 @@ mod tests {
             &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]
         );
 
-        // Test encoding maximum varint (10 bytes)
+        // Test encoding maximum varint (MAX_VARINT_BYTES bytes)
         let varint = Varint::from_uint64(0xFFFFFFFFFFFFFFFF);
         let (bytes, count) = varint.encode();
-        assert_eq!(count, 10);
+        assert_eq!(count, MAX_VARINT_BYTES);
         assert_eq!(
             &bytes[..count],
             &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]
