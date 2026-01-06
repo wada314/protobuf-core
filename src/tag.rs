@@ -127,7 +127,7 @@ pub trait TryIteratorExtTag {
 
 impl<I, E> TryIteratorExtTag for I
 where
-    I: Iterator<Item = std::result::Result<u8, E>>,
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
     fn read_tag(&mut self) -> Result<Option<Tag>> {
@@ -363,7 +363,7 @@ mod tests {
     #[test]
     fn test_try_iterator_ext_read_tag() {
         use super::TryIteratorExtTag;
-        use std::io::Cursor;
+        use ::std::io::Cursor;
 
         let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
         let reader = Cursor::new(data);
@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn test_try_iterator_ext_read_tag_empty() {
         use super::TryIteratorExtTag;
-        use std::io::Cursor;
+        use ::std::io::Cursor;
 
         let data = vec![];
         let reader = Cursor::new(data);

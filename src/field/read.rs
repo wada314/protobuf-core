@@ -70,7 +70,7 @@ pub struct ProtobufFieldIteratorFromTryBytes<I> {
 
 impl<I, E> Iterator for ProtobufFieldIteratorFromTryBytes<I>
 where
-    I: Iterator<Item = std::result::Result<u8, E>>,
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
     type Item = Result<Field<Vec<u8>>>;
@@ -95,7 +95,7 @@ where
 ///
 /// let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
 /// let iter = bytes.into_iter();
-/// let fields: Vec<_> = iter.protobuf_fields().collect::<std::result::Result<Vec<_>, _>>().unwrap();
+/// let fields: Vec<_> = iter.protobuf_fields().collect::<::std::result::Result<Vec<_>, _>>().unwrap();
 /// assert_eq!(fields[0].field_number.as_u32(), 1);
 /// ```
 pub trait IteratorExtProtobuf {
@@ -134,7 +134,7 @@ where
 /// let data = vec![0x08, 0x96, 0x01]; // field 1: 150
 /// let mut reader = Cursor::new(data);
 /// let iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
-/// let fields: Vec<_> = iter.protobuf_fields().collect::<std::result::Result<Vec<_>, _>>().unwrap();
+/// let fields: Vec<_> = iter.protobuf_fields().collect::<::std::result::Result<Vec<_>, _>>().unwrap();
 /// assert_eq!(fields[0].field_number.as_u32(), 1);
 /// ```
 pub trait TryIteratorExtProtobuf {
@@ -150,7 +150,7 @@ pub trait TryIteratorExtProtobuf {
 
 impl<I, E> TryIteratorExtProtobuf for I
 where
-    I: Iterator<Item = std::result::Result<u8, E>>,
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
     fn protobuf_fields(self) -> ProtobufFieldIteratorFromTryBytes<Self>
@@ -268,7 +268,7 @@ where
 /// Read a single raw field from a try iterator (private helper function)
 fn parse_field_from_try_iterator<I, E>(iter: &mut I) -> Result<Option<Field<Vec<u8>>>>
 where
-    I: Iterator<Item = std::result::Result<u8, E>>,
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
     use crate::tag::TryIteratorExtTag;
@@ -540,7 +540,7 @@ mod tests {
         let iter = bytes.into_iter();
         let fields: Vec<_> = iter
             .protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].field_number.as_u32(), 1);
@@ -563,7 +563,7 @@ mod tests {
         let iter = bytes.into_iter();
         let fields: Vec<_> = iter
             .protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 2);
 
@@ -589,14 +589,14 @@ mod tests {
     #[test]
     fn test_try_iterator_ext_read_single_field() {
         use super::TryIteratorExtProtobuf;
-        use std::io::Cursor;
+        use ::std::io::Cursor;
 
         let data = vec![0x08, 0x96, 0x01]; // field 1: 150
         let reader = Cursor::new(data);
         let iter = reader.bytes();
         let fields: Vec<_> = iter
             .protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].field_number.as_u32(), 1);
@@ -611,7 +611,7 @@ mod tests {
     #[test]
     fn test_try_iterator_ext_read_multiple_fields() {
         use super::TryIteratorExtProtobuf;
-        use std::io::Cursor;
+        use ::std::io::Cursor;
 
         let data = vec![
             0x08, 0x96, 0x01, // field 1: 150
@@ -621,7 +621,7 @@ mod tests {
         let iter = reader.bytes();
         let fields: Vec<_> = iter
             .protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 2);
 

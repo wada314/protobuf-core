@@ -218,7 +218,7 @@ impl Varint {
 /// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
 fn decode_varint_from_bytes<I, E>(bytes: I) -> Result<Option<Varint>>
 where
-    I: Iterator<Item = std::result::Result<u8, E>>,
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
     let mut decoded_value = 0u64;
@@ -309,7 +309,7 @@ pub trait TryIteratorExtVarint {
 
 impl<I, E> TryIteratorExtVarint for I
 where
-    I: Iterator<Item = std::result::Result<u8, E>>,
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
     fn try_collect_varint(self) -> Result<Option<Varint>> {
@@ -525,7 +525,7 @@ mod tests {
 
     #[test]
     fn test_read_varint_from_reader() {
-        use std::io::Cursor;
+        use ::std::io::Cursor;
         let input = [0x96, 0x01];
         let mut reader = Cursor::new(input);
         let varint = reader.read_varint().unwrap().unwrap();
@@ -535,7 +535,7 @@ mod tests {
 
     #[test]
     fn test_read_ext_varint_trait() {
-        use std::io::Cursor;
+        use ::std::io::Cursor;
         let input = [0x96, 0x01];
         let mut reader = Cursor::new(input);
         let varint = reader.read_varint().unwrap().unwrap();
@@ -782,20 +782,22 @@ mod tests {
 
     #[test]
     fn test_try_iterator_ext_varint() {
-        use std::io::Cursor;
         use super::TryIteratorExtVarint;
+        use ::std::io::Cursor;
 
         let data = vec![0x96, 0x01]; // 150 in varint encoding
         let reader = Cursor::new(data);
         let iter = reader.bytes();
-        let varint = TryIteratorExtVarint::try_collect_varint(iter).unwrap().unwrap();
+        let varint = TryIteratorExtVarint::try_collect_varint(iter)
+            .unwrap()
+            .unwrap();
         assert_eq!(varint.to_uint64(), 150);
     }
 
     #[test]
     fn test_try_iterator_ext_varint_empty() {
-        use std::io::Cursor;
         use super::TryIteratorExtVarint;
+        use ::std::io::Cursor;
 
         let data = vec![];
         let reader = Cursor::new(data);
