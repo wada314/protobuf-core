@@ -34,10 +34,10 @@ pub trait WriteExtProtobuf {
     ///
     /// # Example
     /// ```
-    /// use protobuf_core::field::{WriteExtProtobuf, Field, FieldValue};
-    /// use protobuf_core::field_number::FieldNumber;
+    /// use ::protobuf_core::field::{WriteExtProtobuf, Field, FieldValue};
+    /// use ::protobuf_core::field_number::FieldNumber;
     ///
-    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
     ///     let mut buffer = Vec::new();
     ///     
     ///     let field = Field::new(
@@ -58,10 +58,10 @@ pub trait WriteExtProtobuf {
     ///
     /// # Example
     /// ```
-    /// use protobuf_core::field::{WriteExtProtobuf, Field, FieldValue};
-    /// use protobuf_core::field_number::FieldNumber;
+    /// use ::protobuf_core::field::{WriteExtProtobuf, Field, FieldValue};
+    /// use ::protobuf_core::field_number::FieldNumber;
     ///
-    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
     ///     let mut buffer = Vec::new();
     ///     
     ///     let fields = vec![
@@ -329,7 +329,7 @@ mod tests {
             let reader = buffer.as_slice();
             let fields: Vec<_> = reader
                 .read_protobuf_fields()
-                .collect::<std::result::Result<Vec<_>, _>>()
+                .collect::<::std::result::Result<Vec<_>, _>>()
                 .unwrap();
             assert_eq!(fields.len(), 1);
             assert_eq!(fields[0], original_field);
@@ -350,7 +350,7 @@ mod tests {
             let reader = buffer.as_slice();
             let fields: Vec<_> = reader
                 .read_protobuf_fields()
-                .collect::<std::result::Result<Vec<_>, _>>()
+                .collect::<::std::result::Result<Vec<_>, _>>()
                 .unwrap();
             assert_eq!(fields.len(), 1);
             let read_field = &fields[0];
@@ -383,7 +383,7 @@ mod tests {
             let reader = buffer.as_slice();
             let read_fields: Vec<_> = reader
                 .read_protobuf_fields()
-                .collect::<std::result::Result<Vec<_>, _>>()
+                .collect::<::std::result::Result<Vec<_>, _>>()
                 .unwrap();
 
             assert_eq!(read_fields, original_fields);

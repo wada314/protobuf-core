@@ -27,7 +27,7 @@ use ::std::io::Cursor;
 ///
 /// # Example
 /// ```
-/// use protobuf_core::SliceAdvance;
+/// use ::protobuf_core::SliceAdvance;
 ///
 /// let data = [0x08, 0x96, 0x01];
 /// let mut slice = &data[..];
@@ -56,4 +56,3 @@ impl<T: AsRef<[u8]>> SliceAdvance for Cursor<T> {
         self.set_position(current_pos + consumed as u64);
     }
 }
-

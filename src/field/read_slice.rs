@@ -64,7 +64,7 @@ pub trait SliceExtProtobuf: AsRef<[u8]> {
     ///
     /// # Example
     /// ```
-    /// use protobuf_core::SliceExtProtobuf;
+    /// use ::protobuf_core::SliceExtProtobuf;
     ///
     /// let slice = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
     ///
@@ -206,7 +206,7 @@ mod tests {
 
         let fields: Vec<_> = slice
             .read_protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].field_number.as_u32(), 1);
@@ -225,7 +225,7 @@ mod tests {
 
         let fields: Vec<_> = slice
             .read_protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 2);
 

@@ -91,7 +91,7 @@ where
 ///
 /// # Example
 /// ```
-/// use protobuf_core::field::IteratorExtProtobuf;
+/// use ::protobuf_core::field::IteratorExtProtobuf;
 ///
 /// let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
 /// let iter = bytes.into_iter();
@@ -129,7 +129,7 @@ where
 /// # Example
 /// ```
 /// use ::std::io::{Cursor, Read};
-/// use protobuf_core::TryIteratorExtProtobuf;
+/// use ::protobuf_core::TryIteratorExtProtobuf;
 ///
 /// let data = vec![0x08, 0x96, 0x01]; // field 1: 150
 /// let mut reader = Cursor::new(data);
@@ -173,9 +173,9 @@ pub trait ReadExtProtobuf {
     ///
     /// # Example
     /// ```
-    /// use protobuf_core::field::{ReadExtProtobuf, Field, FieldValue};
+    /// use ::protobuf_core::field::{ReadExtProtobuf, Field, FieldValue};
     ///
-    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
     ///     let reader = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
     ///
     ///     for field in reader.read_protobuf_fields() {
@@ -395,7 +395,7 @@ mod tests {
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].field_number.as_u32(), 1);
@@ -413,7 +413,7 @@ mod tests {
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
 
@@ -433,7 +433,7 @@ mod tests {
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
 
@@ -453,7 +453,7 @@ mod tests {
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
 
@@ -473,7 +473,7 @@ mod tests {
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
 
@@ -496,7 +496,7 @@ mod tests {
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 2);
 
@@ -527,7 +527,7 @@ mod tests {
 
         let fields: Vec<_> = reader
             .read_protobuf_fields()
-            .collect::<std::result::Result<Vec<_>, _>>()
+            .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 0);
     }

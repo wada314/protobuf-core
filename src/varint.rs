@@ -178,7 +178,7 @@ impl Varint {
     ///
     /// # Example
     /// ```
-    /// use protobuf_core::varint::Varint;
+    /// use ::protobuf_core::varint::Varint;
     ///
     /// let varint = Varint::from_uint64(150);
     /// let (bytes, count) = varint.encode();
@@ -253,7 +253,7 @@ where
 ///
 /// # Example
 /// ```
-/// use protobuf_core::varint::{IteratorExtVarint, Varint};
+/// use ::protobuf_core::varint::{IteratorExtVarint, Varint};
 ///
 /// let bytes = vec![0x96, 0x01]; // 150 in varint encoding
 /// let mut iter = bytes.into_iter();
@@ -287,7 +287,7 @@ where
 /// # Example
 /// ```
 /// use ::std::io::{Cursor, Read};
-/// use protobuf_core::{TryIteratorExtVarint, Varint};
+/// use ::protobuf_core::{TryIteratorExtVarint, Varint};
 ///
 /// let data = vec![0x96, 0x01]; // 150 in varint encoding
 /// let mut reader = Cursor::new(data);
@@ -322,8 +322,8 @@ where
 ///
 /// # Example
 /// ```
-/// use std::io::Cursor;
-/// use protobuf_core::varint::{ReadExtVarint, Varint};
+/// use ::std::io::Cursor;
+/// use ::protobuf_core::varint::{ReadExtVarint, Varint};
 ///
 /// let data = vec![0x96, 0x01]; // 150 in varint encoding
 /// let mut reader = Cursor::new(data);
@@ -358,7 +358,7 @@ where
 ///
 /// # Example
 /// ```
-/// use protobuf_core::varint::{SliceExtVarint, Varint};
+/// use ::protobuf_core::varint::{SliceExtVarint, Varint};
 ///
 /// let data = [0x96, 0x01]; // 150 in varint encoding
 /// let mut slice = &data[..];
@@ -417,8 +417,8 @@ where
 ///
 /// # Example
 /// ```
-/// use std::io::Write;
-/// use protobuf_core::varint::{WriteExtVarint, Varint};
+/// use ::std::io::Write;
+/// use ::protobuf_core::varint::{WriteExtVarint, Varint};
 ///
 /// let varint = Varint::from_uint64(150);
 /// let mut writer = Vec::new();
@@ -440,8 +440,8 @@ pub trait WriteExtVarint {
     ///
     /// # Example
     /// ```
-    /// use std::io::Write;
-    /// use protobuf_core::varint::{WriteExtVarint, Varint};
+    /// use ::std::io::Write;
+    /// use ::protobuf_core::varint::{WriteExtVarint, Varint};
     ///
     /// let varint = Varint::from_uint64(150);
     /// let mut buffer = Vec::new();

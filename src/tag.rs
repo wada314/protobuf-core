@@ -67,7 +67,7 @@ impl Tag {
 ///
 /// # Example
 /// ```
-/// use protobuf_core::tag::IteratorExtTag;
+/// use ::protobuf_core::tag::IteratorExtTag;
 ///
 /// let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
 /// let mut iter = bytes.into_iter();
@@ -108,7 +108,7 @@ where
 /// # Example
 /// ```
 /// use ::std::io::{Cursor, Read};
-/// use protobuf_core::TryIteratorExtTag;
+/// use ::protobuf_core::TryIteratorExtTag;
 ///
 /// let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
 /// let mut reader = Cursor::new(data);
@@ -149,8 +149,8 @@ where
 ///
 /// # Example
 /// ```
-/// use std::io::Cursor;
-/// use protobuf_core::tag::ReadExtTag;
+/// use ::std::io::Cursor;
+/// use ::protobuf_core::tag::ReadExtTag;
 ///
 /// let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
 /// let mut reader = Cursor::new(data);
@@ -189,7 +189,7 @@ where
 ///
 /// # Example
 /// ```
-/// use protobuf_core::tag::SliceExtTag;
+/// use ::protobuf_core::tag::SliceExtTag;
 ///
 /// let data = [0x08]; // tag 1:0 (field 1, wire type 0)
 /// let mut slice = &data[..];
