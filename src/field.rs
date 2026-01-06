@@ -43,13 +43,13 @@ use crate::varint::Varint;
 use crate::wire_format::WireType;
 
 #[cfg(feature = "read")]
-pub mod read;
+pub(crate) mod read;
 
 #[cfg(feature = "read")]
-pub mod read_slice;
+pub(crate) mod read_slice;
 
 #[cfg(feature = "write")]
-pub mod write;
+pub(crate) mod write;
 
 // Re-export read functionality
 #[cfg(feature = "read")]

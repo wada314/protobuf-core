@@ -18,12 +18,12 @@
 //! for implementing Protocol Buffers in Rust.
 
 #[cfg(any(feature = "read", feature = "write"))]
-pub mod field;
-pub mod field_number;
-pub mod slice;
-pub mod tag;
-pub mod varint;
-pub mod wire_format;
+pub(crate) mod field;
+pub(crate) mod field_number;
+pub(crate) mod slice;
+pub(crate) mod tag;
+pub(crate) mod varint;
+pub(crate) mod wire_format;
 
 #[cfg(feature = "write")]
 pub use self::field::WriteExtProtobuf;
