@@ -59,6 +59,9 @@ pub enum ProtobufError {
         target_type: &'static str,
     },
 
+    #[error("Varint exceeds maximum length of 10 bytes")]
+    VarintTooLong,
+
     #[error("Failed to downcast field value to expected type: {expected_type}")]
     FieldTypeDowncastError { expected_type: String },
 

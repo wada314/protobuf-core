@@ -214,7 +214,7 @@ impl Varint {
 ///
 /// Returns `Ok(Some(Varint))` if successfully decoded.
 /// Returns `Ok(None)` if no bytes were read (empty iterator).
-/// Returns `Err(ProtobufError::VarintDowncastOutOfRange)` if the varint exceeds MAX_VARINT_SIZE.
+/// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
 /// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
 fn decode_varint_from_bytes<I, E>(bytes: I) -> Result<Option<Varint>>
 where
@@ -243,10 +243,7 @@ where
         return Ok(None);
     }
 
-    Err(ProtobufError::VarintDowncastOutOfRange {
-        value: decoded_value,
-        target_type: "varint (too long)",
-    })
+    Err(ProtobufError::VarintTooLong)
 }
 
 /// Extension trait for collecting varints from byte iterators.
@@ -268,7 +265,7 @@ pub trait IteratorExtVarint {
     ///
     /// Returns the Varint `Ok(Some(varint))` if successfully read.
     /// Returns `Ok(None)` if no input is available (empty iterator).
-    /// Returns `Err(VarintError::TooLong)` if the varint exceeds MAX_VARINT_SIZE.
+    /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
     fn try_collect_varint(self) -> Result<Option<Varint>>;
 }
 
@@ -303,7 +300,8 @@ pub trait TryIteratorExtVarint {
     ///
     /// Returns the Varint `Ok(Some(varint))` if successfully read.
     /// Returns `Ok(None)` if no input is available (empty iterator).
-    /// Returns `Err(ProtobufError)` if the varint exceeds MAX_VARINT_SIZE or an I/O error occurs.
+    /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
+    /// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
     fn try_collect_varint(self) -> Result<Option<Varint>>;
 }
 
@@ -337,7 +335,7 @@ pub trait ReadExtVarint {
     ///
     /// Returns the Varint `Ok(Some(varint))` if successfully read.
     /// Returns `Ok(None)` if no input is available (EOF).
-    /// Returns `Err(VarintError::TooLong)` if the varint exceeds MAX_VARINT_SIZE.
+    /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
     /// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
     fn read_varint(&mut self) -> Result<Option<Varint>>;
 }
@@ -375,7 +373,7 @@ pub trait SliceExtVarint {
     ///
     /// Returns `Ok(Some(varint))` if successfully read.
     /// Returns `Ok(None)` if no input is available (empty slice).
-    /// Returns `Err(VarintError::TooLong)` if the varint exceeds MAX_VARINT_SIZE.
+    /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
     fn read_varint(&mut self) -> Result<Option<Varint>>;
 }
 
