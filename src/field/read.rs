@@ -128,8 +128,8 @@ where
 ///
 /// # Example
 /// ```
-/// use std::io::{Cursor, Read};
-/// use protobuf_core::field::read::TryIteratorExtProtobuf;
+/// use ::std::io::{Cursor, Read};
+/// use protobuf_core::TryIteratorExtProtobuf;
 ///
 /// let data = vec![0x08, 0x96, 0x01]; // field 1: 150
 /// let mut reader = Cursor::new(data);

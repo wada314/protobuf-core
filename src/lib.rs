@@ -34,11 +34,14 @@ pub use self::field::{Field, FieldValue};
 #[cfg(feature = "read")]
 pub use self::field::{
     IteratorExtProtobuf, ProtobufFieldIterator, ProtobufFieldIteratorFromBytes, ReadExtProtobuf,
+    TryIteratorExtProtobuf,
 };
 pub use self::field_number::FieldNumber;
 pub use self::slice::SliceAdvance;
-pub use self::tag::{IteratorExtTag, ReadExtTag, SliceExtTag, Tag};
-pub use self::varint::{IteratorExtVarint, ReadExtVarint, SliceExtVarint, Varint, WriteExtVarint};
+pub use self::tag::{IteratorExtTag, ReadExtTag, SliceExtTag, Tag, TryIteratorExtTag};
+pub use self::varint::{
+    IteratorExtVarint, ReadExtVarint, SliceExtVarint, TryIteratorExtVarint, Varint, WriteExtVarint,
+};
 pub use self::wire_format::{MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER, WireType};
 
 use ::std::convert::Infallible;

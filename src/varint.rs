@@ -286,8 +286,8 @@ where
 ///
 /// # Example
 /// ```
-/// use std::io::{Cursor, Read};
-/// use protobuf_core::varint::{TryIteratorExtVarint, Varint};
+/// use ::std::io::{Cursor, Read};
+/// use protobuf_core::{TryIteratorExtVarint, Varint};
 ///
 /// let data = vec![0x96, 0x01]; // 150 in varint encoding
 /// let mut reader = Cursor::new(data);

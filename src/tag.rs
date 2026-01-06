@@ -107,8 +107,8 @@ where
 ///
 /// # Example
 /// ```
-/// use std::io::{Cursor, Read};
-/// use protobuf_core::tag::TryIteratorExtTag;
+/// use ::std::io::{Cursor, Read};
+/// use protobuf_core::TryIteratorExtTag;
 ///
 /// let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
 /// let mut reader = Cursor::new(data);
