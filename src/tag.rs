@@ -107,12 +107,12 @@ where
 ///
 /// # Example
 /// ```
-/// use std::io::Cursor;
+/// use std::io::{Cursor, Read};
 /// use protobuf_core::tag::TryIteratorExtTag;
 ///
 /// let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
 /// let mut reader = Cursor::new(data);
-/// let iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
+/// let mut iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
 /// let tag = iter.read_tag().unwrap().unwrap();
 /// assert_eq!(tag.field_number.as_u32(), 1);
 /// ```

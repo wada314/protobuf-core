@@ -128,13 +128,13 @@ where
 ///
 /// # Example
 /// ```
-/// use std::io::Cursor;
-/// use protobuf_core::field::TryIteratorExtProtobuf;
+/// use std::io::{Cursor, Read};
+/// use protobuf_core::field::read::TryIteratorExtProtobuf;
 ///
 /// let data = vec![0x08, 0x96, 0x01]; // field 1: 150
 /// let mut reader = Cursor::new(data);
 /// let iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
-/// let fields: Vec<_> = iter.protobuf_fields().collect::<::std::result::Result<Vec<_>, _>>().unwrap();
+/// let fields: Vec<_> = iter.protobuf_fields().collect::<Result<Vec<_>, _>>().unwrap();
 /// assert_eq!(fields[0].field_number.as_u32(), 1);
 /// ```
 pub trait TryIteratorExtProtobuf {
