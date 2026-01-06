@@ -42,7 +42,13 @@ pub use self::tag::{IteratorExtTag, ReadExtTag, SliceExtTag, Tag, TryIteratorExt
 pub use self::varint::{
     IteratorExtVarint, ReadExtVarint, SliceExtVarint, TryIteratorExtVarint, Varint, WriteExtVarint,
 };
-pub use self::wire_format::{MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER, WireType};
+pub use self::wire_format::{
+    FIELD_NUMBER_SHIFT, FIXED32_BYTES, FIXED64_BYTES, MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT,
+    MAX_3_BYTE_VARINT, MAX_4_BYTE_VARINT, MAX_5_BYTE_VARINT, MAX_6_BYTE_VARINT, MAX_7_BYTE_VARINT,
+    MAX_8_BYTE_VARINT, MAX_9_BYTE_VARINT, MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MAX_STRING_SIZE,
+    MAX_VARINT_BYTES, MIN_FIELD_NUMBER, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK,
+    WIRE_TYPE_MASK, WireType,
+};
 
 use ::std::convert::Infallible;
 use ::thiserror::Error;
