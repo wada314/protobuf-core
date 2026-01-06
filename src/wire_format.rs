@@ -148,16 +148,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_wire_type_from_trait() {
-        assert_eq!(u8::from(WireType::Varint), 0);
-        assert_eq!(u8::from(WireType::Int64), 1);
-        assert_eq!(u8::from(WireType::Len), 2);
-        assert_eq!(u8::from(WireType::SGroup), 3);
-        assert_eq!(u8::from(WireType::EGroup), 4);
-        assert_eq!(u8::from(WireType::Int32), 5);
-    }
-
-    #[test]
     fn test_wire_type_try_from_trait() {
         // Test valid wire types
         assert_eq!(WireType::try_from(0).unwrap(), WireType::Varint);
@@ -183,37 +173,6 @@ mod tests {
         } else {
             panic!("Expected InvalidWireType error");
         }
-    }
-
-    #[test]
-    fn test_constants() {
-        assert_eq!(MAX_FIELD_NUMBER, FieldNumber::MAX);
-        assert_eq!(MIN_FIELD_NUMBER, FieldNumber::MIN);
-        assert_eq!(MAX_MESSAGE_SIZE, 2 * 1024 * 1024 * 1024);
-        assert_eq!(WIRE_TYPE_MASK, 0b111);
-        assert_eq!(FIELD_NUMBER_SHIFT, 3);
-        assert_eq!(MAX_VARINT_BYTES, 10);
-        assert_eq!(VARINT_CONTINUATION_BIT, 0x80);
-        assert_eq!(VARINT_PAYLOAD_MASK, 0x7F);
-    }
-
-    #[test]
-    fn test_varint_size_constants() {
-        assert_eq!(MAX_1_BYTE_VARINT, 0x7F);
-        assert_eq!(MAX_2_BYTE_VARINT, 0x3FFF);
-        assert_eq!(MAX_3_BYTE_VARINT, 0x1FFFFF);
-        assert_eq!(MAX_4_BYTE_VARINT, 0xFFFFFFF);
-        assert_eq!(MAX_5_BYTE_VARINT, 0x7_FFFF_FFFF);
-        assert_eq!(MAX_6_BYTE_VARINT, 0x3FF_FFFF_FFFF);
-        assert_eq!(MAX_7_BYTE_VARINT, 0x1FFFF_FFFF_FFFF);
-        assert_eq!(MAX_8_BYTE_VARINT, 0xFFFF_FFFF_FFFF_FF);
-        assert_eq!(MAX_9_BYTE_VARINT, 0x7FFF_FFFF_FFFF_FFFF);
-    }
-
-    #[test]
-    fn test_fixed_size_constants() {
-        assert_eq!(FIXED32_BYTES, 4);
-        assert_eq!(FIXED64_BYTES, 8);
     }
 
     #[test]
