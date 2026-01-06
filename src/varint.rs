@@ -451,14 +451,14 @@ pub trait WriteExtVarint {
     /// assert_eq!(bytes_written, 2);
     /// assert_eq!(buffer, vec![0x96, 0x01]);
     /// ```
-    fn write_varint(&mut self, value: &Varint) -> std::io::Result<usize>;
+    fn write_varint(&mut self, value: &Varint) -> ::std::io::Result<usize>;
 }
 
 impl<W> WriteExtVarint for W
 where
     W: Write,
 {
-    fn write_varint(&mut self, value: &Varint) -> std::io::Result<usize> {
+    fn write_varint(&mut self, value: &Varint) -> ::std::io::Result<usize> {
         let (bytes, count) = value.encode();
         self.write_all(&bytes[..count])?;
         Ok(count)
