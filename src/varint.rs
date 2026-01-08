@@ -860,6 +860,25 @@ mod tests {
     }
 
     #[test]
+    fn test_try_iterator_ext_varint_error() {
+        use super::TryIteratorExtVarint;
+        use crate::ProtobufError;
+        use ::std::io::ErrorKind;
+
+        // Create an iterator that returns an error
+        let error = ::std::io::Error::new(ErrorKind::UnexpectedEof, "test error");
+        let iter = ::std::iter::once(Err(error));
+        let result = TryIteratorExtVarint::read_varint(iter);
+
+        assert!(result.is_err());
+        if let Err(ProtobufError::IoError(io_err)) = result {
+            assert_eq!(io_err.kind(), ErrorKind::UnexpectedEof);
+        } else {
+            panic!("Expected IoError");
+        }
+    }
+
+    #[test]
     fn test_try_iterator_ext_varint_read_varints() {
         use super::TryIteratorExtVarint;
         use ::std::io::{Cursor, Read};

@@ -396,6 +396,24 @@ mod tests {
         assert_eq!(tag, None);
     }
 
+    #[test]
+    fn test_try_iterator_ext_tag_error() {
+        use super::TryIteratorExtTag;
+        use ::std::io::ErrorKind;
+
+        // Create an iterator that returns an error
+        let error = ::std::io::Error::new(ErrorKind::UnexpectedEof, "test error");
+        let mut iter = ::std::iter::once(Err(error));
+        let result = iter.read_tag();
+
+        assert!(result.is_err());
+        if let Err(ProtobufError::IoError(io_err)) = result {
+            assert_eq!(io_err.kind(), ErrorKind::UnexpectedEof);
+        } else {
+            panic!("Expected IoError");
+        }
+    }
+
     // ============================================================================
     // ReadExtTag tests
     // ============================================================================
