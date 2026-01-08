@@ -201,8 +201,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::Tag;
     use crate::ProtobufError;
+    use crate::field_number::FieldNumber;
+    use crate::varint::Varint;
     use crate::wire_format::WireType;
 
     #[test]
@@ -301,7 +303,7 @@ mod tests {
     #[test]
     fn test_try_iterator_ext_read_tag() {
         use super::TryIteratorExtTag;
-        use ::std::io::Cursor;
+        use ::std::io::{Cursor, Read};
 
         let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
         let reader = Cursor::new(data);
@@ -314,7 +316,7 @@ mod tests {
     #[test]
     fn test_try_iterator_ext_read_tag_empty() {
         use super::TryIteratorExtTag;
-        use ::std::io::Cursor;
+        use ::std::io::{Cursor, Read};
 
         let data = vec![];
         let reader = Cursor::new(data);
@@ -325,6 +327,8 @@ mod tests {
 
     #[test]
     fn test_from_varint() {
+        use ::std::convert::{Into, TryFrom};
+
         let field_number = FieldNumber::try_new(5).unwrap();
         let wire_type = WireType::Varint;
         let tag = Tag {
@@ -338,6 +342,8 @@ mod tests {
 
     #[test]
     fn test_try_from_varint_invalid() {
+        use ::std::convert::TryFrom;
+
         // Test with invalid field number 0
         let varint = Varint::from_uint32(0);
         let result = Tag::try_from(varint);
@@ -352,6 +358,8 @@ mod tests {
 
     #[test]
     fn test_try_from_varint_invalid_wire_type() {
+        use ::std::convert::TryFrom;
+
         // Test with invalid wire type
         let varint = Varint::from_uint32((1 << 3) | 6);
         let result = Tag::try_from(varint);
