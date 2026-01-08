@@ -503,9 +503,7 @@ where
     R: Read,
 {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
-        // Use Bytes iterator which returns Iterator<Item = Result<u8, io::Error>>
-        // decode_varint_from_bytes will handle errors and stop when varint ends
-        decode_varint_from_bytes(self.bytes().take(MAX_VARINT_BYTES))
+        decode_varint_from_bytes(self.bytes())
     }
 
     fn read_varints(&mut self) -> VarintIterator<::std::io::Bytes<&mut Self>> {
