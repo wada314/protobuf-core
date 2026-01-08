@@ -20,10 +20,11 @@
 
 use crate::field::{Field, FieldValue};
 use crate::tag::SliceExtTag;
-use crate::varint::SliceExtVarint;
+use crate::varint::ReadExtVarint;
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
+use ::std::io::Cursor;
 
 /// Iterator for reading raw protobuf fields sequentially from a slice
 pub struct ProtobufFieldSliceIterator<'a> {
@@ -98,7 +99,11 @@ fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [
 
     let value = match tag.wire_type {
         WireType::Varint => {
-            FieldValue::Varint(slice.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?)
+            let mut cursor = Cursor::new(*slice);
+            let varint = cursor.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+            let consumed = cursor.position() as usize;
+            *slice = &slice[consumed..];
+            FieldValue::Varint(varint)
         }
         WireType::Int32 => {
             let (bytes, remaining) = slice
@@ -116,10 +121,11 @@ fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [
         }
         WireType::Len => {
             // Read length prefix (varint)
-            let length = slice
-                .read_varint()?
-                .ok_or(ProtobufError::UnexpectedEof)?
-                .try_to_uint32()? as usize;
+            let mut cursor = Cursor::new(*slice);
+            let varint = cursor.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+            let consumed = cursor.position() as usize;
+            *slice = &slice[consumed..];
+            let length = varint.try_to_uint32()? as usize;
             let (value_slice, remaining) = slice
                 .split_at_checked(length)
                 .ok_or(ProtobufError::UnexpectedEof)?;

@@ -40,7 +40,7 @@ pub use self::field_number::FieldNumber;
 pub use self::slice::SliceAdvance;
 pub use self::tag::{IteratorExtTag, ReadExtTag, SliceExtTag, Tag, TryIteratorExtTag};
 pub use self::varint::{
-    IteratorExtVarint, ReadExtVarint, SliceExtVarint, TryIteratorExtVarint, Varint, WriteExtVarint,
+    IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint, WriteExtVarint,
 };
 pub use self::wire_format::{
     FIELD_NUMBER_SHIFT, FIXED32_BYTES, FIXED64_BYTES, MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT,

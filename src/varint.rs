@@ -255,39 +255,6 @@ where
     }
 }
 
-/// Iterator that reads multiple varints from a slice.
-///
-/// This iterator yields `Result<Varint>` for each varint read from the slice.
-/// The slice is automatically advanced as varints are read.
-/// It stops when there are no more bytes available or an error occurs.
-pub struct SliceVarintIterator<'a, S> {
-    slice: &'a mut S,
-}
-
-impl<'a, S> SliceVarintIterator<'a, S>
-where
-    S: AsRef<[u8]> + SliceAdvance,
-{
-    fn new(slice: &'a mut S) -> Self {
-        Self { slice }
-    }
-}
-
-impl<'a, S> Iterator for SliceVarintIterator<'a, S>
-where
-    S: AsRef<[u8]> + SliceAdvance,
-{
-    type Item = Result<Varint>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.slice.read_varint() {
-            Ok(Some(varint)) => Some(Ok(varint)),
-            Ok(None) => None,
-            Err(e) => Some(Err(e)),
-        }
-    }
-}
-
 /// Decode a varint from a sequence of bytes.
 ///
 /// This is a helper function that implements the core varint decoding logic.
@@ -508,93 +475,6 @@ where
 
     fn read_varints(&mut self) -> VarintIterator<::std::io::Bytes<&mut Self>> {
         VarintIterator::new(self.bytes())
-    }
-}
-
-/// Extension trait for reading varints from slices.
-///
-/// This trait provides a convenient method to read varints directly from
-/// byte slices. The slice is automatically advanced after reading.
-///
-/// # Example
-/// ```
-/// use ::protobuf_core::{SliceExtVarint, Varint};
-///
-/// let data = [0x96, 0x01]; // 150 in varint encoding
-/// let mut slice = &data[..];
-/// let varint = slice.read_varint().unwrap().unwrap();
-/// assert_eq!(varint.to_uint64(), 150);
-/// ```
-pub trait SliceExtVarint {
-    /// Read a varint from this slice.
-    ///
-    /// The slice is automatically advanced to point to the byte after the varint.
-    /// To get the number of bytes consumed, compare the slice length before and after.
-    ///
-    /// Returns `Ok(Some(varint))` if successfully read.
-    /// Returns `Ok(None)` if no input is available (empty slice).
-    /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
-    fn read_varint(&mut self) -> Result<Option<Varint>>;
-
-    /// Create an iterator that reads multiple varints from this slice.
-    ///
-    /// The slice is automatically advanced as varints are read.
-    /// Returns an iterator that yields `Result<Varint>` for each varint read.
-    /// The iterator stops when there are no more bytes available or an error occurs.
-    ///
-    /// # Example
-    /// ```
-    /// use ::protobuf_core::{SliceExtVarint, Varint};
-    ///
-    /// let data = [0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
-    /// let mut slice = &data[..];
-    /// let varints: Vec<Varint> = slice.read_varints().collect::<Result<Vec<_>>>().unwrap();
-    /// assert_eq!(varints.len(), 2);
-    /// assert_eq!(varints[0].to_uint64(), 150);
-    /// assert_eq!(varints[1].to_uint64(), 127);
-    /// ```
-    fn read_varints(&mut self) -> SliceVarintIterator<'_, Self>
-    where
-        Self: Sized;
-}
-
-impl<S> SliceExtVarint for S
-where
-    S: AsRef<[u8]> + SliceAdvance,
-{
-    fn read_varint(&mut self) -> Result<Option<Varint>> {
-        let slice = self.as_ref();
-        if slice.is_empty() {
-            return Ok(None);
-        }
-
-        // Track the number of bytes read by enumerating the iterator
-        let mut bytes_read = 0;
-        let mut iter = slice.iter().copied().enumerate();
-        let result = decode_varint_from_bytes(
-            iter.by_ref()
-                .map(|(idx, b)| {
-                    bytes_read = idx + 1;
-                    Ok::<u8, Infallible>(b)
-                })
-                .take(MAX_VARINT_BYTES),
-        )?;
-
-        match result {
-            Some(varint) => {
-                // Advance using SliceAdvance
-                self.advance(bytes_read);
-                Ok(Some(varint))
-            }
-            None => Ok(None),
-        }
-    }
-
-    fn read_varints(&mut self) -> SliceVarintIterator<'_, Self>
-    where
-        Self: Sized,
-    {
-        SliceVarintIterator::new(self)
     }
 }
 
@@ -1034,13 +914,12 @@ mod tests {
 
     #[test]
     fn test_slice_ext_varint_read_varints() {
-        use super::SliceExtVarint;
+        use super::ReadExtVarint;
+        use ::std::io::Cursor;
 
         let data = [0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
-        let mut slice = &data[..];
-        let varints: Vec<Varint> = SliceExtVarint::read_varints(&mut slice)
-            .collect::<Result<Vec<_>>>()
-            .unwrap();
+        let mut cursor = Cursor::new(&data[..]);
+        let varints: Vec<Varint> = cursor.read_varints().collect::<Result<Vec<_>>>().unwrap();
         assert_eq!(varints.len(), 3);
         assert_eq!(varints[0].to_uint64(), 150);
         assert_eq!(varints[1].to_uint64(), 127);

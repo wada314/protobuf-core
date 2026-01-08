@@ -213,11 +213,15 @@ where
     S: AsRef<[u8]> + SliceAdvance,
 {
     fn read_tag(&mut self) -> Result<Option<Tag>> {
-        use crate::varint::SliceExtVarint;
+        use crate::varint::ReadExtVarint;
+        use ::std::io::Cursor;
 
-        let Some(varint) = self.read_varint()? else {
+        let mut cursor = Cursor::new(self.as_ref());
+        let Some(varint) = cursor.read_varint()? else {
             return Ok(None);
         };
+        let consumed = cursor.position() as usize;
+        self.advance(consumed);
 
         let tag = Tag::from_encoded(varint)?;
         Ok(Some(tag))
