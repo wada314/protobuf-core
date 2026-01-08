@@ -19,10 +19,9 @@
 //!
 //! This is a **reference implementation**. Not optimized for performance.
 
-use crate::slice::SliceAdvance;
 use crate::wire_format::{MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK};
 use crate::{ProtobufError, Result};
-use ::std::convert::{AsRef, Infallible, TryFrom};
+use ::std::convert::{Infallible, TryFrom};
 use ::std::io::{Read, Write};
 use ::std::iter::Iterator;
 
