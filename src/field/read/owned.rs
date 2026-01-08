@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Field reading utilities for Protocol Buffers
+//! Field reading utilities for Protocol Buffers (owned data)
 //!
 //! This module provides low-level utilities for reading raw protobuf fields from byte streams.
+//! It returns `Field<Vec<u8>>` - owned data suitable for streaming sources like `std::io::Read`.
 
 use crate::field::{Field, FieldValue};
 use crate::tag::{IteratorExtTag, ReadExtTag};
@@ -87,7 +88,7 @@ where
 /// Extension trait for reading raw Protocol Buffer fields from byte iterators.
 ///
 /// This trait provides convenient methods to read fields directly from
-/// any iterator that yields bytes.
+/// any iterator that yields bytes. Returns owned data (`Field<Vec<u8>>`).
 ///
 /// # Example
 /// ```
@@ -124,7 +125,7 @@ where
 ///
 /// This trait provides convenient methods to read fields directly from
 /// any iterator that yields `Result<u8, E>`, allowing proper error propagation
-/// from I/O operations.
+/// from I/O operations. Returns owned data (`Field<Vec<u8>>`).
 ///
 /// # Example
 /// ```
@@ -164,35 +165,37 @@ where
 /// Extension trait for reading raw Protocol Buffer fields from `Read` types
 ///
 /// This trait provides low-level utilities for reading field-by-field from a byte stream.
+/// It returns owned data (`Field<Vec<u8>>`) suitable for streaming sources.
 /// It does not provide semantic interpretation - that is the caller's responsibility.
+///
+/// # Example
+/// ```
+/// use ::protobuf_core::{ReadExtProtobuf, Field, FieldValue};
+///
+/// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
+///     let reader = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
+///
+///     for field in reader.read_protobuf_fields() {
+///         let field = field?;
+///         match field.value {
+///             FieldValue::Varint(varint) => {
+///                 println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
+///             },
+///             FieldValue::Len(data) => {
+///                 println!("Field {}: {:?}", field.field_number.as_u32(), data);
+///             },
+///             _ => {}
+///         }
+///     }
+///     Ok(())
+/// }
+/// ```
 pub trait ReadExtProtobuf {
     /// Read raw protobuf fields from the reader, returning an iterator
     ///
     /// This consumes the reader and returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
-    ///
-    /// # Example
-    /// ```
-    /// use ::protobuf_core::{ReadExtProtobuf, Field, FieldValue};
-    ///
-    /// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
-    ///     let reader = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
-    ///
-    ///     for field in reader.read_protobuf_fields() {
-    ///         let field = field?;
-    ///         match field.value {
-    ///             FieldValue::Varint(varint) => {
-    ///                 println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
-    ///             },
-    ///             FieldValue::Len(data) => {
-    ///                 println!("Field {}: {:?}", field.field_number.as_u32(), data);
-    ///             },
-    ///             _ => {}
-    ///         }
-    ///     }
-    ///     Ok(())
-    /// }
-    /// ```
+    /// Returns owned data (`Field<Vec<u8>>`).
     fn read_protobuf_fields(self) -> ProtobufFieldIterator<Self>
     where
         Self: Sized;

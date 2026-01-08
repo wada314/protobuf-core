@@ -45,17 +45,14 @@ use crate::wire_format::WireType;
 #[cfg(feature = "read")]
 pub(crate) mod read;
 
-#[cfg(feature = "read")]
-pub(crate) mod read_slice;
-
 #[cfg(feature = "write")]
 pub(crate) mod write;
 
 // Re-export read functionality
 #[cfg(feature = "read")]
 pub use self::read::{
-    IteratorExtProtobuf, ProtobufFieldIterator, ProtobufFieldIteratorFromBytes, ReadExtProtobuf,
-    TryIteratorExtProtobuf,
+    AsRefExtProtobuf, IteratorExtProtobuf, ProtobufFieldIterator, ProtobufFieldIteratorFromBytes,
+    ProtobufFieldSliceIterator, ReadExtProtobuf, TryIteratorExtProtobuf,
 };
 
 // Re-export write functionality

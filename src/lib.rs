@@ -28,14 +28,12 @@ pub(crate) mod wire_format;
 #[cfg(feature = "write")]
 pub use self::field::WriteExtProtobuf;
 #[cfg(feature = "read")]
-pub use self::field::read_slice::{ProtobufFieldSliceIterator, SliceExtProtobuf};
+pub use self::field::{
+    AsRefExtProtobuf, IteratorExtProtobuf, ProtobufFieldIterator, ProtobufFieldIteratorFromBytes,
+    ProtobufFieldSliceIterator, ReadExtProtobuf, TryIteratorExtProtobuf,
+};
 #[cfg(any(feature = "read", feature = "write"))]
 pub use self::field::{Field, FieldValue};
-#[cfg(feature = "read")]
-pub use self::field::{
-    IteratorExtProtobuf, ProtobufFieldIterator, ProtobufFieldIteratorFromBytes, ReadExtProtobuf,
-    TryIteratorExtProtobuf,
-};
 pub use self::field_number::FieldNumber;
 pub use self::slice::SliceAdvance;
 pub use self::tag::{IteratorExtTag, ReadExtTag, Tag, TryIteratorExtTag};

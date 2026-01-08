@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Field reading utilities for Protocol Buffers from slices
+//! Field reading utilities for Protocol Buffers (borrowed references)
 //!
 //! This module provides low-level utilities for reading raw protobuf fields from byte slices.
-//! Unlike the `read` module which uses `std::io::Read` and returns owned data,
-//! this module works directly with slices and returns references to sub-slices.
+//! Unlike the `owned` module which uses `std::io::Read` and returns owned data,
+//! this module works directly with slices and returns references to sub-slices (`Field<&'a [u8]>`).
 
 use crate::field::{Field, FieldValue};
 use crate::tag::ReadExtTag;
@@ -54,27 +54,29 @@ impl<'a> Iterator for ProtobufFieldSliceIterator<'a> {
 /// Extension trait for reading raw Protocol Buffer fields from slice types
 ///
 /// This trait provides low-level utilities for reading field-by-field from a byte slice.
+/// It returns borrowed references (`Field<&'a [u8]>`) suitable for slice sources.
 /// It does not provide semantic interpretation - that is the caller's responsibility.
-pub trait SliceExtProtobuf: AsRef<[u8]> {
+///
+/// # Example
+/// ```
+/// use ::protobuf_core::AsRefExtProtobuf;
+///
+/// let slice = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
+///
+/// for field_result in slice.read_protobuf_fields() {
+///     let field = field_result?;
+///     // Process field...
+/// }
+/// # Ok::<(), protobuf_core::ProtobufError>(())
+/// ```
+pub trait AsRefExtProtobuf: AsRef<[u8]> {
     /// Read raw protobuf fields from the slice, returning an iterator
     ///
     /// This returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
+    /// Returns borrowed references (`Field<&'a [u8]>`).
     ///
     /// This method is available for all types implementing `AsRef<[u8]>`.
-    ///
-    /// # Example
-    /// ```
-    /// use ::protobuf_core::SliceExtProtobuf;
-    ///
-    /// let slice = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
-    ///
-    /// for field_result in slice.read_protobuf_fields() {
-    ///     let field = field_result?;
-    ///     // Process field...
-    /// }
-    /// # Ok::<(), protobuf_core::ProtobufError>(())
-    /// ```
     fn read_protobuf_fields(&self) -> ProtobufFieldSliceIterator<'_> {
         ProtobufFieldSliceIterator {
             slice: self.as_ref(),
@@ -82,7 +84,7 @@ pub trait SliceExtProtobuf: AsRef<[u8]> {
     }
 }
 
-impl<T> SliceExtProtobuf for T where T: AsRef<[u8]> {}
+impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> {}
 
 fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [u8]>>> {
     if slice.is_empty() {
