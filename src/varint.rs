@@ -532,7 +532,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::Varint;
+    use super::{MAX_VARINT_BYTES, Result, Varint};
 
     // ============================================================================
     // Basic Varint tests (no traits)
@@ -686,8 +686,6 @@ mod tests {
 
     #[test]
     fn test_encode_varint() {
-        use super::MAX_VARINT_BYTES;
-
         // Test encoding small values
         let varint = Varint::from_uint64(150);
         let (bytes, count) = varint.encode();
@@ -727,7 +725,7 @@ mod tests {
 
     #[test]
     fn test_write_varint() {
-        use super::{MAX_VARINT_BYTES, WriteExtVarint};
+        use super::WriteExtVarint;
 
         // Test encoding small values
         let varint = Varint::from_uint64(150);
@@ -822,7 +820,7 @@ mod tests {
 
     #[test]
     fn test_iterator_ext_varint_read_varints() {
-        use super::{IteratorExtVarint, Result};
+        use super::IteratorExtVarint;
 
         let bytes = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
         let iter = bytes.into_iter();
@@ -863,7 +861,7 @@ mod tests {
 
     #[test]
     fn test_try_iterator_ext_varint_read_varints() {
-        use super::{Result, TryIteratorExtVarint};
+        use super::TryIteratorExtVarint;
         use ::std::io::{Cursor, Read};
 
         let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
@@ -894,7 +892,7 @@ mod tests {
 
     #[test]
     fn test_read_ext_varint_read_varints() {
-        use super::{ReadExtVarint, Result};
+        use super::ReadExtVarint;
         use ::std::io::Cursor;
 
         let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
