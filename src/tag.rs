@@ -207,20 +207,9 @@ mod tests {
     use crate::varint::Varint;
     use crate::wire_format::WireType;
 
-    #[test]
-    fn test_tag_build_and_parse() {
-        let field_number = FieldNumber::try_new(1).unwrap();
-        let wire_type = WireType::Varint;
-        let tag = Tag {
-            field_number,
-            wire_type,
-        };
-
-        let encoded = tag.to_encoded();
-        let parsed_tag = Tag::from_encoded(encoded).unwrap();
-        assert_eq!(parsed_tag.field_number, field_number);
-        assert_eq!(parsed_tag.wire_type, wire_type);
-    }
+    // ============================================================================
+    // Basic Tag tests (no traits)
+    // ============================================================================
 
     #[test]
     fn test_tag_struct() {
@@ -238,6 +227,21 @@ mod tests {
         let encoded = tag.to_encoded();
         let decoded = Tag::from_encoded(encoded).unwrap();
         assert_eq!(decoded, tag);
+    }
+
+    #[test]
+    fn test_tag_build_and_parse() {
+        let field_number = FieldNumber::try_new(1).unwrap();
+        let wire_type = WireType::Varint;
+        let tag = Tag {
+            field_number,
+            wire_type,
+        };
+
+        let encoded = tag.to_encoded();
+        let parsed_tag = Tag::from_encoded(encoded).unwrap();
+        assert_eq!(parsed_tag.field_number, field_number);
+        assert_eq!(parsed_tag.wire_type, wire_type);
     }
 
     #[test]
@@ -268,62 +272,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_read_tag() {
-        use super::IteratorExtTag;
-
-        let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
-        let mut iter = bytes.into_iter();
-        let tag = iter.read_tag().unwrap().unwrap();
-        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
-        assert_eq!(tag.wire_type, WireType::Varint);
-    }
-
-    #[test]
-    fn test_read_tag_u32_overflow() {
-        use super::IteratorExtTag;
-
-        // Test case where the varint value exceeds u32::MAX
-        // This should trigger VarintDowncastOutOfRange error
-        // u32::MAX = 4,294,967,295 (0xFFFFFFFF)
-        // Use 0x100000000 (4,294,967,296) which exceeds u32::MAX
-        let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x10]; // Value: 0x100000000 (exceeds u32::MAX)
-        let mut iter = bytes.into_iter();
-        let result = iter.read_tag();
-
-        assert!(result.is_err());
-        if let Err(ProtobufError::VarintDowncastOutOfRange { value, target_type }) = result {
-            assert_eq!(value, 0x100000000);
-            assert_eq!(target_type, "u32");
-        } else {
-            panic!("Expected VarintDowncastOutOfRange error");
-        }
-    }
-
-    #[test]
-    fn test_try_iterator_ext_read_tag() {
-        use super::TryIteratorExtTag;
-        use ::std::io::{Cursor, Read};
-
-        let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
-        let reader = Cursor::new(data);
-        let mut iter = reader.bytes();
-        let tag = iter.read_tag().unwrap().unwrap();
-        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
-        assert_eq!(tag.wire_type, WireType::Varint);
-    }
-
-    #[test]
-    fn test_try_iterator_ext_read_tag_empty() {
-        use super::TryIteratorExtTag;
-        use ::std::io::{Cursor, Read};
-
-        let data = vec![];
-        let reader = Cursor::new(data);
-        let mut iter = reader.bytes();
-        let tag = iter.read_tag().unwrap();
-        assert_eq!(tag, None);
-    }
+    // ============================================================================
+    // From / Into / TryFrom tests
+    // ============================================================================
 
     #[test]
     fn test_from_varint() {
@@ -370,5 +321,70 @@ mod tests {
         } else {
             panic!("Expected InvalidWireType error");
         }
+    }
+
+    // ============================================================================
+    // IteratorExtTag tests
+    // ============================================================================
+
+    #[test]
+    fn test_read_tag() {
+        use super::IteratorExtTag;
+
+        let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
+        let mut iter = bytes.into_iter();
+        let tag = iter.read_tag().unwrap().unwrap();
+        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
+        assert_eq!(tag.wire_type, WireType::Varint);
+    }
+
+    #[test]
+    fn test_read_tag_u32_overflow() {
+        use super::IteratorExtTag;
+
+        // Test case where the varint value exceeds u32::MAX
+        // This should trigger VarintDowncastOutOfRange error
+        // u32::MAX = 4,294,967,295 (0xFFFFFFFF)
+        // Use 0x100000000 (4,294,967,296) which exceeds u32::MAX
+        let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x10]; // Value: 0x100000000 (exceeds u32::MAX)
+        let mut iter = bytes.into_iter();
+        let result = iter.read_tag();
+
+        assert!(result.is_err());
+        if let Err(ProtobufError::VarintDowncastOutOfRange { value, target_type }) = result {
+            assert_eq!(value, 0x100000000);
+            assert_eq!(target_type, "u32");
+        } else {
+            panic!("Expected VarintDowncastOutOfRange error");
+        }
+    }
+
+    // ============================================================================
+    // TryIteratorExtTag tests
+    // ============================================================================
+
+    #[test]
+    fn test_try_iterator_ext_read_tag() {
+        use super::TryIteratorExtTag;
+        use ::std::io::{Cursor, Read};
+
+        let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
+        let reader = Cursor::new(data);
+        let mut iter = reader.bytes();
+        let tag = iter.read_tag().unwrap().unwrap();
+        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
+        assert_eq!(tag.wire_type, WireType::Varint);
+    }
+
+    #[test]
+    fn test_try_iterator_ext_read_tag_empty() {
+        use super::TryIteratorExtTag;
+        use ::std::io::{Cursor, Read};
+
+        let data = vec![];
+        let reader = Cursor::new(data);
+        let mut iter = reader.bytes();
+        let tag = iter.read_tag().unwrap();
+        assert_eq!(tag, None);
     }
 }
