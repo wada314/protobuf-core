@@ -90,7 +90,7 @@ where
     fn read_tag(&mut self) -> Result<Option<Tag>> {
         use crate::varint::IteratorExtVarint;
 
-        let varint_result = self.try_collect_varint()?;
+        let varint_result = self.read_varint()?;
         let Some(varint) = varint_result else {
             return Ok(None);
         };
@@ -133,7 +133,7 @@ where
     fn read_tag(&mut self) -> Result<Option<Tag>> {
         use crate::varint::TryIteratorExtVarint;
 
-        let varint_result = self.try_collect_varint()?;
+        let varint_result = self.read_varint()?;
         let Some(varint) = varint_result else {
             return Ok(None);
         };

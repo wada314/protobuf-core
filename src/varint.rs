@@ -338,16 +338,16 @@ where
 ///
 /// let bytes = vec![0x96, 0x01]; // 150 in varint encoding
 /// let mut iter = bytes.into_iter();
-/// let varint: Option<Varint> = iter.try_collect_varint().unwrap();
+/// let varint: Option<Varint> = iter.read_varint().unwrap();
 /// assert_eq!(varint.unwrap().to_uint64(), 150);
 /// ```
 pub trait IteratorExtVarint {
-    /// Collect a varint from this iterator.
+    /// Read a varint from this iterator.
     ///
     /// Returns the Varint `Ok(Some(varint))` if successfully read.
     /// Returns `Ok(None)` if no input is available (empty iterator).
     /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
-    fn try_collect_varint(self) -> Result<Option<Varint>>;
+    fn read_varint(self) -> Result<Option<Varint>>;
 
     /// Create an iterator that reads multiple varints from this iterator.
     ///
@@ -360,12 +360,12 @@ pub trait IteratorExtVarint {
     ///
     /// let bytes = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
     /// let iter = bytes.into_iter();
-    /// let varints: Vec<Varint> = iter.try_collect_varints().collect::<Result<Vec<_>>>().unwrap();
+    /// let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
     /// assert_eq!(varints.len(), 2);
     /// assert_eq!(varints[0].to_uint64(), 150);
     /// assert_eq!(varints[1].to_uint64(), 127);
     /// ```
-    fn try_collect_varints(self) -> VarintIterator<ToResultIterator<Self>>
+    fn read_varints(self) -> VarintIterator<ToResultIterator<Self>>
     where
         Self: Sized + Iterator<Item = u8>;
 }
@@ -374,11 +374,11 @@ impl<I> IteratorExtVarint for I
 where
     I: Iterator<Item = u8>,
 {
-    fn try_collect_varint(self) -> Result<Option<Varint>> {
+    fn read_varint(self) -> Result<Option<Varint>> {
         decode_varint_from_bytes(self.map(|b| Ok::<u8, Infallible>(b)))
     }
 
-    fn try_collect_varints(self) -> VarintIterator<ToResultIterator<Self>>
+    fn read_varints(self) -> VarintIterator<ToResultIterator<Self>>
     where
         Self: Sized,
     {
@@ -386,9 +386,9 @@ where
     }
 }
 
-/// Extension trait for collecting varints from byte iterators that yield `Result<u8, E>`.
+/// Extension trait for reading varints from byte iterators that yield `Result<u8, E>`.
 ///
-/// This trait provides convenient methods to collect varints directly from
+/// This trait provides convenient methods to read varints directly from
 /// any iterator that yields `Result<u8, E>`, allowing proper error propagation.
 /// The error type `E` must implement `Into<ProtobufError>`.
 ///
@@ -400,17 +400,17 @@ where
 /// let data = vec![0x96, 0x01]; // 150 in varint encoding
 /// let mut reader = Cursor::new(data);
 /// let iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
-/// let varint = iter.try_collect_varint().unwrap().unwrap();
+/// let varint = iter.read_varint().unwrap().unwrap();
 /// assert_eq!(varint.to_uint64(), 150);
 /// ```
 pub trait TryIteratorExtVarint {
-    /// Collect a varint from this iterator.
+    /// Read a varint from this iterator.
     ///
     /// Returns the Varint `Ok(Some(varint))` if successfully read.
     /// Returns `Ok(None)` if no input is available (empty iterator).
     /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
     /// Returns `Err(ProtobufError)` if an error occurs while reading bytes (the error type `E` is converted via `Into<ProtobufError>`).
-    fn try_collect_varint(self) -> Result<Option<Varint>>;
+    fn read_varint(self) -> Result<Option<Varint>>;
 
     /// Create an iterator that reads multiple varints from this iterator.
     ///
@@ -425,12 +425,12 @@ pub trait TryIteratorExtVarint {
     /// let data = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
     /// let reader = Cursor::new(data);
     /// let iter = reader.bytes();
-    /// let varints: Vec<Varint> = iter.try_collect_varints().collect::<Result<Vec<_>>>().unwrap();
+    /// let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
     /// assert_eq!(varints.len(), 2);
     /// assert_eq!(varints[0].to_uint64(), 150);
     /// assert_eq!(varints[1].to_uint64(), 127);
     /// ```
-    fn try_collect_varints(self) -> VarintIterator<Self>
+    fn read_varints(self) -> VarintIterator<Self>
     where
         Self: Sized + Iterator;
 }
@@ -440,11 +440,11 @@ where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
-    fn try_collect_varint(self) -> Result<Option<Varint>> {
+    fn read_varint(self) -> Result<Option<Varint>> {
         decode_varint_from_bytes(self)
     }
 
-    fn try_collect_varints(self) -> VarintIterator<Self>
+    fn read_varints(self) -> VarintIterator<Self>
     where
         Self: Sized,
     {
@@ -706,7 +706,7 @@ mod tests {
     fn test_read_varint_from_iterator() {
         let input = [0x96, 0x01];
         let iter = input.iter().copied();
-        let varint = iter.try_collect_varint().unwrap().unwrap();
+        let varint = iter.read_varint().unwrap().unwrap();
 
         assert_eq!(varint.to_uint64(), 150);
     }
@@ -745,7 +745,7 @@ mod tests {
     fn test_iterator_ext_varint_trait() {
         let bytes = vec![0x96, 0x01]; // 150 in varint encoding
         let iter = bytes.into_iter();
-        let varint = iter.try_collect_varint().unwrap().unwrap();
+        let varint = iter.read_varint().unwrap().unwrap();
 
         assert_eq!(varint.to_uint64(), 150);
     }
@@ -756,7 +756,7 @@ mod tests {
 
         let bytes = vec![];
         let iter = bytes.into_iter();
-        let varint = IteratorExtVarint::try_collect_varint(iter).unwrap();
+        let varint = IteratorExtVarint::read_varint(iter).unwrap();
 
         assert_eq!(varint, None);
     }
@@ -809,7 +809,7 @@ mod tests {
             buffer.write_varint(&varint).unwrap();
 
             let iter = buffer.iter().copied();
-            let decoded_varint = iter.try_collect_varint().unwrap().unwrap();
+            let decoded_varint = iter.read_varint().unwrap().unwrap();
             let decoded_value = decoded_varint.to_uint64();
 
             assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
@@ -976,9 +976,7 @@ mod tests {
         let data = vec![0x96, 0x01]; // 150 in varint encoding
         let reader = Cursor::new(data);
         let iter = reader.bytes();
-        let varint = TryIteratorExtVarint::try_collect_varint(iter)
-            .unwrap()
-            .unwrap();
+        let varint = TryIteratorExtVarint::read_varint(iter).unwrap().unwrap();
         assert_eq!(varint.to_uint64(), 150);
     }
 
@@ -990,20 +988,17 @@ mod tests {
         let data = vec![];
         let reader = Cursor::new(data);
         let iter = reader.bytes();
-        let varint = TryIteratorExtVarint::try_collect_varint(iter).unwrap();
+        let varint = TryIteratorExtVarint::read_varint(iter).unwrap();
         assert_eq!(varint, None);
     }
 
     #[test]
-    fn test_iterator_ext_varint_try_collect_varints() {
+    fn test_iterator_ext_varint_read_varints() {
         use super::IteratorExtVarint;
 
         let bytes = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
         let iter = bytes.into_iter();
-        let varints: Vec<Varint> = iter
-            .try_collect_varints()
-            .collect::<Result<Vec<_>>>()
-            .unwrap();
+        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
         assert_eq!(varints.len(), 3);
         assert_eq!(varints[0].to_uint64(), 150);
         assert_eq!(varints[1].to_uint64(), 127);
@@ -1011,17 +1006,14 @@ mod tests {
     }
 
     #[test]
-    fn test_try_iterator_ext_varint_try_collect_varints() {
+    fn test_try_iterator_ext_varint_read_varints() {
         use super::TryIteratorExtVarint;
         use ::std::io::Cursor;
 
         let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
         let reader = Cursor::new(data);
         let iter = reader.bytes();
-        let varints: Vec<Varint> = iter
-            .try_collect_varints()
-            .collect::<Result<Vec<_>>>()
-            .unwrap();
+        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
         assert_eq!(varints.len(), 3);
         assert_eq!(varints[0].to_uint64(), 150);
         assert_eq!(varints[1].to_uint64(), 127);

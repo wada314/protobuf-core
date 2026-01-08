@@ -222,7 +222,7 @@ where
 
     let value = match tag.wire_type {
         WireType::Varint => {
-            let Some(varint) = iter.try_collect_varint()? else {
+            let Some(varint) = iter.read_varint()? else {
                 return Err(ProtobufError::UnexpectedEof);
             };
             FieldValue::Varint(varint)
@@ -242,7 +242,7 @@ where
             FieldValue::I64(bytes)
         }
         WireType::Len => {
-            let Some(varint) = iter.try_collect_varint()? else {
+            let Some(varint) = iter.read_varint()? else {
                 return Err(ProtobufError::UnexpectedEof);
             };
             let length = varint.try_to_uint32()? as usize;
@@ -281,7 +281,7 @@ where
 
     let value = match tag.wire_type {
         WireType::Varint => {
-            let Some(varint) = iter.try_collect_varint()? else {
+            let Some(varint) = iter.read_varint()? else {
                 return Err(ProtobufError::UnexpectedEof);
             };
             FieldValue::Varint(varint)
@@ -307,7 +307,7 @@ where
             FieldValue::I64(bytes)
         }
         WireType::Len => {
-            let Some(varint) = iter.try_collect_varint()? else {
+            let Some(varint) = iter.read_varint()? else {
                 return Err(ProtobufError::UnexpectedEof);
             };
             let length = varint.try_to_uint32()? as usize;
