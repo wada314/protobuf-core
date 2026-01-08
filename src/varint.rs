@@ -212,7 +212,7 @@ impl Varint {
 /// This iterator yields `Result<Varint>` for each varint read from the underlying iterator.
 /// It stops when there are no more bytes available or an error occurs.
 pub struct VarintIterator<I: Iterator> {
-    bytes: ::std::iter::Peekable<I>,
+    bytes: I,
 }
 
 /// Iterator adapter that converts `Iterator<Item = u8>` to `Iterator<Item = Result<u8, Infallible>>`.
@@ -239,9 +239,7 @@ where
     E: Into<ProtobufError>,
 {
     fn new(bytes: I) -> Self {
-        Self {
-            bytes: bytes.peekable(),
-        }
+        Self { bytes }
     }
 }
 
@@ -253,44 +251,7 @@ where
     type Item = Result<Varint>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Check if there are any bytes available
-        if self.bytes.peek().is_none() {
-            return None;
-        }
-
-        // Collect bytes for one varint
-        let mut varint_bytes = Vec::new();
-        let mut found_end = false;
-
-        // Read up to MAX_VARINT_BYTES bytes or until we find the end of varint
-        for _ in 0..MAX_VARINT_BYTES {
-            match self.bytes.next() {
-                Some(Ok(byte)) => {
-                    varint_bytes.push(byte);
-                    if byte & VARINT_CONTINUATION_BIT == 0 {
-                        found_end = true;
-                        break;
-                    }
-                }
-                Some(Err(e)) => return Some(Err(e.into())),
-                None => break, // EOF reached
-            }
-        }
-
-        if varint_bytes.is_empty() {
-            return None;
-        }
-
-        if !found_end && varint_bytes.len() == MAX_VARINT_BYTES {
-            return Some(Err(ProtobufError::VarintTooLong));
-        }
-
-        // Decode the varint from collected bytes
-        match decode_varint_from_bytes(varint_bytes.into_iter().map(|b| Ok::<u8, Infallible>(b))) {
-            Ok(Some(varint)) => Some(Ok(varint)),
-            Ok(None) => None,
-            Err(e) => Some(Err(e)),
-        }
+        decode_varint_from_bytes(&mut self.bytes).transpose()
     }
 }
 
