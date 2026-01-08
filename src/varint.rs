@@ -532,10 +532,14 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::Varint;
+
+    // ============================================================================
+    // Basic Varint tests (no traits)
+    // ============================================================================
+
     #[test]
     fn test_varint_value_creation() {
-        use super::Varint;
-
         let bytes = [0x96, 0x01, 0, 0, 0, 0, 0, 0];
         let varint = Varint::new(bytes);
         assert_eq!(varint.as_bytes(), &bytes);
@@ -543,8 +547,6 @@ mod tests {
 
     #[test]
     fn test_varint_conversions() {
-        use super::Varint;
-
         // 406 in little-endian: 0x96, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
         let bytes = [0x96, 0x01, 0, 0, 0, 0, 0, 0];
         let varint = Varint::new(bytes);
@@ -572,8 +574,6 @@ mod tests {
 
     #[test]
     fn test_signed_integer_conversions() {
-        use super::Varint;
-
         // -1 in ZigZag encoding: 1
         let bytes = [0x01, 0, 0, 0, 0, 0, 0, 0];
         let varint = Varint::new(bytes);
@@ -588,112 +588,105 @@ mod tests {
     }
 
     #[test]
-    fn test_read_varint_from_iterator() {
-        use super::IteratorExtVarint;
-
-        let input = [0x96, 0x01];
-        let iter = input.iter().copied();
-        let varint = iter.read_varint().unwrap().unwrap();
-
-        assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
-    fn test_read_ext_varint_trait() {
-        use super::ReadExtVarint;
-        use ::std::io::Cursor;
-
-        let input = [0x96, 0x01];
-        let mut reader = Cursor::new(input);
-        let varint = reader.read_varint().unwrap().unwrap();
-
-        assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
-    fn test_iterator_ext_varint_trait() {
-        use super::IteratorExtVarint;
-
-        let bytes = vec![0x96, 0x01]; // 150 in varint encoding
-        let iter = bytes.into_iter();
-        let varint = iter.read_varint().unwrap().unwrap();
-
-        assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
-    fn test_iterator_ext_varint_empty() {
-        use super::IteratorExtVarint;
-
-        let varint = IteratorExtVarint::read_varint(::std::iter::empty()).unwrap();
-
-        assert_eq!(varint, None);
-    }
-
-    #[test]
-    fn test_write_varint() {
-        use super::Varint;
-        use super::{MAX_VARINT_BYTES, WriteExtVarint};
-
-        // Test encoding small values
+    fn test_from_traits() {
+        // Test From<u64> for Varint
         let varint = Varint::from_uint64(150);
-        let mut buffer = Vec::new();
-        let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, 2);
-        assert_eq!(buffer, vec![0x96, 0x01]);
+        assert_eq!(varint.to_uint64(), 150);
 
-        // Test encoding single-byte values
-        let varint = Varint::from_uint64(127);
-        let mut buffer = Vec::new();
-        let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, 1);
-        assert_eq!(buffer, vec![0x7F]);
+        // Test from_uint32
+        let varint = Varint::from_uint32(150);
+        assert_eq!(varint.to_uint64(), 150);
 
-        // Test encoding zero
-        let varint = Varint::from_uint64(0);
-        let mut buffer = Vec::new();
-        let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, 1);
-        assert_eq!(buffer, vec![0x00]);
+        // Test from_sint64
+        let varint = Varint::from_sint64(150);
+        assert_eq!(varint.to_sint64(), 150);
 
-        // Test encoding large values
-        let varint = Varint::from_uint64(0x7FFFFFFFFFFFFFFF);
-        let mut buffer = Vec::new();
-        let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, 9); // 9-byte varint
+        // Test from_sint64 with negative value
+        let varint = Varint::from_sint64(-1);
+        assert_eq!(varint.to_sint64(), -1);
 
-        // Test encoding maximum varint (MAX_VARINT_BYTES bytes)
-        let varint = Varint::from_uint64(0xFFFFFFFFFFFFFFFF);
-        let mut buffer = Vec::new();
-        let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, MAX_VARINT_BYTES); // Maximum varint size
+        // Test from_bool
+        let varint = Varint::from_bool(true);
+        assert_eq!(varint.to_bool(), true);
+
+        // Test from_int32 (non-ZigZag)
+        let varint = Varint::from_int32(150);
+        assert_eq!(varint.to_int64(), 150);
+
+        // Test from_int64 (non-ZigZag)
+        let varint = Varint::from_int64(150);
+        assert_eq!(varint.to_int64(), 150);
     }
 
     #[test]
-    fn test_write_varint_roundtrip() {
-        use super::Varint;
-        use super::{IteratorExtVarint, WriteExtVarint};
+    fn test_to_methods() {
+        let bytes = [150, 0, 0, 0, 0, 0, 0, 0]; // 150 in little-endian
+        let varint = Varint::new(bytes);
 
-        let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
+        // Test to_uint32
+        assert_eq!(varint.try_to_uint32().unwrap(), 150);
 
-        for &value in &test_values {
-            // Create Varint from the test value
-            let varint = Varint::from_uint64(value);
+        // Test to_sint32 (150 in ZigZag encoding represents 75 in signed value)
+        assert_eq!(varint.try_to_sint32().unwrap(), 75);
 
-            let mut buffer = Vec::new();
-            buffer.write_varint(&varint).unwrap();
+        // Test to_sint64 (150 in ZigZag encoding represents 75 in signed value)
+        assert_eq!(varint.to_sint64(), 75);
 
-            let iter = buffer.iter().copied();
-            let decoded_varint = iter.read_varint().unwrap().unwrap();
-            let decoded_value = decoded_varint.to_uint64();
+        // Test to_bool
+        assert_eq!(varint.to_bool(), true);
 
-            assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
-        }
+        // Test to_int32 (non-ZigZag)
+        assert_eq!(varint.try_to_int32().unwrap(), 150);
+
+        // Test to_int64 (non-ZigZag)
+        assert_eq!(varint.to_int64(), 150);
     }
+
+    #[test]
+    fn test_roundtrip_conversions() {
+        // Test roundtrip for u64
+        let original = 150u64;
+        let varint = Varint::from_uint64(original);
+        assert_eq!(varint.to_uint64(), original);
+
+        // Test roundtrip for u32
+        let original = 150u32;
+        let varint = Varint::from_uint32(original);
+        let converted = varint.try_to_uint32().unwrap();
+        assert_eq!(converted, original);
+
+        // Test roundtrip for i64 (ZigZag)
+        let original = -1i64;
+        let varint = Varint::from_sint64(original);
+        let converted = varint.to_sint64();
+        assert_eq!(converted, original);
+
+        // Test roundtrip for i64 (non-ZigZag)
+        let original = 150i64;
+        let varint = Varint::from_int64(original);
+        let converted = varint.to_int64();
+        assert_eq!(converted, original);
+
+        // Test roundtrip for i32 (non-ZigZag)
+        let original = 150i32;
+        let varint = Varint::from_int32(original);
+        let converted = varint.try_to_int32().unwrap();
+        assert_eq!(converted, original);
+
+        // Test roundtrip for bool
+        let original = true;
+        let varint = Varint::from_bool(original);
+        let converted = varint.to_bool();
+        assert_eq!(converted, original);
+    }
+
+    // ============================================================================
+    // Encoding tests
+    // ============================================================================
 
     #[test]
     fn test_encode_varint() {
-        use super::{MAX_VARINT_BYTES, Varint};
+        use super::MAX_VARINT_BYTES;
 
         // Test encoding small values
         let varint = Varint::from_uint64(150);
@@ -733,8 +726,45 @@ mod tests {
     }
 
     #[test]
+    fn test_write_varint() {
+        use super::{MAX_VARINT_BYTES, WriteExtVarint};
+
+        // Test encoding small values
+        let varint = Varint::from_uint64(150);
+        let mut buffer = Vec::new();
+        let bytes_written = buffer.write_varint(&varint).unwrap();
+        assert_eq!(bytes_written, 2);
+        assert_eq!(buffer, vec![0x96, 0x01]);
+
+        // Test encoding single-byte values
+        let varint = Varint::from_uint64(127);
+        let mut buffer = Vec::new();
+        let bytes_written = buffer.write_varint(&varint).unwrap();
+        assert_eq!(bytes_written, 1);
+        assert_eq!(buffer, vec![0x7F]);
+
+        // Test encoding zero
+        let varint = Varint::from_uint64(0);
+        let mut buffer = Vec::new();
+        let bytes_written = buffer.write_varint(&varint).unwrap();
+        assert_eq!(bytes_written, 1);
+        assert_eq!(buffer, vec![0x00]);
+
+        // Test encoding large values
+        let varint = Varint::from_uint64(0x7FFFFFFFFFFFFFFF);
+        let mut buffer = Vec::new();
+        let bytes_written = buffer.write_varint(&varint).unwrap();
+        assert_eq!(bytes_written, 9); // 9-byte varint
+
+        // Test encoding maximum varint (MAX_VARINT_BYTES bytes)
+        let varint = Varint::from_uint64(0xFFFFFFFFFFFFFFFF);
+        let mut buffer = Vec::new();
+        let bytes_written = buffer.write_varint(&varint).unwrap();
+        assert_eq!(bytes_written, MAX_VARINT_BYTES); // Maximum varint size
+    }
+
+    #[test]
     fn test_all_encoding_methods_consistency() {
-        use super::Varint;
         use super::WriteExtVarint;
 
         let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
@@ -755,104 +785,57 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_from_traits() {
-        use super::Varint;
+    // ============================================================================
+    // IteratorExtVarint tests
+    // ============================================================================
 
-        // Test From<u64> for Varint
-        let varint = Varint::from_uint64(150);
+    #[test]
+    fn test_read_varint_from_iterator() {
+        use super::IteratorExtVarint;
+
+        let input = [0x96, 0x01];
+        let iter = input.iter().copied();
+        let varint = iter.read_varint().unwrap().unwrap();
+
         assert_eq!(varint.to_uint64(), 150);
+    }
 
-        // Test from_uint32
-        let varint = Varint::from_uint32(150);
+    #[test]
+    fn test_iterator_ext_varint_trait() {
+        use super::IteratorExtVarint;
+
+        let bytes = vec![0x96, 0x01]; // 150 in varint encoding
+        let iter = bytes.into_iter();
+        let varint = iter.read_varint().unwrap().unwrap();
+
         assert_eq!(varint.to_uint64(), 150);
-
-        // Test from_sint64
-        let varint = Varint::from_sint64(150);
-        assert_eq!(varint.to_sint64(), 150);
-
-        // Test from_sint64 with negative value
-        let varint = Varint::from_sint64(-1);
-        assert_eq!(varint.to_sint64(), -1);
-
-        // Test from_bool
-        let varint = Varint::from_bool(true);
-        assert_eq!(varint.to_bool(), true);
-
-        // Test from_int32 (non-ZigZag)
-        let varint = Varint::from_int32(150);
-        assert_eq!(varint.to_int64(), 150);
-
-        // Test from_int64 (non-ZigZag)
-        let varint = Varint::from_int64(150);
-        assert_eq!(varint.to_int64(), 150);
     }
 
     #[test]
-    fn test_to_methods() {
-        use super::Varint;
+    fn test_iterator_ext_varint_empty() {
+        use super::IteratorExtVarint;
 
-        let bytes = [150, 0, 0, 0, 0, 0, 0, 0]; // 150 in little-endian
-        let varint = Varint::new(bytes);
+        let varint = IteratorExtVarint::read_varint(::std::iter::empty()).unwrap();
 
-        // Test to_uint32
-        assert_eq!(varint.try_to_uint32().unwrap(), 150);
-
-        // Test to_sint32 (150 in ZigZag encoding represents 75 in signed value)
-        assert_eq!(varint.try_to_sint32().unwrap(), 75);
-
-        // Test to_sint64 (150 in ZigZag encoding represents 75 in signed value)
-        assert_eq!(varint.to_sint64(), 75);
-
-        // Test to_bool
-        assert_eq!(varint.to_bool(), true);
-
-        // Test to_int32 (non-ZigZag)
-        assert_eq!(varint.try_to_int32().unwrap(), 150);
-
-        // Test to_int64 (non-ZigZag)
-        assert_eq!(varint.to_int64(), 150);
+        assert_eq!(varint, None);
     }
 
     #[test]
-    fn test_roundtrip_conversions() {
-        use super::Varint;
+    fn test_iterator_ext_varint_read_varints() {
+        use super::{IteratorExtVarint, Result};
 
-        // Test roundtrip for u64
-        let original = 150u64;
-        let varint = Varint::from_uint64(original);
-        assert_eq!(varint.to_uint64(), original);
-
-        // Test roundtrip for u32
-        let original = 150u32;
-        let varint = Varint::from_uint32(original);
-        let converted = varint.try_to_uint32().unwrap();
-        assert_eq!(converted, original);
-
-        // Test roundtrip for i64 (ZigZag)
-        let original = -1i64;
-        let varint = Varint::from_sint64(original);
-        let converted = varint.to_sint64();
-        assert_eq!(converted, original);
-
-        // Test roundtrip for i64 (non-ZigZag)
-        let original = 150i64;
-        let varint = Varint::from_int64(original);
-        let converted = varint.to_int64();
-        assert_eq!(converted, original);
-
-        // Test roundtrip for i32 (non-ZigZag)
-        let original = 150i32;
-        let varint = Varint::from_int32(original);
-        let converted = varint.try_to_int32().unwrap();
-        assert_eq!(converted, original);
-
-        // Test roundtrip for bool
-        let original = true;
-        let varint = Varint::from_bool(original);
-        let converted = varint.to_bool();
-        assert_eq!(converted, original);
+        let bytes = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
+        let iter = bytes.into_iter();
+        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
+        assert_eq!(varints.len(), 3);
+        assert_eq!(varints[0].to_uint64(), 150);
+        assert_eq!(varints[1].to_uint64(), 127);
+        assert_eq!(varints[2].to_uint64(), 1);
     }
+
+    // ============================================================================
+    // TryIteratorExtVarint tests
+    // ============================================================================
 
     #[test]
     fn test_try_iterator_ext_varint() {
@@ -879,22 +862,7 @@ mod tests {
     }
 
     #[test]
-    fn test_iterator_ext_varint_read_varints() {
-        use super::Varint;
-        use super::{IteratorExtVarint, Result};
-
-        let bytes = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
-        let iter = bytes.into_iter();
-        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
-        assert_eq!(varints.len(), 3);
-        assert_eq!(varints[0].to_uint64(), 150);
-        assert_eq!(varints[1].to_uint64(), 127);
-        assert_eq!(varints[2].to_uint64(), 1);
-    }
-
-    #[test]
     fn test_try_iterator_ext_varint_read_varints() {
-        use super::Varint;
         use super::{Result, TryIteratorExtVarint};
         use ::std::io::{Cursor, Read};
 
@@ -908,9 +876,24 @@ mod tests {
         assert_eq!(varints[2].to_uint64(), 1);
     }
 
+    // ============================================================================
+    // ReadExtVarint tests
+    // ============================================================================
+
+    #[test]
+    fn test_read_ext_varint_trait() {
+        use super::ReadExtVarint;
+        use ::std::io::Cursor;
+
+        let input = [0x96, 0x01];
+        let mut reader = Cursor::new(input);
+        let varint = reader.read_varint().unwrap().unwrap();
+
+        assert_eq!(varint.to_uint64(), 150);
+    }
+
     #[test]
     fn test_read_ext_varint_read_varints() {
-        use super::Varint;
         use super::{ReadExtVarint, Result};
         use ::std::io::Cursor;
 
@@ -921,5 +904,30 @@ mod tests {
         assert_eq!(varints[0].to_uint64(), 150);
         assert_eq!(varints[1].to_uint64(), 127);
         assert_eq!(varints[2].to_uint64(), 1);
+    }
+
+    // ============================================================================
+    // Roundtrip tests
+    // ============================================================================
+
+    #[test]
+    fn test_write_varint_roundtrip() {
+        use super::{IteratorExtVarint, WriteExtVarint};
+
+        let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
+
+        for &value in &test_values {
+            // Create Varint from the test value
+            let varint = Varint::from_uint64(value);
+
+            let mut buffer = Vec::new();
+            buffer.write_varint(&varint).unwrap();
+
+            let iter = buffer.iter().copied();
+            let decoded_varint = iter.read_varint().unwrap().unwrap();
+            let decoded_value = decoded_varint.to_uint64();
+
+            assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
+        }
     }
 }
