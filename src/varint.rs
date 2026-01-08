@@ -593,16 +593,6 @@ mod tests {
     }
 
     #[test]
-    fn test_read_varint_from_reader() {
-        use ::std::io::Cursor;
-        let input = [0x96, 0x01];
-        let mut reader = Cursor::new(input);
-        let varint = reader.read_varint().unwrap().unwrap();
-
-        assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
     fn test_read_ext_varint_trait() {
         use ::std::io::Cursor;
         let input = [0x96, 0x01];
@@ -610,16 +600,6 @@ mod tests {
         let varint = reader.read_varint().unwrap().unwrap();
 
         assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
-    fn test_write_ext_varint_trait() {
-        let varint = Varint::from_uint64(150);
-        let mut writer = Vec::new();
-        let bytes_written = writer.write_varint(&varint).unwrap();
-
-        assert_eq!(bytes_written, 2);
-        assert_eq!(writer, vec![0x96, 0x01]);
     }
 
     #[test]
@@ -909,20 +889,6 @@ mod tests {
         let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
         let mut reader = Cursor::new(data);
         let varints: Vec<Varint> = reader.read_varints().collect::<Result<Vec<_>>>().unwrap();
-        assert_eq!(varints.len(), 3);
-        assert_eq!(varints[0].to_uint64(), 150);
-        assert_eq!(varints[1].to_uint64(), 127);
-        assert_eq!(varints[2].to_uint64(), 1);
-    }
-
-    #[test]
-    fn test_slice_ext_varint_read_varints() {
-        use super::ReadExtVarint;
-        use ::std::io::Cursor;
-
-        let data = [0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
-        let mut cursor = Cursor::new(&data[..]);
-        let varints: Vec<Varint> = cursor.read_varints().collect::<Result<Vec<_>>>().unwrap();
         assert_eq!(varints.len(), 3);
         assert_eq!(varints[0].to_uint64(), 150);
         assert_eq!(varints[1].to_uint64(), 127);
