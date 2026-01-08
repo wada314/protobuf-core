@@ -553,15 +553,18 @@ mod tests {
             Ok(value) => assert_eq!(value, 406),
             Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
         }
-        let varint = Varint::new(bytes); // Create new varint for next test
+
+        let varint = Varint::new(bytes);
         // 406 in ZigZag encoding represents 203 in signed value
         assert_eq!(varint.to_sint64(), 203);
-        let varint = Varint::new(bytes); // Create new varint for next test
+
+        let varint = Varint::new(bytes);
         match varint.try_to_sint32() {
             Ok(value) => assert_eq!(value, 203),
             Err(e) => panic!("Expected Ok(203), got error: {:?}", e),
         }
-        let varint = Varint::new(bytes); // Create new varint for next test
+
+        let varint = Varint::new(bytes);
         assert_eq!(varint.to_bool(), true);
     }
 
@@ -572,7 +575,8 @@ mod tests {
         let varint = Varint::new(bytes);
 
         assert_eq!(varint.to_sint64(), -1);
-        let varint = Varint::new(bytes); // Create new varint for next test
+
+        let varint = Varint::new(bytes);
         match varint.try_to_sint32() {
             Ok(value) => assert_eq!(value, -1),
             Err(e) => panic!("Expected Ok(-1), got error: {:?}", e),
