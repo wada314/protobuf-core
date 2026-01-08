@@ -328,7 +328,7 @@ mod tests {
     // ============================================================================
 
     #[test]
-    fn test_read_tag() {
+    fn test_iterator_ext_tag_trait() {
         use super::IteratorExtTag;
 
         let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
@@ -339,7 +339,15 @@ mod tests {
     }
 
     #[test]
-    fn test_read_tag_u32_overflow() {
+    fn test_iterator_ext_tag_empty() {
+        use super::IteratorExtTag;
+
+        let tag = IteratorExtTag::read_tag(&mut ::std::iter::empty()).unwrap();
+        assert_eq!(tag, None);
+    }
+
+    #[test]
+    fn test_iterator_ext_tag_u32_overflow() {
         use super::IteratorExtTag;
 
         // Test case where the varint value exceeds u32::MAX
@@ -364,7 +372,7 @@ mod tests {
     // ============================================================================
 
     #[test]
-    fn test_try_iterator_ext_read_tag() {
+    fn test_try_iterator_ext_tag() {
         use super::TryIteratorExtTag;
         use ::std::io::{Cursor, Read};
 
@@ -377,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_iterator_ext_read_tag_empty() {
+    fn test_try_iterator_ext_tag_empty() {
         use super::TryIteratorExtTag;
         use ::std::io::{Cursor, Read};
 
@@ -385,6 +393,33 @@ mod tests {
         let reader = Cursor::new(data);
         let mut iter = reader.bytes();
         let tag = iter.read_tag().unwrap();
+        assert_eq!(tag, None);
+    }
+
+    // ============================================================================
+    // ReadExtTag tests
+    // ============================================================================
+
+    #[test]
+    fn test_read_ext_tag_trait() {
+        use super::ReadExtTag;
+        use ::std::io::Cursor;
+
+        let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
+        let mut reader = Cursor::new(data);
+        let tag = reader.read_tag().unwrap().unwrap();
+        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
+        assert_eq!(tag.wire_type, WireType::Varint);
+    }
+
+    #[test]
+    fn test_read_ext_tag_empty() {
+        use super::ReadExtTag;
+        use ::std::io::Cursor;
+
+        let data = vec![];
+        let mut reader = Cursor::new(data);
+        let tag = reader.read_tag().unwrap();
         assert_eq!(tag, None);
     }
 }
