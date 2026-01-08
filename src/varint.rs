@@ -532,10 +532,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_varint_value_creation() {
+        use super::Varint;
+
         let bytes = [0x96, 0x01, 0, 0, 0, 0, 0, 0];
         let varint = Varint::new(bytes);
         assert_eq!(varint.as_bytes(), &bytes);
@@ -543,6 +543,8 @@ mod tests {
 
     #[test]
     fn test_varint_conversions() {
+        use super::Varint;
+
         // 406 in little-endian: 0x96, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
         let bytes = [0x96, 0x01, 0, 0, 0, 0, 0, 0];
         let varint = Varint::new(bytes);
@@ -570,6 +572,8 @@ mod tests {
 
     #[test]
     fn test_signed_integer_conversions() {
+        use super::Varint;
+
         // -1 in ZigZag encoding: 1
         let bytes = [0x01, 0, 0, 0, 0, 0, 0, 0];
         let varint = Varint::new(bytes);
@@ -585,6 +589,8 @@ mod tests {
 
     #[test]
     fn test_read_varint_from_iterator() {
+        use super::IteratorExtVarint;
+
         let input = [0x96, 0x01];
         let iter = input.iter().copied();
         let varint = iter.read_varint().unwrap().unwrap();
@@ -594,7 +600,9 @@ mod tests {
 
     #[test]
     fn test_read_ext_varint_trait() {
+        use super::ReadExtVarint;
         use ::std::io::Cursor;
+
         let input = [0x96, 0x01];
         let mut reader = Cursor::new(input);
         let varint = reader.read_varint().unwrap().unwrap();
@@ -604,6 +612,8 @@ mod tests {
 
     #[test]
     fn test_iterator_ext_varint_trait() {
+        use super::IteratorExtVarint;
+
         let bytes = vec![0x96, 0x01]; // 150 in varint encoding
         let iter = bytes.into_iter();
         let varint = iter.read_varint().unwrap().unwrap();
@@ -615,15 +625,16 @@ mod tests {
     fn test_iterator_ext_varint_empty() {
         use super::IteratorExtVarint;
 
-        let bytes = vec![];
-        let iter = bytes.into_iter();
-        let varint = IteratorExtVarint::read_varint(iter).unwrap();
+        let varint = IteratorExtVarint::read_varint(::std::iter::empty()).unwrap();
 
         assert_eq!(varint, None);
     }
 
     #[test]
     fn test_write_varint() {
+        use super::Varint;
+        use super::{MAX_VARINT_BYTES, WriteExtVarint};
+
         // Test encoding small values
         let varint = Varint::from_uint64(150);
         let mut buffer = Vec::new();
@@ -660,6 +671,9 @@ mod tests {
 
     #[test]
     fn test_write_varint_roundtrip() {
+        use super::Varint;
+        use super::{IteratorExtVarint, WriteExtVarint};
+
         let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
 
         for &value in &test_values {
@@ -679,6 +693,8 @@ mod tests {
 
     #[test]
     fn test_encode_varint() {
+        use super::{MAX_VARINT_BYTES, Varint};
+
         // Test encoding small values
         let varint = Varint::from_uint64(150);
         let (bytes, count) = varint.encode();
@@ -718,6 +734,9 @@ mod tests {
 
     #[test]
     fn test_all_encoding_methods_consistency() {
+        use super::Varint;
+        use super::WriteExtVarint;
+
         let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
 
         for &value in &test_values {
@@ -738,6 +757,8 @@ mod tests {
 
     #[test]
     fn test_from_traits() {
+        use super::Varint;
+
         // Test From<u64> for Varint
         let varint = Varint::from_uint64(150);
         assert_eq!(varint.to_uint64(), 150);
@@ -769,6 +790,8 @@ mod tests {
 
     #[test]
     fn test_to_methods() {
+        use super::Varint;
+
         let bytes = [150, 0, 0, 0, 0, 0, 0, 0]; // 150 in little-endian
         let varint = Varint::new(bytes);
 
@@ -793,6 +816,8 @@ mod tests {
 
     #[test]
     fn test_roundtrip_conversions() {
+        use super::Varint;
+
         // Test roundtrip for u64
         let original = 150u64;
         let varint = Varint::from_uint64(original);
@@ -832,7 +857,7 @@ mod tests {
     #[test]
     fn test_try_iterator_ext_varint() {
         use super::TryIteratorExtVarint;
-        use ::std::io::Cursor;
+        use ::std::io::{Cursor, Read};
 
         let data = vec![0x96, 0x01]; // 150 in varint encoding
         let reader = Cursor::new(data);
@@ -844,7 +869,7 @@ mod tests {
     #[test]
     fn test_try_iterator_ext_varint_empty() {
         use super::TryIteratorExtVarint;
-        use ::std::io::Cursor;
+        use ::std::io::{Cursor, Read};
 
         let data = vec![];
         let reader = Cursor::new(data);
@@ -855,7 +880,8 @@ mod tests {
 
     #[test]
     fn test_iterator_ext_varint_read_varints() {
-        use super::IteratorExtVarint;
+        use super::Varint;
+        use super::{IteratorExtVarint, Result};
 
         let bytes = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
         let iter = bytes.into_iter();
@@ -868,8 +894,9 @@ mod tests {
 
     #[test]
     fn test_try_iterator_ext_varint_read_varints() {
-        use super::TryIteratorExtVarint;
-        use ::std::io::Cursor;
+        use super::Varint;
+        use super::{Result, TryIteratorExtVarint};
+        use ::std::io::{Cursor, Read};
 
         let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
         let reader = Cursor::new(data);
@@ -883,7 +910,8 @@ mod tests {
 
     #[test]
     fn test_read_ext_varint_read_varints() {
-        use super::ReadExtVarint;
+        use super::Varint;
+        use super::{ReadExtVarint, Result};
         use ::std::io::Cursor;
 
         let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
