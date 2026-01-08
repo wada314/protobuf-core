@@ -19,7 +19,7 @@
 //! this module works directly with slices and returns references to sub-slices.
 
 use crate::field::{Field, FieldValue};
-use crate::tag::SliceExtTag;
+use crate::tag::ReadExtTag;
 use crate::varint::ReadExtVarint;
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
@@ -90,12 +90,15 @@ fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [
     }
 
     // Read tag
-    let tag = match slice.read_tag()? {
+    let mut cursor = Cursor::new(*slice);
+    let tag = match cursor.read_tag()? {
         Some(tag) => tag,
         None => {
             return Ok(None);
         }
     };
+    let consumed = cursor.position() as usize;
+    *slice = &slice[consumed..];
 
     let value = match tag.wire_type {
         WireType::Varint => {

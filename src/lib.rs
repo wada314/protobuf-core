@@ -38,7 +38,7 @@ pub use self::field::{
 };
 pub use self::field_number::FieldNumber;
 pub use self::slice::SliceAdvance;
-pub use self::tag::{IteratorExtTag, ReadExtTag, SliceExtTag, Tag, TryIteratorExtTag};
+pub use self::tag::{IteratorExtTag, ReadExtTag, Tag, TryIteratorExtTag};
 pub use self::varint::{
     IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint, WriteExtVarint,
 };

@@ -20,10 +20,9 @@
 use crate::ProtobufError;
 use crate::Result;
 use crate::field_number::FieldNumber;
-use crate::slice::SliceAdvance;
 use crate::varint::Varint;
 use crate::wire_format::{FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK, WireType};
-use ::std::convert::{AsRef, TryFrom};
+use ::std::convert::{From, Into, TryFrom};
 use ::std::io::Read;
 
 /// A protobuf tag containing field number and wire type
@@ -60,9 +59,27 @@ impl Tag {
     }
 }
 
-/// Extension trait for reading tags from byte iterators.
+// ============================================================================
+// From / Into implementations
+// ============================================================================
+
+impl From<Tag> for Varint {
+    fn from(tag: Tag) -> Self {
+        tag.to_encoded()
+    }
+}
+
+impl TryFrom<Varint> for Tag {
+    type Error = ProtobufError;
+
+    fn try_from(encoded: Varint) -> Result<Self> {
+        Self::from_encoded(encoded)
+    }
+}
+
+/// Extension trait for reading tag from byte iterators.
 ///
-/// This trait provides a convenient method to read tags directly from
+/// This trait provides a convenient method to read tag directly from
 /// any iterator that yields bytes.
 ///
 /// # Example
@@ -99,9 +116,9 @@ where
     }
 }
 
-/// Extension trait for reading tags from byte iterators that yield `Result<u8, E>`.
+/// Extension trait for reading tag from byte iterators that yield `Result<u8, E>`.
 ///
-/// This trait provides a convenient method to read tags directly from
+/// This trait provides a convenient method to read tag directly from
 /// any iterator that yields `Result<u8, E>`, allowing proper error propagation
 /// from I/O operations.
 ///
@@ -176,52 +193,6 @@ where
         let Some(varint) = self.read_varint()? else {
             return Ok(None);
         };
-
-        let tag = Tag::from_encoded(varint)?;
-        Ok(Some(tag))
-    }
-}
-
-/// Extension trait for reading tags from slices.
-///
-/// This trait provides a convenient method to read tags directly from
-/// byte slices. The slice is automatically advanced after reading.
-///
-/// # Example
-/// ```
-/// use ::protobuf_core::SliceExtTag;
-///
-/// let data = [0x08]; // tag 1:0 (field 1, wire type 0)
-/// let mut slice = &data[..];
-/// let tag = slice.read_tag().unwrap().unwrap();
-/// assert_eq!(tag.field_number.as_u32(), 1);
-/// ```
-pub trait SliceExtTag {
-    /// Read a tag from this slice.
-    ///
-    /// The slice is automatically advanced to point to the byte after the tag.
-    /// To get the number of bytes consumed, compare the slice length before and after.
-    ///
-    /// Returns `Ok(Some(tag))` if successfully read.
-    /// Returns `Ok(None)` if no input is available (empty slice).
-    /// Returns `Err(ProtobufError)` if the tag is malformed.
-    fn read_tag(&mut self) -> Result<Option<Tag>>;
-}
-
-impl<S> SliceExtTag for S
-where
-    S: AsRef<[u8]> + SliceAdvance,
-{
-    fn read_tag(&mut self) -> Result<Option<Tag>> {
-        use crate::varint::ReadExtVarint;
-        use ::std::io::Cursor;
-
-        let mut cursor = Cursor::new(self.as_ref());
-        let Some(varint) = cursor.read_varint()? else {
-            return Ok(None);
-        };
-        let consumed = cursor.position() as usize;
-        self.advance(consumed);
 
         let tag = Tag::from_encoded(varint)?;
         Ok(Some(tag))
@@ -328,43 +299,6 @@ mod tests {
     }
 
     #[test]
-    fn test_slice_ext_read_tag() {
-        use super::SliceExtTag;
-
-        let data = [0x08]; // tag 1:0 (field 1, wire type 0)
-        let mut slice = &data[..];
-        let tag = SliceExtTag::read_tag(&mut slice).unwrap().unwrap();
-        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
-        assert_eq!(tag.wire_type, WireType::Varint);
-        assert!(slice.is_empty());
-
-        // Should return None for empty slice
-        assert!(SliceExtTag::read_tag(&mut slice).unwrap().is_none());
-    }
-
-    #[test]
-    fn test_slice_ext_read_tag_multiple_bytes() {
-        use super::SliceExtTag;
-
-        // Create a tag with field number 2 and encode it
-        let field_number = FieldNumber::try_new(2).unwrap();
-        let wire_type = WireType::Varint;
-        let tag = Tag {
-            field_number,
-            wire_type,
-        };
-        let encoded = tag.to_encoded();
-        let (bytes, count) = encoded.encode();
-
-        // Read the tag from the encoded bytes
-        let mut slice = &bytes[..count];
-        let decoded_tag = SliceExtTag::read_tag(&mut slice).unwrap().unwrap();
-        assert_eq!(decoded_tag.field_number, field_number);
-        assert_eq!(decoded_tag.wire_type, wire_type);
-        assert!(slice.is_empty());
-    }
-
-    #[test]
     fn test_try_iterator_ext_read_tag() {
         use super::TryIteratorExtTag;
         use ::std::io::Cursor;
@@ -387,5 +321,46 @@ mod tests {
         let mut iter = reader.bytes();
         let tag = iter.read_tag().unwrap();
         assert_eq!(tag, None);
+    }
+
+    #[test]
+    fn test_from_varint() {
+        let field_number = FieldNumber::try_new(5).unwrap();
+        let wire_type = WireType::Varint;
+        let tag = Tag {
+            field_number,
+            wire_type,
+        };
+        let varint: Varint = tag.into();
+        let decoded_tag = Tag::try_from(varint).unwrap();
+        assert_eq!(decoded_tag, tag);
+    }
+
+    #[test]
+    fn test_try_from_varint_invalid() {
+        // Test with invalid field number 0
+        let varint = Varint::from_uint32(0);
+        let result = Tag::try_from(varint);
+        assert!(result.is_err());
+
+        if let Err(ProtobufError::FieldNumberOutOfRange { value }) = result {
+            assert_eq!(value, "0");
+        } else {
+            panic!("Expected FieldNumberOutOfRange error");
+        }
+    }
+
+    #[test]
+    fn test_try_from_varint_invalid_wire_type() {
+        // Test with invalid wire type
+        let varint = Varint::from_uint32((1 << 3) | 6);
+        let result = Tag::try_from(varint);
+        assert!(result.is_err());
+
+        if let Err(ProtobufError::InvalidWireType { value }) = result {
+            assert_eq!(value, 6);
+        } else {
+            panic!("Expected InvalidWireType error");
+        }
     }
 }
