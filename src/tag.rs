@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn test_read_tag_u64_overflow() {
+    fn test_read_tag_u32_overflow() {
         use super::IteratorExtTag;
 
         // Test case where the varint value exceeds u32::MAX
