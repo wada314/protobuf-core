@@ -18,8 +18,8 @@
 //! It returns `Field<Vec<u8>>` - owned data suitable for streaming sources like `std::io::Read`.
 
 use crate::field::Field;
-use crate::field::read::{FieldValueReader, parse_field_value};
-use crate::tag::{IteratorExtTag, ReadExtTag};
+use crate::field::read::{FieldValueReader, parse_field};
+use crate::tag::{IteratorExtTag, ReadExtTag, Tag};
 use crate::varint::{IteratorExtVarint, Varint};
 use crate::{ProtobufError, Result};
 use ::std::io::Read;
@@ -33,6 +33,10 @@ impl<'a, I> FieldValueReader<Vec<u8>> for IteratorReader<'a, I>
 where
     I: Iterator<Item = u8>,
 {
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
+        self.0.read_tag()
+    }
+
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         self.0.read_varint()
     }
@@ -73,6 +77,11 @@ where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
+        use crate::tag::TryIteratorExtTag;
+        self.0.read_tag()
+    }
+
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::TryIteratorExtVarint;
         self.0.read_varint()
@@ -125,6 +134,10 @@ impl<'a, R> FieldValueReader<Vec<u8>> for ReadReader<'a, R>
 where
     R: Read,
 {
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
+        self.0.read_tag()
+    }
+
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::ReadExtVarint;
         self.0.read_varint()
@@ -343,18 +356,8 @@ fn parse_field_from_iterator<I>(iter: &mut I) -> Result<Option<Field<Vec<u8>>>>
 where
     I: Iterator<Item = u8>,
 {
-    // Read tag
-    let Some(tag) = iter.read_tag()? else {
-        return Ok(None);
-    };
-
     let mut reader = IteratorReader(iter);
-    let value = parse_field_value(tag, &mut reader)?;
-
-    Ok(Some(Field {
-        field_number: tag.field_number,
-        value,
-    }))
+    parse_field(&mut reader)
 }
 
 /// Read a single raw field from a try iterator (private helper function)
@@ -363,20 +366,8 @@ where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
-    use crate::tag::TryIteratorExtTag;
-
-    // Read tag
-    let Some(tag) = iter.read_tag()? else {
-        return Ok(None);
-    };
-
     let mut reader = TryIteratorReader(iter);
-    let value = parse_field_value(tag, &mut reader)?;
-
-    Ok(Some(Field {
-        field_number: tag.field_number,
-        value,
-    }))
+    parse_field(&mut reader)
 }
 
 /// Read a single raw field from the reader (private helper function)
@@ -384,18 +375,8 @@ fn parse_next_field<R>(reader: &mut R) -> Result<Option<Field<Vec<u8>>>>
 where
     R: Read,
 {
-    // Read tag
-    let Some(tag) = reader.read_tag()? else {
-        return Ok(None);
-    };
-
     let mut read_reader = ReadReader(reader);
-    let value = parse_field_value(tag, &mut read_reader)?;
-
-    Ok(Some(Field {
-        field_number: tag.field_number,
-        value,
-    }))
+    parse_field(&mut read_reader)
 }
 
 #[cfg(test)]

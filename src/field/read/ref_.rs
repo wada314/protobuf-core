@@ -19,8 +19,8 @@
 //! this module works directly with slices and returns references to sub-slices (`Field<&'a [u8]>`).
 
 use crate::field::Field;
-use crate::field::read::{parse_field_value, FieldValueReader};
-use crate::tag::ReadExtTag;
+use crate::field::read::{FieldValueReader, parse_field};
+use crate::tag::{ReadExtTag, Tag};
 use crate::varint::{ReadExtVarint, Varint};
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
@@ -32,6 +32,20 @@ struct SliceReader<'a, 'b> {
 }
 
 impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
+        if self.slice.is_empty() {
+            return Ok(None);
+        }
+        let mut cursor = Cursor::new(*self.slice);
+        let tag_result = cursor.read_tag()?;
+        let Some(tag) = tag_result else {
+            return Ok(None);
+        };
+        let consumed = cursor.position() as usize;
+        *self.slice = &(*self.slice)[consumed..];
+        Ok(Some(tag))
+    }
+
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         let mut cursor = Cursor::new(*self.slice);
         let varint_result = cursor.read_varint()?;
@@ -129,28 +143,8 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
 impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> {}
 
 fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [u8]>>> {
-    if slice.is_empty() {
-        return Ok(None);
-    }
-
-    // Read tag
-    let mut cursor = Cursor::new(*slice);
-    let tag = match cursor.read_tag()? {
-        Some(tag) => tag,
-        None => {
-            return Ok(None);
-        }
-    };
-    let consumed = cursor.position() as usize;
-    *slice = &slice[consumed..];
-
     let mut reader = SliceReader { slice };
-    let value = parse_field_value(tag, &mut reader)?;
-
-    Ok(Some(Field {
-        field_number: tag.field_number,
-        value,
-    }))
+    parse_field(&mut reader)
 }
 
 #[cfg(test)]

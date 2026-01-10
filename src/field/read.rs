@@ -20,7 +20,7 @@
 //! - `owned`: Returns `Field<Vec<u8>>` - owned data suitable for streaming sources
 //! - `ref`: Returns `Field<&'a [u8]>` - borrowed references suitable for slice sources
 
-use crate::field::FieldValue;
+use crate::field::{Field, FieldValue};
 use crate::tag::Tag;
 use crate::varint::Varint;
 use crate::wire_format::WireType;
@@ -31,6 +31,9 @@ use crate::{ProtobufError, Result};
 /// This trait abstracts the reading operations needed to parse field values.
 /// Different implementations handle different data source types (Iterator, Read, slice, etc.)
 pub(crate) trait FieldValueReader<L> {
+    /// Read a tag (field number + wire type)
+    fn read_tag(&mut self) -> Result<Option<Tag>>;
+
     /// Read a varint value (may be called multiple times for Len wire type)
     fn read_varint(&mut self) -> Result<Option<Varint>>;
 
@@ -87,6 +90,29 @@ where
     };
 
     Ok(value)
+}
+
+/// Parse a complete field (tag + value) from a field value reader
+///
+/// This is the common parsing logic for reading a complete field.
+/// The `L` type parameter represents the type used for length-delimited values
+/// (e.g., `Vec<u8>` for owned data, `&'a [u8]` for borrowed data).
+pub(crate) fn parse_field<L, R>(reader: &mut R) -> Result<Option<Field<L>>>
+where
+    R: FieldValueReader<L>,
+{
+    // Read tag
+    let Some(tag) = reader.read_tag()? else {
+        return Ok(None);
+    };
+
+    // Parse value based on wire type
+    let value = parse_field_value(tag, reader)?;
+
+    Ok(Some(Field {
+        field_number: tag.field_number,
+        value,
+    }))
 }
 
 #[path = "read/owned.rs"]
