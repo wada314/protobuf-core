@@ -26,8 +26,8 @@ use ::std::convert::AsRef;
 use ::std::io::Cursor;
 
 /// Helper struct implementing FieldValueReader for slice-based readers
-struct SliceReader<'a, 'b> {
-    slice: &'b mut &'a [u8],
+pub(crate) struct SliceReader<'a, 'b> {
+    pub(crate) slice: &'b mut &'a [u8],
 }
 
 impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
@@ -81,7 +81,10 @@ impl<'a> Iterator for ProtobufFieldSliceIterator<'a> {
         }
 
         let mut remaining = self.slice;
-        match parse_field_from_slice(&mut remaining) {
+        let mut reader = SliceReader {
+            slice: &mut remaining,
+        };
+        match parse_field(&mut reader) {
             Ok(Some(field)) => {
                 self.slice = remaining;
                 Some(Ok(field))
@@ -127,22 +130,19 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
 
 impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> {}
 
-fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [u8]>>> {
-    let mut reader = SliceReader { slice };
-    parse_field(&mut reader)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::field::FieldValue;
+    use crate::field::read::parse_field;
 
     #[test]
     fn test_parse_varint_field_from_slice() {
         let data = &[0x08, 0x96, 0x01][..]; // field 1: 150
 
         let mut slice = data;
-        let field = parse_field_from_slice(&mut slice).unwrap().unwrap();
+        let mut reader = SliceReader { slice: &mut slice };
+        let field = parse_field(&mut reader).unwrap().unwrap();
         assert_eq!(field.field_number.as_u32(), 1);
         assert_eq!(data.len() - slice.len(), 3);
         assert!(slice.is_empty());
@@ -159,7 +159,8 @@ mod tests {
         let data = &[0x12, 0x03, 0x48, 0x65, 0x6c][..]; // field 2: "Hel"
 
         let mut slice = data;
-        let field = parse_field_from_slice(&mut slice).unwrap().unwrap();
+        let mut reader = SliceReader { slice: &mut slice };
+        let field = parse_field(&mut reader).unwrap().unwrap();
         assert_eq!(field.field_number.as_u32(), 2);
         assert_eq!(data.len() - slice.len(), 5);
         assert!(slice.is_empty());
@@ -176,7 +177,8 @@ mod tests {
         let data = &[0x15, 0x78, 0x56, 0x34, 0x12][..]; // field 2: 0x12345678
 
         let mut slice = data;
-        let field = parse_field_from_slice(&mut slice).unwrap().unwrap();
+        let mut reader = SliceReader { slice: &mut slice };
+        let field = parse_field(&mut reader).unwrap().unwrap();
         assert_eq!(field.field_number.as_u32(), 2);
         assert_eq!(data.len() - slice.len(), 5);
         assert!(slice.is_empty());
@@ -191,7 +193,8 @@ mod tests {
     #[test]
     fn test_parse_empty_slice() {
         let mut data = &[][..];
-        assert!(parse_field_from_slice(&mut data).unwrap().is_none());
+        let mut reader = SliceReader { slice: &mut data };
+        assert!(parse_field(&mut reader).unwrap().is_none());
     }
 
     #[test]

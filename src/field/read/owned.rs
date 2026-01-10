@@ -160,7 +160,8 @@ where
     type Item = Result<Field<Vec<u8>>>; // Owned data from Read
 
     fn next(&mut self) -> Option<Self::Item> {
-        match parse_next_field(&mut self.reader) {
+        let mut reader = ReadReader(&mut self.reader);
+        match parse_field(&mut reader) {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -180,7 +181,8 @@ where
     type Item = Result<Field<Vec<u8>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match parse_field_from_iterator(&mut self.iter) {
+        let mut reader = IteratorReader(&mut self.iter);
+        match parse_field(&mut reader) {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -201,7 +203,8 @@ where
     type Item = Result<Field<Vec<u8>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match parse_field_from_try_iterator(&mut self.iter) {
+        let mut reader = TryIteratorReader(&mut self.iter);
+        match parse_field(&mut reader) {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -335,34 +338,6 @@ where
     {
         ProtobufFieldIterator { reader: self }
     }
-}
-
-/// Read a single raw field from an iterator (private helper function)
-fn parse_field_from_iterator<I>(iter: &mut I) -> Result<Option<Field<Vec<u8>>>>
-where
-    I: Iterator<Item = u8>,
-{
-    let mut reader = IteratorReader(iter);
-    parse_field(&mut reader)
-}
-
-/// Read a single raw field from a try iterator (private helper function)
-fn parse_field_from_try_iterator<I, E>(iter: &mut I) -> Result<Option<Field<Vec<u8>>>>
-where
-    I: Iterator<Item = ::std::result::Result<u8, E>>,
-    E: Into<ProtobufError>,
-{
-    let mut reader = TryIteratorReader(iter);
-    parse_field(&mut reader)
-}
-
-/// Read a single raw field from the reader (private helper function)
-fn parse_next_field<R>(reader: &mut R) -> Result<Option<Field<Vec<u8>>>>
-where
-    R: Read,
-{
-    let mut read_reader = ReadReader(reader);
-    parse_field(&mut read_reader)
 }
 
 #[cfg(test)]
