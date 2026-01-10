@@ -53,15 +53,21 @@ pub(crate) trait FieldValueReader<L> {
     fn read_length_delimited(&mut self, length: usize) -> Result<L>;
 }
 
-/// Parse a field value given a tag and a field value reader
+/// Parse a complete field (tag + value) from a field value reader
 ///
-/// This is the common parsing logic shared between all field parsers.
+/// This is the common parsing logic for reading a complete field.
 /// The `L` type parameter represents the type used for length-delimited values
 /// (e.g., `Vec<u8>` for owned data, `&'a [u8]` for borrowed data).
-pub(crate) fn parse_field_value<L, R>(tag: Tag, reader: &mut R) -> Result<FieldValue<L>>
+pub(crate) fn parse_field<L, R>(reader: &mut R) -> Result<Option<Field<L>>>
 where
     R: FieldValueReader<L>,
 {
+    // Read tag
+    let Some(tag) = reader.read_tag()? else {
+        return Ok(None);
+    };
+
+    // Parse value based on wire type
     let value = match tag.wire_type {
         WireType::Varint => {
             let Some(varint) = reader.read_varint()? else {
@@ -92,26 +98,6 @@ where
             });
         }
     };
-
-    Ok(value)
-}
-
-/// Parse a complete field (tag + value) from a field value reader
-///
-/// This is the common parsing logic for reading a complete field.
-/// The `L` type parameter represents the type used for length-delimited values
-/// (e.g., `Vec<u8>` for owned data, `&'a [u8]` for borrowed data).
-pub(crate) fn parse_field<L, R>(reader: &mut R) -> Result<Option<Field<L>>>
-where
-    R: FieldValueReader<L>,
-{
-    // Read tag
-    let Some(tag) = reader.read_tag()? else {
-        return Ok(None);
-    };
-
-    // Parse value based on wire type
-    let value = parse_field_value(tag, reader)?;
 
     Ok(Some(Field {
         field_number: tag.field_number,
