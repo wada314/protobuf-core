@@ -19,12 +19,54 @@
 //! this module works directly with slices and returns references to sub-slices (`Field<&'a [u8]>`).
 
 use crate::field::{Field, FieldValue};
+use crate::field::read::common::{parse_field_value, FieldValueReader};
 use crate::tag::ReadExtTag;
-use crate::varint::ReadExtVarint;
-use crate::wire_format::WireType;
+use crate::varint::{ReadExtVarint, Varint};
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
 use ::std::io::Cursor;
+
+/// Helper struct implementing FieldValueReader for slice-based readers
+struct SliceReader<'a, 'b> {
+    slice: &'b mut &'a [u8],
+}
+
+impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        let mut cursor = Cursor::new(*self.slice);
+        let varint_result = cursor.read_varint()?;
+        let Some(varint) = varint_result else {
+            return Ok(None);
+        };
+        let consumed = cursor.position() as usize;
+        *self.slice = &(*self.slice)[consumed..];
+        Ok(Some(varint))
+    }
+
+    fn read_i32(&mut self) -> Result<[u8; 4]> {
+        let (bytes, remaining) = (*self.slice)
+            .split_first_chunk()
+            .ok_or(ProtobufError::UnexpectedEof)?;
+        *self.slice = remaining;
+        Ok(*bytes)
+    }
+
+    fn read_i64(&mut self) -> Result<[u8; 8]> {
+        let (bytes, remaining) = (*self.slice)
+            .split_first_chunk()
+            .ok_or(ProtobufError::UnexpectedEof)?;
+        *self.slice = remaining;
+        Ok(*bytes)
+    }
+
+    fn read_len(&mut self, length: usize) -> Result<&'a [u8]> {
+        let (value_slice, remaining) = (*self.slice)
+            .split_at_checked(length)
+            .ok_or(ProtobufError::UnexpectedEof)?;
+        *self.slice = remaining;
+        Ok(value_slice)
+    }
+}
 
 /// Iterator for reading raw protobuf fields sequentially from a slice
 pub struct ProtobufFieldSliceIterator<'a> {
@@ -102,47 +144,8 @@ fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [
     let consumed = cursor.position() as usize;
     *slice = &slice[consumed..];
 
-    let value = match tag.wire_type {
-        WireType::Varint => {
-            let mut cursor = Cursor::new(*slice);
-            let varint = cursor.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-            let consumed = cursor.position() as usize;
-            *slice = &slice[consumed..];
-            FieldValue::Varint(varint)
-        }
-        WireType::Int32 => {
-            let (bytes, remaining) = slice
-                .split_first_chunk()
-                .ok_or(ProtobufError::UnexpectedEof)?;
-            *slice = remaining;
-            FieldValue::I32(*bytes)
-        }
-        WireType::Int64 => {
-            let (bytes, remaining) = slice
-                .split_first_chunk()
-                .ok_or(ProtobufError::UnexpectedEof)?;
-            *slice = remaining;
-            FieldValue::I64(*bytes)
-        }
-        WireType::Len => {
-            // Read length prefix (varint)
-            let mut cursor = Cursor::new(*slice);
-            let varint = cursor.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-            let consumed = cursor.position() as usize;
-            *slice = &slice[consumed..];
-            let length = varint.try_to_uint32()? as usize;
-            let (value_slice, remaining) = slice
-                .split_at_checked(length)
-                .ok_or(ProtobufError::UnexpectedEof)?;
-            *slice = remaining;
-            FieldValue::Len(value_slice)
-        }
-        _ => {
-            return Err(ProtobufError::InvalidWireType {
-                value: tag.wire_type as u8,
-            });
-        }
-    };
+    let mut reader = SliceReader { slice };
+    let value = parse_field_value(tag, &mut reader)?;
 
     Ok(Some(Field {
         field_number: tag.field_number,

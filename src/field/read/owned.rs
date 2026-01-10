@@ -17,12 +17,137 @@
 //! This module provides low-level utilities for reading raw protobuf fields from byte streams.
 //! It returns `Field<Vec<u8>>` - owned data suitable for streaming sources like `std::io::Read`.
 
+use crate::field::read::common::{FieldValueReader, parse_field_value};
 use crate::field::{Field, FieldValue};
 use crate::tag::{IteratorExtTag, ReadExtTag};
-use crate::varint::IteratorExtVarint;
-use crate::wire_format::WireType;
+use crate::varint::{IteratorExtVarint, Varint};
 use crate::{ProtobufError, Result};
 use ::std::io::Read;
+
+/// Helper struct implementing FieldValueReader for Iterator<Item = u8>
+struct IteratorReader<'a, I>(&'a mut I)
+where
+    I: Iterator<Item = u8>;
+
+impl<'a, I> FieldValueReader<Vec<u8>> for IteratorReader<'a, I>
+where
+    I: Iterator<Item = u8>,
+{
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        self.0.read_varint()
+    }
+
+    fn read_i32(&mut self) -> Result<[u8; 4]> {
+        let mut bytes = [0u8; 4];
+        for byte in bytes.iter_mut() {
+            *byte = self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
+        }
+        Ok(bytes)
+    }
+
+    fn read_i64(&mut self) -> Result<[u8; 8]> {
+        let mut bytes = [0u8; 8];
+        for byte in bytes.iter_mut() {
+            *byte = self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
+        }
+        Ok(bytes)
+    }
+
+    fn read_len(&mut self, length: usize) -> Result<Vec<u8>> {
+        let mut data = Vec::with_capacity(length);
+        for _ in 0..length {
+            data.push(self.0.next().ok_or(ProtobufError::UnexpectedEof)?);
+        }
+        Ok(data)
+    }
+}
+
+/// Helper struct implementing FieldValueReader for Iterator<Item = Result<u8, E>>
+struct TryIteratorReader<'a, I, E>(&'a mut I)
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>;
+
+impl<'a, I, E> FieldValueReader<Vec<u8>> for TryIteratorReader<'a, I, E>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        use crate::varint::TryIteratorExtVarint;
+        self.0.read_varint()
+    }
+
+    fn read_i32(&mut self) -> Result<[u8; 4]> {
+        let mut bytes = [0u8; 4];
+        for byte in bytes.iter_mut() {
+            *byte = self
+                .0
+                .next()
+                .ok_or(ProtobufError::UnexpectedEof)?
+                .map_err(Into::into)?;
+        }
+        Ok(bytes)
+    }
+
+    fn read_i64(&mut self) -> Result<[u8; 8]> {
+        let mut bytes = [0u8; 8];
+        for byte in bytes.iter_mut() {
+            *byte = self
+                .0
+                .next()
+                .ok_or(ProtobufError::UnexpectedEof)?
+                .map_err(Into::into)?;
+        }
+        Ok(bytes)
+    }
+
+    fn read_len(&mut self, length: usize) -> Result<Vec<u8>> {
+        let mut data = Vec::with_capacity(length);
+        for _ in 0..length {
+            data.push(
+                self.0
+                    .next()
+                    .ok_or(ProtobufError::UnexpectedEof)?
+                    .map_err(Into::into)?,
+            );
+        }
+        Ok(data)
+    }
+}
+
+/// Helper struct implementing FieldValueReader for Read
+struct ReadReader<'a, R>(&'a mut R)
+where
+    R: Read;
+
+impl<'a, R> FieldValueReader<Vec<u8>> for ReadReader<'a, R>
+where
+    R: Read,
+{
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        use crate::varint::ReadExtVarint;
+        self.0.read_varint()
+    }
+
+    fn read_i32(&mut self) -> Result<[u8; 4]> {
+        let mut bytes = [0u8; 4];
+        self.0.read_exact(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    fn read_i64(&mut self) -> Result<[u8; 8]> {
+        let mut bytes = [0u8; 8];
+        self.0.read_exact(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    fn read_len(&mut self, length: usize) -> Result<Vec<u8>> {
+        let mut data = vec![0u8; length];
+        self.0.read_exact(&mut data)?;
+        Ok(data)
+    }
+}
 
 /// Iterator for reading raw protobuf fields sequentially from a reader
 pub struct ProtobufFieldIterator<R> {
@@ -223,44 +348,8 @@ where
         return Ok(None);
     };
 
-    let value = match tag.wire_type {
-        WireType::Varint => {
-            let Some(varint) = iter.read_varint()? else {
-                return Err(ProtobufError::UnexpectedEof);
-            };
-            FieldValue::Varint(varint)
-        }
-        WireType::Int32 => {
-            let mut bytes = [0u8; 4];
-            for byte in bytes.iter_mut() {
-                *byte = iter.next().ok_or(ProtobufError::UnexpectedEof)?;
-            }
-            FieldValue::I32(bytes)
-        }
-        WireType::Int64 => {
-            let mut bytes = [0u8; 8];
-            for byte in bytes.iter_mut() {
-                *byte = iter.next().ok_or(ProtobufError::UnexpectedEof)?;
-            }
-            FieldValue::I64(bytes)
-        }
-        WireType::Len => {
-            let Some(varint) = iter.read_varint()? else {
-                return Err(ProtobufError::UnexpectedEof);
-            };
-            let length = varint.try_to_uint32()? as usize;
-            let mut data = Vec::with_capacity(length);
-            for _ in 0..length {
-                data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
-            }
-            FieldValue::Len(data)
-        }
-        _ => {
-            return Err(ProtobufError::InvalidWireType {
-                value: tag.wire_type as u8,
-            });
-        }
-    };
+    let mut reader = IteratorReader(iter);
+    let value = parse_field_value(tag, &mut reader)?;
 
     Ok(Some(Field {
         field_number: tag.field_number,
@@ -275,61 +364,14 @@ where
     E: Into<ProtobufError>,
 {
     use crate::tag::TryIteratorExtTag;
-    use crate::varint::TryIteratorExtVarint;
 
     // Read tag
     let Some(tag) = iter.read_tag()? else {
         return Ok(None);
     };
 
-    let value = match tag.wire_type {
-        WireType::Varint => {
-            let Some(varint) = iter.read_varint()? else {
-                return Err(ProtobufError::UnexpectedEof);
-            };
-            FieldValue::Varint(varint)
-        }
-        WireType::Int32 => {
-            let mut bytes = [0u8; 4];
-            for byte in bytes.iter_mut() {
-                *byte = iter
-                    .next()
-                    .ok_or(ProtobufError::UnexpectedEof)?
-                    .map_err(Into::into)?;
-            }
-            FieldValue::I32(bytes)
-        }
-        WireType::Int64 => {
-            let mut bytes = [0u8; 8];
-            for byte in bytes.iter_mut() {
-                *byte = iter
-                    .next()
-                    .ok_or(ProtobufError::UnexpectedEof)?
-                    .map_err(Into::into)?;
-            }
-            FieldValue::I64(bytes)
-        }
-        WireType::Len => {
-            let Some(varint) = iter.read_varint()? else {
-                return Err(ProtobufError::UnexpectedEof);
-            };
-            let length = varint.try_to_uint32()? as usize;
-            let mut data = Vec::with_capacity(length);
-            for _ in 0..length {
-                data.push(
-                    iter.next()
-                        .ok_or(ProtobufError::UnexpectedEof)?
-                        .map_err(Into::into)?,
-                );
-            }
-            FieldValue::Len(data)
-        }
-        _ => {
-            return Err(ProtobufError::InvalidWireType {
-                value: tag.wire_type as u8,
-            });
-        }
-    };
+    let mut reader = TryIteratorReader(iter);
+    let value = parse_field_value(tag, &mut reader)?;
 
     Ok(Some(Field {
         field_number: tag.field_number,
@@ -347,40 +389,8 @@ where
         return Ok(None);
     };
 
-    let value = match tag.wire_type {
-        WireType::Varint => {
-            use crate::varint::ReadExtVarint;
-            let Some(varint) = reader.read_varint()? else {
-                return Err(ProtobufError::UnexpectedEof);
-            };
-            FieldValue::Varint(varint)
-        }
-        WireType::Int32 => {
-            let mut bytes = [0u8; 4];
-            reader.read_exact(&mut bytes)?;
-            FieldValue::I32(bytes)
-        }
-        WireType::Int64 => {
-            let mut bytes = [0u8; 8];
-            reader.read_exact(&mut bytes)?;
-            FieldValue::I64(bytes)
-        }
-        WireType::Len => {
-            use crate::varint::ReadExtVarint;
-            let Some(varint) = reader.read_varint()? else {
-                return Err(ProtobufError::UnexpectedEof);
-            };
-            let length = varint.try_to_uint32()? as usize;
-            let mut data = vec![0u8; length];
-            reader.read_exact(&mut data)?;
-            FieldValue::Len(data)
-        }
-        _ => {
-            return Err(ProtobufError::InvalidWireType {
-                value: tag.wire_type as u8,
-            });
-        }
-    };
+    let mut read_reader = ReadReader(reader);
+    let value = parse_field_value(tag, &mut read_reader)?;
 
     Ok(Some(Field {
         field_number: tag.field_number,
