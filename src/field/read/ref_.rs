@@ -42,7 +42,7 @@ impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
         Ok(Some(varint))
     }
 
-    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
+    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         let (bytes, remaining) = (*self.slice)
             .split_first_chunk::<N>()
             .ok_or(ProtobufError::UnexpectedEof)?;
@@ -50,7 +50,7 @@ impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
         Ok(*bytes)
     }
 
-    fn read_len(&mut self, length: usize) -> Result<&'a [u8]> {
+    fn read_length_delimited(&mut self, length: usize) -> Result<&'a [u8]> {
         let (value_slice, remaining) = (*self.slice)
             .split_at_checked(length)
             .ok_or(ProtobufError::UnexpectedEof)?;

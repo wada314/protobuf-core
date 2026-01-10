@@ -36,7 +36,7 @@ where
         self.0.read_varint()
     }
 
-    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
+    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         let mut bytes = [0u8; N];
         for byte in bytes.iter_mut() {
             *byte = self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
@@ -44,7 +44,7 @@ where
         Ok(bytes)
     }
 
-    fn read_len(&mut self, length: usize) -> Result<Vec<u8>> {
+    fn read_length_delimited(&mut self, length: usize) -> Result<Vec<u8>> {
         let mut data = Vec::with_capacity(length);
         for _ in 0..length {
             data.push(self.0.next().ok_or(ProtobufError::UnexpectedEof)?);
@@ -69,7 +69,7 @@ where
         self.0.read_varint()
     }
 
-    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
+    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         let mut bytes = [0u8; N];
         for byte in bytes.iter_mut() {
             *byte = self
@@ -81,7 +81,7 @@ where
         Ok(bytes)
     }
 
-    fn read_len(&mut self, length: usize) -> Result<Vec<u8>> {
+    fn read_length_delimited(&mut self, length: usize) -> Result<Vec<u8>> {
         let mut data = Vec::with_capacity(length);
         for _ in 0..length {
             data.push(
@@ -109,13 +109,13 @@ where
         self.0.read_varint()
     }
 
-    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
+    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         let mut bytes = [0u8; N];
         self.0.read_exact(&mut bytes)?;
         Ok(bytes)
     }
 
-    fn read_len(&mut self, length: usize) -> Result<Vec<u8>> {
+    fn read_length_delimited(&mut self, length: usize) -> Result<Vec<u8>> {
         let mut data = vec![0u8; length];
         self.0.read_exact(&mut data)?;
         Ok(data)

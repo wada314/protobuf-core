@@ -44,13 +44,13 @@ pub(crate) trait FieldValueReader<L> {
     /// Read a varint value (may be called multiple times for Len wire type)
     fn read_varint(&mut self) -> Result<Option<Varint>>;
 
-    /// Read exactly N bytes
-    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]>;
+    /// Read exactly N bytes (for fixed-size wire types like Int32, Int64, Fixed32, Fixed64)
+    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]>;
 
-    /// Read a length-prefixed byte sequence
+    /// Read a length-delimited byte sequence
     ///
     /// The length parameter is the number of bytes to read after the length varint has been parsed.
-    fn read_len(&mut self, length: usize) -> Result<L>;
+    fn read_length_delimited(&mut self, length: usize) -> Result<L>;
 }
 
 /// Parse a field value given a tag and a field value reader
@@ -70,11 +70,11 @@ where
             FieldValue::Varint(varint)
         }
         WireType::Int32 => {
-            let bytes = reader.read_bytes::<4>()?;
+            let bytes = reader.read_fixed::<4>()?;
             FieldValue::I32(bytes)
         }
         WireType::Int64 => {
-            let bytes = reader.read_bytes::<8>()?;
+            let bytes = reader.read_fixed::<8>()?;
             FieldValue::I64(bytes)
         }
         WireType::Len => {
@@ -83,7 +83,7 @@ where
                 return Err(ProtobufError::UnexpectedEof);
             };
             let length = length_varint.try_to_uint32()? as usize;
-            let data = reader.read_len(length)?;
+            let data = reader.read_length_delimited(length)?;
             FieldValue::Len(data)
         }
         _ => {
