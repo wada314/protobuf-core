@@ -20,7 +20,10 @@
 //! - `owned`: Returns `Field<Vec<u8>>` - owned data suitable for streaming sources
 //! - `ref`: Returns `Field<&'a [u8]>` - borrowed references suitable for slice sources
 
+#[path = "read/owned.rs"]
 pub mod owned;
+
+#[path = "read/ref_.rs"]
 pub mod ref_;
 
 // Re-export for convenience
