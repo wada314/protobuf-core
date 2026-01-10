@@ -32,7 +32,14 @@ use crate::{ProtobufError, Result};
 /// Different implementations handle different data source types (Iterator, Read, slice, etc.)
 pub(crate) trait FieldValueReader<L> {
     /// Read a tag (field number + wire type)
-    fn read_tag(&mut self) -> Result<Option<Tag>>;
+    ///
+    /// Default implementation uses `read_varint` and converts the varint to a tag.
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
+        let Some(varint) = self.read_varint()? else {
+            return Ok(None);
+        };
+        Tag::from_encoded(varint).map(Some)
+    }
 
     /// Read a varint value (may be called multiple times for Len wire type)
     fn read_varint(&mut self) -> Result<Option<Varint>>;

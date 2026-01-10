@@ -19,7 +19,6 @@
 
 use crate::field::Field;
 use crate::field::read::{FieldValueReader, parse_field};
-use crate::tag::{IteratorExtTag, ReadExtTag, Tag};
 use crate::varint::{IteratorExtVarint, Varint};
 use crate::{ProtobufError, Result};
 use ::std::io::Read;
@@ -33,10 +32,6 @@ impl<'a, I> FieldValueReader<Vec<u8>> for IteratorReader<'a, I>
 where
     I: Iterator<Item = u8>,
 {
-    fn read_tag(&mut self) -> Result<Option<Tag>> {
-        self.0.read_tag()
-    }
-
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         self.0.read_varint()
     }
@@ -77,11 +72,6 @@ where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
-    fn read_tag(&mut self) -> Result<Option<Tag>> {
-        use crate::tag::TryIteratorExtTag;
-        self.0.read_tag()
-    }
-
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::TryIteratorExtVarint;
         self.0.read_varint()
@@ -134,10 +124,6 @@ impl<'a, R> FieldValueReader<Vec<u8>> for ReadReader<'a, R>
 where
     R: Read,
 {
-    fn read_tag(&mut self) -> Result<Option<Tag>> {
-        self.0.read_tag()
-    }
-
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::ReadExtVarint;
         self.0.read_varint()

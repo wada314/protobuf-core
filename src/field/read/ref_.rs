@@ -20,7 +20,6 @@
 
 use crate::field::Field;
 use crate::field::read::{FieldValueReader, parse_field};
-use crate::tag::{ReadExtTag, Tag};
 use crate::varint::{ReadExtVarint, Varint};
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
@@ -32,20 +31,6 @@ struct SliceReader<'a, 'b> {
 }
 
 impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
-    fn read_tag(&mut self) -> Result<Option<Tag>> {
-        if self.slice.is_empty() {
-            return Ok(None);
-        }
-        let mut cursor = Cursor::new(*self.slice);
-        let tag_result = cursor.read_tag()?;
-        let Some(tag) = tag_result else {
-            return Ok(None);
-        };
-        let consumed = cursor.position() as usize;
-        *self.slice = &(*self.slice)[consumed..];
-        Ok(Some(tag))
-    }
-
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         let mut cursor = Cursor::new(*self.slice);
         let varint_result = cursor.read_varint()?;
