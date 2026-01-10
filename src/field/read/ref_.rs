@@ -23,7 +23,6 @@ use crate::field::read::{FieldValueReader, parse_field};
 use crate::varint::{ReadExtVarint, Varint};
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
-use ::std::io::Cursor;
 
 /// Helper struct implementing FieldValueReader for slice-based readers
 pub(crate) struct SliceReader<'a, 'b> {
@@ -32,14 +31,7 @@ pub(crate) struct SliceReader<'a, 'b> {
 
 impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
-        let mut cursor = Cursor::new(*self.slice);
-        let varint_result = cursor.read_varint()?;
-        let Some(varint) = varint_result else {
-            return Ok(None);
-        };
-        let consumed = cursor.position() as usize;
-        *self.slice = &(*self.slice)[consumed..];
-        Ok(Some(varint))
+        (*self.slice).read_varint()
     }
 
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
