@@ -18,8 +18,8 @@
 //! Unlike the `owned` module which uses `std::io::Read` and returns owned data,
 //! this module works directly with slices and returns references to sub-slices (`Field<&'a [u8]>`).
 
-use crate::field::{Field, FieldValue};
-use crate::field::read::common::{parse_field_value, FieldValueReader};
+use crate::field::Field;
+use crate::field::read::{parse_field_value, FieldValueReader};
 use crate::tag::ReadExtTag;
 use crate::varint::{ReadExtVarint, Varint};
 use crate::{ProtobufError, Result};
@@ -156,6 +156,7 @@ fn parse_field_from_slice<'a>(slice: &mut &'a [u8]) -> Result<Option<Field<&'a [
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::field::FieldValue;
 
     #[test]
     fn test_parse_varint_field_from_slice() {

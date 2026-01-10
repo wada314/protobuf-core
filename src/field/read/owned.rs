@@ -17,8 +17,8 @@
 //! This module provides low-level utilities for reading raw protobuf fields from byte streams.
 //! It returns `Field<Vec<u8>>` - owned data suitable for streaming sources like `std::io::Read`.
 
-use crate::field::read::common::{FieldValueReader, parse_field_value};
-use crate::field::{Field, FieldValue};
+use crate::field::Field;
+use crate::field::read::{FieldValueReader, parse_field_value};
 use crate::tag::{IteratorExtTag, ReadExtTag};
 use crate::varint::{IteratorExtVarint, Varint};
 use crate::{ProtobufError, Result};
@@ -401,6 +401,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::field::FieldValue;
 
     #[test]
     fn test_read_single_varint_field() {
