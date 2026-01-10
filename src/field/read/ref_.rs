@@ -76,22 +76,10 @@ impl<'a> Iterator for ProtobufFieldSliceIterator<'a> {
     type Item = Result<Field<&'a [u8]>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.slice.is_empty() {
-            return None;
-        }
-
-        let mut remaining = self.slice;
         let mut reader = SliceReader {
-            slice: &mut remaining,
+            slice: &mut self.slice,
         };
-        match parse_field(&mut reader) {
-            Ok(Some(field)) => {
-                self.slice = remaining;
-                Some(Ok(field))
-            }
-            Ok(None) => None,
-            Err(err) => Some(Err(err)),
-        }
+        parse_field(&mut reader).transpose()
     }
 }
 
