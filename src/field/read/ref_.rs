@@ -42,17 +42,9 @@ impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
         Ok(Some(varint))
     }
 
-    fn read_i32(&mut self) -> Result<[u8; 4]> {
+    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
         let (bytes, remaining) = (*self.slice)
-            .split_first_chunk()
-            .ok_or(ProtobufError::UnexpectedEof)?;
-        *self.slice = remaining;
-        Ok(*bytes)
-    }
-
-    fn read_i64(&mut self) -> Result<[u8; 8]> {
-        let (bytes, remaining) = (*self.slice)
-            .split_first_chunk()
+            .split_first_chunk::<N>()
             .ok_or(ProtobufError::UnexpectedEof)?;
         *self.slice = remaining;
         Ok(*bytes)

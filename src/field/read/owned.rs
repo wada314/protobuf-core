@@ -36,16 +36,8 @@ where
         self.0.read_varint()
     }
 
-    fn read_i32(&mut self) -> Result<[u8; 4]> {
-        let mut bytes = [0u8; 4];
-        for byte in bytes.iter_mut() {
-            *byte = self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
-        }
-        Ok(bytes)
-    }
-
-    fn read_i64(&mut self) -> Result<[u8; 8]> {
-        let mut bytes = [0u8; 8];
+    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
+        let mut bytes = [0u8; N];
         for byte in bytes.iter_mut() {
             *byte = self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
         }
@@ -77,20 +69,8 @@ where
         self.0.read_varint()
     }
 
-    fn read_i32(&mut self) -> Result<[u8; 4]> {
-        let mut bytes = [0u8; 4];
-        for byte in bytes.iter_mut() {
-            *byte = self
-                .0
-                .next()
-                .ok_or(ProtobufError::UnexpectedEof)?
-                .map_err(Into::into)?;
-        }
-        Ok(bytes)
-    }
-
-    fn read_i64(&mut self) -> Result<[u8; 8]> {
-        let mut bytes = [0u8; 8];
+    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
+        let mut bytes = [0u8; N];
         for byte in bytes.iter_mut() {
             *byte = self
                 .0
@@ -129,14 +109,8 @@ where
         self.0.read_varint()
     }
 
-    fn read_i32(&mut self) -> Result<[u8; 4]> {
-        let mut bytes = [0u8; 4];
-        self.0.read_exact(&mut bytes)?;
-        Ok(bytes)
-    }
-
-    fn read_i64(&mut self) -> Result<[u8; 8]> {
-        let mut bytes = [0u8; 8];
+    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
+        let mut bytes = [0u8; N];
         self.0.read_exact(&mut bytes)?;
         Ok(bytes)
     }

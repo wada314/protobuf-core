@@ -44,11 +44,8 @@ pub(crate) trait FieldValueReader<L> {
     /// Read a varint value (may be called multiple times for Len wire type)
     fn read_varint(&mut self) -> Result<Option<Varint>>;
 
-    /// Read exactly 4 bytes
-    fn read_i32(&mut self) -> Result<[u8; 4]>;
-
-    /// Read exactly 8 bytes
-    fn read_i64(&mut self) -> Result<[u8; 8]>;
+    /// Read exactly N bytes
+    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]>;
 
     /// Read a length-prefixed byte sequence
     ///
@@ -73,11 +70,11 @@ where
             FieldValue::Varint(varint)
         }
         WireType::Int32 => {
-            let bytes = reader.read_i32()?;
+            let bytes = reader.read_bytes::<4>()?;
             FieldValue::I32(bytes)
         }
         WireType::Int64 => {
-            let bytes = reader.read_i64()?;
+            let bytes = reader.read_bytes::<8>()?;
             FieldValue::I64(bytes)
         }
         WireType::Len => {
