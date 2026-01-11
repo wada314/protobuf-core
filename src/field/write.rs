@@ -64,7 +64,7 @@ pub trait WriteExtProtobuf {
     ///     
     ///     let fields = vec![
     ///         Field::new(FieldNumber::try_from(1)?, FieldValue::from_uint64(150)),
-    ///         Field::new(FieldNumber::try_from(2)?, FieldValue::from_string("Hello".to_string())),
+    ///         Field::new(FieldNumber::try_from(2)?, FieldValue::Len("Hello".to_string().into_bytes())),
     ///     ];
     ///     
     ///     buffer.write_protobuf_fields(&fields)?;
@@ -161,7 +161,7 @@ mod tests {
 
         let field: Field<Vec<u8>> = Field::new(
             FieldNumber::try_from(2).unwrap(),
-            FieldValue::from_string("Hel".to_string()),
+            FieldValue::Len("Hel".to_string().into_bytes()),
         );
 
         buffer.write_protobuf_field(&field).unwrap();
@@ -208,7 +208,7 @@ mod tests {
             ),
             Field::new(
                 FieldNumber::try_from(2).unwrap(),
-                FieldValue::from_string("Hel".to_string()),
+                FieldValue::Len("Hel".to_string().into_bytes()),
             ),
         ];
 
@@ -232,7 +232,7 @@ mod tests {
 
         let field: Field<Vec<u8>> = Field::new(
             FieldNumber::try_from(2).unwrap(),
-            FieldValue::from_string("Hello".to_string()),
+            FieldValue::Len("Hello".to_string().into_bytes()),
         );
         assert_eq!(field.encoded_size(), 7); // tag (1 byte) + length (1 byte) + data (5 bytes)
     }
@@ -296,12 +296,9 @@ mod tests {
         ));
 
         // Length-delimited types
+        assert!(matches!(FieldValue::Len(vec![1, 2, 3]), FieldValue::Len(_)));
         assert!(matches!(
-            FieldValue::from_bytes(vec![1, 2, 3]),
-            FieldValue::Len(_)
-        ));
-        assert!(matches!(
-            FieldValue::from_string("test".to_string()),
+            FieldValue::Len("test".to_string().into_bytes()),
             FieldValue::Len(_)
         ));
     }
@@ -340,7 +337,7 @@ mod tests {
             // Write
             let original_field: Field<Vec<u8>> = Field::new(
                 FieldNumber::try_from(2).unwrap(),
-                FieldValue::from_string("Hello, Protocol Buffers!".to_string()),
+                FieldValue::Len("Hello, Protocol Buffers!".to_string().into_bytes()),
             );
             buffer.write_protobuf_field(&original_field).unwrap();
 
@@ -368,7 +365,7 @@ mod tests {
                 ),
                 Field::new(
                     FieldNumber::try_from(2).unwrap(),
-                    FieldValue::from_string("Hello".to_string()),
+                    FieldValue::Len("Hello".to_string().into_bytes()),
                 ),
                 Field::new(
                     FieldNumber::try_from(3).unwrap(),
