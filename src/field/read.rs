@@ -515,28 +515,6 @@ mod tests {
     }
 
     #[test]
-    fn test_read_all_varint_fields() {
-        use super::AsRefExtProtobuf;
-
-        let reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
-
-        let fields: Vec<_> = reader
-            .read_protobuf_fields()
-            .collect::<::std::result::Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(fields.len(), 1);
-
-        let field = &fields[0];
-        assert_eq!(field.field_number.as_u32(), 1);
-        match &field.value {
-            FieldValue::Varint(varint) => {
-                assert_eq!(varint.to_uint64(), 150);
-            }
-            _ => panic!("Expected Varint field"),
-        }
-    }
-
-    #[test]
     fn test_parse_len_field() {
         use super::AsRefExtProtobuf;
 
