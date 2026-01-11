@@ -492,10 +492,13 @@ impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{SliceReader, parse_field};
+    use crate::field::FieldValue;
 
     #[test]
     fn test_read_single_varint_field() {
+        use super::AsRefExtProtobuf;
+
         let reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
 
         let fields: Vec<_> = reader
@@ -514,6 +517,8 @@ mod tests {
 
     #[test]
     fn test_read_all_varint_fields() {
+        use super::AsRefExtProtobuf;
+
         let reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
 
         let fields: Vec<_> = reader
@@ -534,6 +539,8 @@ mod tests {
 
     #[test]
     fn test_parse_len_field() {
+        use super::AsRefExtProtobuf;
+
         let reader = &[0x12, 0x03, 0x48, 0x65, 0x6c][..]; // field 2: "Hel"
 
         let fields: Vec<_> = reader
@@ -554,6 +561,8 @@ mod tests {
 
     #[test]
     fn test_parse_i32_field() {
+        use super::AsRefExtProtobuf;
+
         let reader = &[0x15, 0x78, 0x56, 0x34, 0x12][..]; // field 2: 0x12345678 (Fixed32)
 
         let fields: Vec<_> = reader
@@ -574,6 +583,8 @@ mod tests {
 
     #[test]
     fn test_parse_i64_field() {
+        use super::AsRefExtProtobuf;
+
         let reader = &[0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12][..]; // field 3: 0x1234567890ABCDEF (Fixed64)
 
         let fields: Vec<_> = reader
@@ -594,6 +605,8 @@ mod tests {
 
     #[test]
     fn test_parse_multiple_fields() {
+        use super::AsRefExtProtobuf;
+
         let reader = &[
             0x08, 0x96, 0x01, // field 1: 150
             0x12, 0x03, 0x48, 0x65, 0x6c, // field 2: "Hel"
@@ -628,6 +641,8 @@ mod tests {
 
     #[test]
     fn test_parse_empty_stream() {
+        use super::AsRefExtProtobuf;
+
         let reader = &[][..];
 
         let fields: Vec<_> = reader
@@ -694,7 +709,7 @@ mod tests {
     #[test]
     fn test_try_iterator_ext_read_single_field() {
         use super::TryIteratorExtProtobuf;
-        use ::std::io::Cursor;
+        use ::std::io::{Cursor, Read};
 
         let data = vec![0x08, 0x96, 0x01]; // field 1: 150
         let reader = Cursor::new(data);
@@ -716,7 +731,7 @@ mod tests {
     #[test]
     fn test_try_iterator_ext_read_multiple_fields() {
         use super::TryIteratorExtProtobuf;
-        use ::std::io::Cursor;
+        use ::std::io::{Cursor, Read};
 
         let data = vec![
             0x08, 0x96, 0x01, // field 1: 150
@@ -816,6 +831,8 @@ mod tests {
 
     #[test]
     fn test_slice_ext_read_single_field() {
+        use super::AsRefExtProtobuf;
+
         let slice = &[0x08, 0x96, 0x01][..]; // field 1: 150
 
         let fields: Vec<_> = slice
@@ -834,6 +851,8 @@ mod tests {
 
     #[test]
     fn test_slice_ext_read_all_fields() {
+        use super::AsRefExtProtobuf;
+
         let slice = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
         // field 1: 150, field 2: "Hel"
 
