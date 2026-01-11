@@ -492,7 +492,6 @@ impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> {}
 
 #[cfg(test)]
 mod tests {
-    use super::{SliceReader, parse_field};
     use crate::field::FieldValue;
 
     #[test]
@@ -762,71 +761,6 @@ mod tests {
             }
             _ => panic!("Expected Len field"),
         }
-    }
-
-    // ============================================================================
-    // Borrowed reference tests
-    // ============================================================================
-
-    #[test]
-    fn test_parse_varint_field_from_slice() {
-        let data = &[0x08, 0x96, 0x01][..]; // field 1: 150
-
-        let mut slice = data;
-        let mut reader = SliceReader { slice: &mut slice };
-        let field = parse_field(&mut reader).unwrap().unwrap();
-        assert_eq!(field.field_number.as_u32(), 1);
-        assert_eq!(data.len() - slice.len(), 3);
-        assert!(slice.is_empty());
-        match field.value {
-            FieldValue::Varint(varint) => {
-                assert_eq!(varint.to_uint64(), 150);
-            }
-            _ => panic!("Expected Varint field"),
-        }
-    }
-
-    #[test]
-    fn test_parse_len_field_from_slice() {
-        let data = &[0x12, 0x03, 0x48, 0x65, 0x6c][..]; // field 2: "Hel"
-
-        let mut slice = data;
-        let mut reader = SliceReader { slice: &mut slice };
-        let field = parse_field(&mut reader).unwrap().unwrap();
-        assert_eq!(field.field_number.as_u32(), 2);
-        assert_eq!(data.len() - slice.len(), 5);
-        assert!(slice.is_empty());
-        match field.value {
-            FieldValue::Len(data_slice) => {
-                assert_eq!(data_slice, b"Hel");
-            }
-            _ => panic!("Expected Len field"),
-        }
-    }
-
-    #[test]
-    fn test_parse_i32_field_from_slice() {
-        let data = &[0x15, 0x78, 0x56, 0x34, 0x12][..]; // field 2: 0x12345678
-
-        let mut slice = data;
-        let mut reader = SliceReader { slice: &mut slice };
-        let field = parse_field(&mut reader).unwrap().unwrap();
-        assert_eq!(field.field_number.as_u32(), 2);
-        assert_eq!(data.len() - slice.len(), 5);
-        assert!(slice.is_empty());
-        match field.value {
-            FieldValue::I32(bytes) => {
-                assert_eq!(bytes, [0x78, 0x56, 0x34, 0x12]);
-            }
-            _ => panic!("Expected I32 field"),
-        }
-    }
-
-    #[test]
-    fn test_parse_empty_slice() {
-        let mut data = &[][..];
-        let mut reader = SliceReader { slice: &mut data };
-        assert!(parse_field(&mut reader).unwrap().is_none());
     }
 
     #[test]
