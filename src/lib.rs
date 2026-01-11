@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Protocol Buffers core library
-//!
-//! This library provides common definitions, constants, enums, and basic logic
-//! for implementing Protocol Buffers in Rust.
+#![doc = include_str!("../README.md")]
 
 #[cfg(any(feature = "read", feature = "write"))]
 pub(crate) mod field;
