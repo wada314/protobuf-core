@@ -66,17 +66,17 @@ pub use self::write::WriteExtProtobuf;
 /// based on the field's schema definition.
 ///
 /// `L` is the type for length-delimited values (Len variant).
-/// For owned data (from `std::io::Read`): use `Vec<u8>`
-/// For borrowed data (from slices): use `&'a [u8]`
+///  - For owned data (from `std::io::Read`): use `Vec<u8>`
+///  - For borrowed data (from slices): use `&'a [u8]`
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
-    /// Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum)
+    /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`)
     Varint(Varint),
-    /// 32-bit fixed-width values (Fixed32, SFixed32, Float)
+    /// 32-bit fixed-width values (`Fixed32`, `SFixed32`, `Float`)
     I32([u8; 4]),
-    /// 64-bit fixed-width values (Fixed64, SFixed64, Double)
+    /// 64-bit fixed-width values (`Fixed64`, `SFixed64`, `Double`)
     I64([u8; 8]),
-    /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields)
+    /// Length-delimited values (`String`, `Bytes`, embedded messages, packed repeated fields)
     Len(L),
 }
 
@@ -88,69 +88,69 @@ impl<L> FieldValue<L> {
         Self::Varint(varint)
     }
 
-    /// Create a field value from a UInt64 protobuf type
+    /// Create a field value from a `UInt64` protobuf type
     pub fn from_uint64(value: u64) -> Self {
         Self::Varint(Varint::from_uint64(value))
     }
 
-    /// Create a field value from a UInt32 protobuf type
+    /// Create a field value from a `UInt32` protobuf type
     pub fn from_uint32(value: u32) -> Self {
         Self::Varint(Varint::from_uint32(value))
     }
 
-    /// Create a field value from a SInt64 protobuf type (ZigZag encoded)
+    /// Create a field value from a `SInt64` protobuf type (ZigZag encoded)
     pub fn from_sint64(value: i64) -> Self {
         Self::Varint(Varint::from_sint64(value))
     }
 
-    /// Create a field value from a SInt32 protobuf type (ZigZag encoded)
+    /// Create a field value from a `SInt32` protobuf type (ZigZag encoded)
     pub fn from_sint32(value: i32) -> Self {
         Self::Varint(Varint::from_sint32(value))
     }
 
-    /// Create a field value from an Int64 protobuf type (non-ZigZag)
+    /// Create a field value from an `Int64` protobuf type (non-ZigZag)
     pub fn from_int64(value: i64) -> Self {
         Self::Varint(Varint::from_int64(value))
     }
 
-    /// Create a field value from an Int32 protobuf type (non-ZigZag)
+    /// Create a field value from an `Int32` protobuf type (non-ZigZag)
     pub fn from_int32(value: i32) -> Self {
         Self::Varint(Varint::from_int32(value))
     }
 
-    /// Create a field value from a Bool protobuf type
+    /// Create a field value from a `Bool` protobuf type
     pub fn from_bool(value: bool) -> Self {
         Self::Varint(Varint::from_bool(value))
     }
 
     // Fixed-width constructors
 
-    /// Create a field value from a Fixed32 protobuf type
+    /// Create a field value from a `Fixed32` protobuf type
     pub fn from_fixed32(value: u32) -> Self {
         Self::I32(value.to_le_bytes())
     }
 
-    /// Create a field value from a SFixed32 protobuf type
+    /// Create a field value from a `SFixed32` protobuf type
     pub fn from_sfixed32(value: i32) -> Self {
         Self::I32(value.to_le_bytes())
     }
 
-    /// Create a field value from a Float protobuf type
+    /// Create a field value from a `Float` protobuf type
     pub fn from_float(value: f32) -> Self {
         Self::I32(value.to_le_bytes())
     }
 
-    /// Create a field value from a Fixed64 protobuf type
+    /// Create a field value from a `Fixed64` protobuf type
     pub fn from_fixed64(value: u64) -> Self {
         Self::I64(value.to_le_bytes())
     }
 
-    /// Create a field value from a SFixed64 protobuf type
+    /// Create a field value from a `SFixed64` protobuf type
     pub fn from_sfixed64(value: i64) -> Self {
         Self::I64(value.to_le_bytes())
     }
 
-    /// Create a field value from a Double protobuf type
+    /// Create a field value from a `Double` protobuf type
     pub fn from_double(value: f64) -> Self {
         Self::I64(value.to_le_bytes())
     }
@@ -227,12 +227,12 @@ impl<L> Field<L> {
 
 // Convenience implementations for FieldValue<Vec<u8>>
 impl FieldValue<Vec<u8>> {
-    /// Create a field value from raw bytes (Bytes protobuf type)
+    /// Create a field value from raw bytes (`Bytes` protobuf type)
     pub fn from_bytes(data: Vec<u8>) -> Self {
         Self::Len(data)
     }
 
-    /// Create a field value from a String protobuf type
+    /// Create a field value from a `String` protobuf type
     pub fn from_string(s: String) -> Self {
         Self::Len(s.into_bytes())
     }
