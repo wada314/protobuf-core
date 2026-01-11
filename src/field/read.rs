@@ -26,6 +26,10 @@ use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
 use ::std::io::Read;
 
+// ============================================================================
+// Common parsing infrastructure
+// ============================================================================
+
 /// Trait for reading field values from different data sources
 ///
 /// This trait abstracts the reading operations needed to parse field values.
@@ -106,7 +110,7 @@ where
 }
 
 // ============================================================================
-// Owned data implementations (Field<Vec<u8>>)
+// IteratorExtProtobuf
 // ============================================================================
 
 /// Helper struct implementing FieldValueReader for Iterator<Item = u8>
@@ -139,6 +143,67 @@ where
         Ok(data)
     }
 }
+
+/// Iterator for reading raw protobuf fields sequentially from a byte iterator
+pub struct ProtobufFieldIteratorFromBytes<I> {
+    iter: I,
+}
+
+impl<I> Iterator for ProtobufFieldIteratorFromBytes<I>
+where
+    I: Iterator<Item = u8>,
+{
+    type Item = Result<Field<Vec<u8>>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut reader = IteratorReader(&mut self.iter);
+        match parse_field(&mut reader) {
+            Ok(Some(field)) => Some(Ok(field)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
+    }
+}
+
+/// Extension trait for reading raw Protocol Buffer fields from byte iterators.
+///
+/// This trait provides convenient methods to read fields directly from
+/// any iterator that yields bytes. Returns owned data (`Field<Vec<u8>>`).
+///
+/// # Example
+/// ```
+/// use ::protobuf_core::IteratorExtProtobuf;
+///
+/// let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
+/// let iter = bytes.into_iter();
+/// let fields: Vec<_> = iter.protobuf_fields().collect::<::std::result::Result<Vec<_>, _>>().unwrap();
+/// assert_eq!(fields[0].field_number.as_u32(), 1);
+/// ```
+pub trait IteratorExtProtobuf {
+    /// Convert this iterator into an iterator of protobuf fields.
+    ///
+    /// Returns an iterator that yields `Result<Field<Vec<u8>>>`.
+    /// Each field is parsed from the byte stream sequentially.
+    fn protobuf_fields(self) -> ProtobufFieldIteratorFromBytes<Self>
+    where
+        Self: Sized;
+}
+
+impl<I> IteratorExtProtobuf for I
+where
+    I: Iterator<Item = u8>,
+{
+    fn protobuf_fields(self) -> ProtobufFieldIteratorFromBytes<Self>
+    where
+        Self: Sized,
+    {
+        ProtobufFieldIteratorFromBytes { iter: self }
+    }
+}
+
+// ============================================================================
+// TryIteratorExtProtobuf
+// ============================================================================
 
 /// Helper struct implementing FieldValueReader for Iterator<Item = Result<u8, E>>
 struct TryIteratorReader<'a, I, E>(&'a mut I)
@@ -181,6 +246,73 @@ where
         Ok(data)
     }
 }
+
+/// Iterator for reading raw protobuf fields sequentially from a byte iterator that yields `Result<u8, E>`
+pub struct ProtobufFieldIteratorFromTryBytes<I> {
+    iter: I,
+}
+
+impl<I, E> Iterator for ProtobufFieldIteratorFromTryBytes<I>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    type Item = Result<Field<Vec<u8>>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut reader = TryIteratorReader(&mut self.iter);
+        match parse_field(&mut reader) {
+            Ok(Some(field)) => Some(Ok(field)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
+    }
+}
+
+/// Extension trait for reading raw Protocol Buffer fields from byte iterators that yield `Result<u8, E>`.
+///
+/// This trait provides convenient methods to read fields directly from
+/// any iterator that yields `Result<u8, E>`, allowing proper error propagation
+/// from I/O operations. Returns owned data (`Field<Vec<u8>>`).
+///
+/// # Example
+/// ```
+/// use ::std::io::{Cursor, Read};
+/// use ::protobuf_core::TryIteratorExtProtobuf;
+///
+/// let data = vec![0x08, 0x96, 0x01]; // field 1: 150
+/// let mut reader = Cursor::new(data);
+/// let iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
+/// let fields: Vec<_> = iter.protobuf_fields().collect::<Result<Vec<_>, _>>().unwrap();
+/// assert_eq!(fields[0].field_number.as_u32(), 1);
+/// ```
+pub trait TryIteratorExtProtobuf {
+    /// Convert this iterator into an iterator of protobuf fields.
+    ///
+    /// Returns an iterator that yields `Result<Field<Vec<u8>>>`.
+    /// Each field is parsed from the byte stream sequentially.
+    /// I/O errors from the underlying iterator are properly propagated.
+    fn protobuf_fields(self) -> ProtobufFieldIteratorFromTryBytes<Self>
+    where
+        Self: Sized;
+}
+
+impl<I, E> TryIteratorExtProtobuf for I
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    fn protobuf_fields(self) -> ProtobufFieldIteratorFromTryBytes<Self>
+    where
+        Self: Sized,
+    {
+        ProtobufFieldIteratorFromTryBytes { iter: self }
+    }
+}
+
+// ============================================================================
+// ReadExtProtobuf
+// ============================================================================
 
 /// Helper struct implementing FieldValueReader for Read
 struct ReadReader<'a, R>(&'a mut R)
@@ -227,126 +359,6 @@ where
             Ok(None) => None,
             Err(err) => Some(Err(err)),
         }
-    }
-}
-
-/// Iterator for reading raw protobuf fields sequentially from a byte iterator
-pub struct ProtobufFieldIteratorFromBytes<I> {
-    iter: I,
-}
-
-impl<I> Iterator for ProtobufFieldIteratorFromBytes<I>
-where
-    I: Iterator<Item = u8>,
-{
-    type Item = Result<Field<Vec<u8>>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut reader = IteratorReader(&mut self.iter);
-        match parse_field(&mut reader) {
-            Ok(Some(field)) => Some(Ok(field)),
-            Ok(None) => None,
-            Err(err) => Some(Err(err)),
-        }
-    }
-}
-
-/// Iterator for reading raw protobuf fields sequentially from a byte iterator that yields `Result<u8, E>`
-pub struct ProtobufFieldIteratorFromTryBytes<I> {
-    iter: I,
-}
-
-impl<I, E> Iterator for ProtobufFieldIteratorFromTryBytes<I>
-where
-    I: Iterator<Item = ::std::result::Result<u8, E>>,
-    E: Into<ProtobufError>,
-{
-    type Item = Result<Field<Vec<u8>>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut reader = TryIteratorReader(&mut self.iter);
-        match parse_field(&mut reader) {
-            Ok(Some(field)) => Some(Ok(field)),
-            Ok(None) => None,
-            Err(err) => Some(Err(err)),
-        }
-    }
-}
-
-/// Extension trait for reading raw Protocol Buffer fields from byte iterators.
-///
-/// This trait provides convenient methods to read fields directly from
-/// any iterator that yields bytes. Returns owned data (`Field<Vec<u8>>`).
-///
-/// # Example
-/// ```
-/// use ::protobuf_core::IteratorExtProtobuf;
-///
-/// let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
-/// let iter = bytes.into_iter();
-/// let fields: Vec<_> = iter.protobuf_fields().collect::<::std::result::Result<Vec<_>, _>>().unwrap();
-/// assert_eq!(fields[0].field_number.as_u32(), 1);
-/// ```
-pub trait IteratorExtProtobuf {
-    /// Convert this iterator into an iterator of protobuf fields.
-    ///
-    /// Returns an iterator that yields `Result<Field<Vec<u8>>>`.
-    /// Each field is parsed from the byte stream sequentially.
-    fn protobuf_fields(self) -> ProtobufFieldIteratorFromBytes<Self>
-    where
-        Self: Sized;
-}
-
-impl<I> IteratorExtProtobuf for I
-where
-    I: Iterator<Item = u8>,
-{
-    fn protobuf_fields(self) -> ProtobufFieldIteratorFromBytes<Self>
-    where
-        Self: Sized,
-    {
-        ProtobufFieldIteratorFromBytes { iter: self }
-    }
-}
-
-/// Extension trait for reading raw Protocol Buffer fields from byte iterators that yield `Result<u8, E>`.
-///
-/// This trait provides convenient methods to read fields directly from
-/// any iterator that yields `Result<u8, E>`, allowing proper error propagation
-/// from I/O operations. Returns owned data (`Field<Vec<u8>>`).
-///
-/// # Example
-/// ```
-/// use ::std::io::{Cursor, Read};
-/// use ::protobuf_core::TryIteratorExtProtobuf;
-///
-/// let data = vec![0x08, 0x96, 0x01]; // field 1: 150
-/// let mut reader = Cursor::new(data);
-/// let iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
-/// let fields: Vec<_> = iter.protobuf_fields().collect::<Result<Vec<_>, _>>().unwrap();
-/// assert_eq!(fields[0].field_number.as_u32(), 1);
-/// ```
-pub trait TryIteratorExtProtobuf {
-    /// Convert this iterator into an iterator of protobuf fields.
-    ///
-    /// Returns an iterator that yields `Result<Field<Vec<u8>>>`.
-    /// Each field is parsed from the byte stream sequentially.
-    /// I/O errors from the underlying iterator are properly propagated.
-    fn protobuf_fields(self) -> ProtobufFieldIteratorFromTryBytes<Self>
-    where
-        Self: Sized;
-}
-
-impl<I, E> TryIteratorExtProtobuf for I
-where
-    I: Iterator<Item = ::std::result::Result<u8, E>>,
-    E: Into<ProtobufError>,
-{
-    fn protobuf_fields(self) -> ProtobufFieldIteratorFromTryBytes<Self>
-    where
-        Self: Sized,
-    {
-        ProtobufFieldIteratorFromTryBytes { iter: self }
     }
 }
 
@@ -402,7 +414,7 @@ where
 }
 
 // ============================================================================
-// Borrowed reference implementations (Field<&'a [u8]>)
+// AsRefExtProtobuf
 // ============================================================================
 
 /// Helper struct implementing FieldValueReader for slice-based readers
