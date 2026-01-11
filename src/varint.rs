@@ -326,7 +326,7 @@ pub trait IteratorExtVarint {
     ///
     /// let bytes = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
     /// let iter = bytes.into_iter();
-    /// let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
+    /// let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
     /// assert_eq!(varints.len(), 2);
     /// assert_eq!(varints[0].to_uint64(), 150);
     /// assert_eq!(varints[1].to_uint64(), 127);
@@ -391,7 +391,7 @@ pub trait TryIteratorExtVarint {
     /// let data = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
     /// let reader = Cursor::new(data);
     /// let iter = reader.bytes();
-    /// let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
+    /// let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
     /// assert_eq!(varints.len(), 2);
     /// assert_eq!(varints[0].to_uint64(), 150);
     /// assert_eq!(varints[1].to_uint64(), 127);
@@ -454,7 +454,7 @@ pub trait ReadExtVarint {
     ///
     /// let data = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
     /// let mut reader = Cursor::new(data);
-    /// let varints: Vec<Varint> = reader.read_varints().collect::<Result<Vec<_>>>().unwrap();
+    /// let varints: Vec<Varint> = reader.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
     /// assert_eq!(varints.len(), 2);
     /// assert_eq!(varints[0].to_uint64(), 150);
     /// assert_eq!(varints[1].to_uint64(), 127);

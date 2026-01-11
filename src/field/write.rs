@@ -39,7 +39,7 @@ pub trait WriteExtProtobuf {
     /// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
     ///     let mut buffer = Vec::new();
     ///     
-    ///     let field = Field::new(
+    ///     let field: Field<Vec<u8>> = Field::new(
     ///         FieldNumber::try_from(1)?,
     ///         FieldValue::from_uint64(150)
     ///     );
