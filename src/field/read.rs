@@ -494,8 +494,12 @@ impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> {}
 mod tests {
     use crate::field::FieldValue;
 
+    // ============================================================================
+    // AsRefExtProtobuf tests (borrowed references)
+    // ============================================================================
+
     #[test]
-    fn test_read_single_varint_field() {
+    fn test_as_ref_ext_read_varint_field() {
         use super::AsRefExtProtobuf;
 
         let reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
@@ -515,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_len_field() {
+    fn test_as_ref_ext_read_len_field() {
         use super::AsRefExtProtobuf;
 
         let reader = &[0x12, 0x03, 0x48, 0x65, 0x6c][..]; // field 2: "Hel"
@@ -537,7 +541,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_i32_field() {
+    fn test_as_ref_ext_read_i32_field() {
         use super::AsRefExtProtobuf;
 
         let reader = &[0x15, 0x78, 0x56, 0x34, 0x12][..]; // field 2: 0x12345678 (Fixed32)
@@ -559,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_i64_field() {
+    fn test_as_ref_ext_read_i64_field() {
         use super::AsRefExtProtobuf;
 
         let reader = &[0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12][..]; // field 3: 0x1234567890ABCDEF (Fixed64)
@@ -581,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_multiple_fields() {
+    fn test_as_ref_ext_read_multiple_fields() {
         use super::AsRefExtProtobuf;
 
         let reader = &[
@@ -617,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_empty_stream() {
+    fn test_as_ref_ext_read_empty_stream() {
         use super::AsRefExtProtobuf;
 
         let reader = &[][..];
@@ -634,7 +638,7 @@ mod tests {
     // ============================================================================
 
     #[test]
-    fn test_read_ext_read_single_varint_field() {
+    fn test_read_ext_read_varint_field() {
         use super::ReadExtProtobuf;
         use ::std::io::Cursor;
 
@@ -771,7 +775,7 @@ mod tests {
     // ============================================================================
 
     #[test]
-    fn test_iterator_ext_read_single_field() {
+    fn test_iterator_ext_read_varint_field() {
         use super::IteratorExtProtobuf;
 
         let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
@@ -902,7 +906,7 @@ mod tests {
     // ============================================================================
 
     #[test]
-    fn test_try_iterator_ext_read_single_field() {
+    fn test_try_iterator_ext_read_varint_field() {
         use super::TryIteratorExtProtobuf;
         use ::std::io::{Cursor, Read};
 
