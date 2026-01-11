@@ -35,6 +35,21 @@ protobuf-core = { version = "0.1.0", default-features = false, features = ["read
 
 ## Quick Start
 
+### Basic Data Types
+
+This library provides several core data types for working with Protocol Buffers:
+
+- **`Field<L>`**: Represents a raw protobuf field with a field number and value
+  - `L` is the type for length-delimited values: `Vec<u8>` for owned data, `&[u8]` for borrowed data
+- **`FieldValue<L>`**: Represents the raw value of a field (Varint, I32, I64, or Len)
+  - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum)
+  - `I32([u8; 4])`: 32-bit fixed-width values (Fixed32, SFixed32, Float)
+  - `I64([u8; 8])`: 64-bit fixed-width values (Fixed64, SFixed64, Double)
+  - `Len(L)`: Length-delimited values (String, Bytes, embedded messages, packed repeated fields)
+- **`Tag`**: Represents a protobuf tag (field number + wire type)
+- **`Varint`**: Represents a deserialized varint value (8-byte internal representation)
+- **`FieldNumber`**: A validated field number (range: 1 to 2^29 - 1)
+
 ### Reading Fields from Different Sources
 
 This library provides four different approaches for reading protobuf fields, each suited for different data sources:
