@@ -18,7 +18,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-protobuf-core = "0.1.0"
+protobuf-core = "0.2.0"
 ```
 
 ### Feature Flags
@@ -30,7 +30,7 @@ You can use features independently:
 
 ```toml
 [dependencies]
-protobuf-core = { version = "0.1.0", default-features = false, features = ["read"] }
+protobuf-core = { version = "0.2.0", default-features = false, features = ["read"] }
 ```
 
 ## Quick Start
