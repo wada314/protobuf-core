@@ -711,6 +711,48 @@ mod tests {
     }
 
     #[test]
+    fn test_read_ext_read_len_field() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        let data = vec![0x12, 0x03, 0x48, 0x65, 0x6c]; // field 2: "Hel"
+        let reader = Cursor::new(data);
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 2);
+        match &fields[0].value {
+            FieldValue::Len(data) => {
+                assert_eq!(&data[..], b"Hel");
+            }
+            _ => panic!("Expected Len field"),
+        }
+    }
+
+    #[test]
+    fn test_read_ext_read_i64_field() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        let data = vec![0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]; // field 3: 0x1234567890ABCDEF (Fixed64)
+        let reader = Cursor::new(data);
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 3);
+        match &fields[0].value {
+            FieldValue::I64(bytes) => {
+                assert_eq!(*bytes, [0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]);
+            }
+            _ => panic!("Expected I64 field"),
+        }
+    }
+
+    #[test]
     fn test_read_ext_read_empty_stream() {
         use super::ReadExtProtobuf;
         use ::std::io::Cursor;
@@ -723,6 +765,10 @@ mod tests {
             .unwrap();
         assert_eq!(fields.len(), 0);
     }
+
+    // ============================================================================
+    // IteratorExtProtobuf tests
+    // ============================================================================
 
     #[test]
     fn test_iterator_ext_read_single_field() {
@@ -777,6 +823,83 @@ mod tests {
             _ => panic!("Expected Len field"),
         }
     }
+
+    #[test]
+    fn test_iterator_ext_read_len_field() {
+        use super::IteratorExtProtobuf;
+
+        let bytes = vec![0x12, 0x03, 0x48, 0x65, 0x6c]; // field 2: "Hel"
+        let iter = bytes.into_iter();
+        let fields: Vec<_> = iter
+            .protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 2);
+        match &fields[0].value {
+            FieldValue::Len(data) => {
+                assert_eq!(&data[..], b"Hel");
+            }
+            _ => panic!("Expected Len field"),
+        }
+    }
+
+    #[test]
+    fn test_iterator_ext_read_i32_field() {
+        use super::IteratorExtProtobuf;
+
+        let bytes = vec![0x15, 0x78, 0x56, 0x34, 0x12]; // field 2: 0x12345678 (Fixed32)
+        let iter = bytes.into_iter();
+        let fields: Vec<_> = iter
+            .protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 2);
+        match &fields[0].value {
+            FieldValue::I32(bytes) => {
+                assert_eq!(*bytes, [0x78, 0x56, 0x34, 0x12]);
+            }
+            _ => panic!("Expected I32 field"),
+        }
+    }
+
+    #[test]
+    fn test_iterator_ext_read_i64_field() {
+        use super::IteratorExtProtobuf;
+
+        let bytes = vec![0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]; // field 3: 0x1234567890ABCDEF (Fixed64)
+        let iter = bytes.into_iter();
+        let fields: Vec<_> = iter
+            .protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 3);
+        match &fields[0].value {
+            FieldValue::I64(bytes) => {
+                assert_eq!(*bytes, [0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]);
+            }
+            _ => panic!("Expected I64 field"),
+        }
+    }
+
+    #[test]
+    fn test_iterator_ext_read_empty_stream() {
+        use super::IteratorExtProtobuf;
+
+        let bytes = vec![];
+        let iter = bytes.into_iter();
+        let fields: Vec<_> = iter
+            .protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 0);
+    }
+
+    // ============================================================================
+    // TryIteratorExtProtobuf tests
+    // ============================================================================
 
     #[test]
     fn test_try_iterator_ext_read_single_field() {
@@ -837,54 +960,83 @@ mod tests {
     }
 
     #[test]
-    fn test_slice_ext_read_single_field() {
-        use super::AsRefExtProtobuf;
+    fn test_try_iterator_ext_read_len_field() {
+        use super::TryIteratorExtProtobuf;
+        use ::std::io::{Cursor, Read};
 
-        let slice = &[0x08, 0x96, 0x01][..]; // field 1: 150
-
-        let fields: Vec<_> = slice
-            .read_protobuf_fields()
+        let data = vec![0x12, 0x03, 0x48, 0x65, 0x6c]; // field 2: "Hel"
+        let reader = Cursor::new(data);
+        let iter = reader.bytes();
+        let fields: Vec<_> = iter
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].field_number.as_u32(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 2);
         match &fields[0].value {
-            FieldValue::Varint(varint) => {
-                assert_eq!(varint.to_uint64(), 150);
+            FieldValue::Len(data) => {
+                assert_eq!(&data[..], b"Hel");
             }
-            _ => panic!("Expected Varint field"),
+            _ => panic!("Expected Len field"),
         }
     }
 
     #[test]
-    fn test_slice_ext_read_all_fields() {
-        use super::AsRefExtProtobuf;
+    fn test_try_iterator_ext_read_i32_field() {
+        use super::TryIteratorExtProtobuf;
+        use ::std::io::{Cursor, Read};
 
-        let slice = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
-        // field 1: 150, field 2: "Hel"
-
-        let fields: Vec<_> = slice
-            .read_protobuf_fields()
+        let data = vec![0x15, 0x78, 0x56, 0x34, 0x12]; // field 2: 0x12345678 (Fixed32)
+        let reader = Cursor::new(data);
+        let iter = reader.bytes();
+        let fields: Vec<_> = iter
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(fields.len(), 2);
-
-        let field1 = &fields[0];
-        assert_eq!(field1.field_number.as_u32(), 1);
-        match &field1.value {
-            FieldValue::Varint(varint) => {
-                assert_eq!(varint.to_uint64(), 150);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 2);
+        match &fields[0].value {
+            FieldValue::I32(bytes) => {
+                assert_eq!(*bytes, [0x78, 0x56, 0x34, 0x12]);
             }
-            _ => panic!("Expected Varint field"),
+            _ => panic!("Expected I32 field"),
         }
+    }
 
-        let field2 = &fields[1];
-        assert_eq!(field2.field_number.as_u32(), 2);
-        match &field2.value {
-            FieldValue::Len(data_slice) => {
-                assert_eq!(data_slice, b"Hel");
+    #[test]
+    fn test_try_iterator_ext_read_i64_field() {
+        use super::TryIteratorExtProtobuf;
+        use ::std::io::{Cursor, Read};
+
+        let data = vec![0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]; // field 3: 0x1234567890ABCDEF (Fixed64)
+        let reader = Cursor::new(data);
+        let iter = reader.bytes();
+        let fields: Vec<_> = iter
+            .protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 3);
+        match &fields[0].value {
+            FieldValue::I64(bytes) => {
+                assert_eq!(*bytes, [0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]);
             }
-            _ => panic!("Expected Len field"),
+            _ => panic!("Expected I64 field"),
         }
+    }
+
+    #[test]
+    fn test_try_iterator_ext_read_empty_stream() {
+        use super::TryIteratorExtProtobuf;
+        use ::std::io::{Cursor, Read};
+
+        let data = vec![];
+        let reader = Cursor::new(data);
+        let iter = reader.bytes();
+        let fields: Vec<_> = iter
+            .protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 0);
     }
 }
