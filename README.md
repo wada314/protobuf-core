@@ -71,7 +71,7 @@ This library provides four different approaches for reading protobuf fields, eac
    - Output: `Field<Vec<u8>>` - Len values are owned `Vec<u8>`
 
 ```rust
-use protobuf_core::{IteratorExtProtobuf, TryIteratorExtProtobuf, AsRefExtProtobuf, ReadExtProtobuf};
+use protobuf_core::{Field, IteratorExtProtobuf, TryIteratorExtProtobuf, AsRefExtProtobuf, ReadExtProtobuf};
 use std::io::{Cursor, Read};
 
 // From a byte iterator using IteratorExtProtobuf - returns Field<Vec<u8>> (Len values are Vec<u8>)
@@ -92,16 +92,16 @@ let fields: Vec<Field<Vec<u8>>> = reader
     .unwrap();
 
 // From a slice using AsRefExtProtobuf - returns Field<&[u8]> (Len values are &[u8], zero-copy)
-let slice = &[0x08, 0x96, 0x01][..];
-let fields: Vec<Field<&[u8]>> = slice
-    .read_protobuf_fields()  // AsRefExtProtobuf::read_protobuf_fields()
+let slice_bytes = [0x08, 0x96, 0x01];
+let slice: &[u8] = &slice_bytes;
+let fields: Vec<Field<&[u8]>> = AsRefExtProtobuf::read_protobuf_fields(&slice)
     .collect::<Result<Vec<Field<&[u8]>>, _>>()
     .unwrap();
 
 // From a Read source using ReadExtProtobuf - returns Field<Vec<u8>> (Len values are Vec<u8>)
-// Note: &[u8] implements Read, so we can use slices directly
-let data = &[0x08, 0x96, 0x01][..];
-let fields: Vec<Field<Vec<u8>>> = data
+let data = vec![0x08, 0x96, 0x01];
+let mut reader = Cursor::new(data);
+let fields: Vec<Field<Vec<u8>>> = reader
     .read_protobuf_fields()  // ReadExtProtobuf::read_protobuf_fields()
     .collect::<Result<Vec<Field<Vec<u8>>>, _>>()
     .unwrap();
@@ -112,12 +112,15 @@ let fields: Vec<Field<Vec<u8>>> = data
 ```rust
 use protobuf_core::{WriteExtProtobuf, Field, FieldValue, FieldNumber};
 
-let mut buffer = Vec::new();
-let field = Field::new(
-    FieldNumber::try_from(1)?,
-    FieldValue::from_uint64(150)
-);
-buffer.write_protobuf_field(&field)?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut buffer = Vec::new();
+    let field: Field<Vec<u8>> = Field::new(
+        FieldNumber::try_from(1)?,
+        FieldValue::from_uint64(150)
+    );
+    buffer.write_protobuf_field(&field)?;
+    Ok(())
+}
 ```
 
 ### Reading Tags
@@ -127,7 +130,7 @@ use protobuf_core::IteratorExtTag;
 
 let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
 let mut iter = bytes.into_iter();
-let tag = iter.read_tag()?.unwrap();
+let tag = iter.read_tag().unwrap().unwrap();
 assert_eq!(tag.field_number.as_u32(), 1);
 ```
 
@@ -138,7 +141,7 @@ use protobuf_core::IteratorExtVarint;
 
 let bytes = vec![0x96, 0x01]; // 150
 let mut iter = bytes.into_iter();
-let varint = iter.read_varint()?.unwrap();
+let varint = iter.read_varint().unwrap().unwrap();
 assert_eq!(varint.to_uint64(), 150);
 ```
 
