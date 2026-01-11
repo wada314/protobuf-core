@@ -224,16 +224,3 @@ impl<L> Field<L> {
         tag_size + value_size
     }
 }
-
-// Convenience implementations for FieldValue<Vec<u8>>
-impl FieldValue<Vec<u8>> {
-    /// Create a field value from raw bytes (`Bytes` protobuf type)
-    pub fn from_bytes(data: Vec<u8>) -> Self {
-        Self::Len(data)
-    }
-
-    /// Create a field value from a `String` protobuf type
-    pub fn from_string(s: String) -> Self {
-        Self::Len(s.into_bytes())
-    }
-}
