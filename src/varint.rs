@@ -165,7 +165,7 @@ impl Varint {
         if value == 0 {
             1
         } else {
-            (64 - value.leading_zeros() as usize + 6) / 7
+            (64 - value.leading_zeros() as usize).div_ceil(7)
         }
     }
 
@@ -341,7 +341,7 @@ where
     I: Iterator<Item = u8>,
 {
     fn read_varint(self) -> Result<Option<Varint>> {
-        decode_varint_from_bytes(self.map(|b| Ok::<u8, Infallible>(b)))
+        decode_varint_from_bytes(self.map(Ok::<u8, Infallible>))
     }
 
     fn read_varints(self) -> VarintIterator<ToResultIterator<Self>>
@@ -423,6 +423,23 @@ where
 /// This trait provides a convenient method to read varints directly from
 /// any type that implements `std::io::Read`.
 ///
+/// # Performance Note
+///
+/// When reading from file handles or network streams, consider wrapping the reader
+/// with [`BufReader`](std::io::BufReader) to avoid inefficient byte-by-byte system calls:
+///
+/// ```no_run
+/// use std::io::{BufReader, Read};
+/// use protobuf_core::ReadExtVarint;
+///
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let file = std::fs::File::open("data.bin")?;
+/// let mut reader = BufReader::new(file);
+/// let varint = reader.read_varint()?;
+/// # Ok(())
+/// # }
+/// ```
+///
 /// # Example
 /// ```
 /// use ::std::io::Cursor;
@@ -468,10 +485,12 @@ impl<R> ReadExtVarint for R
 where
     R: Read,
 {
+    #[allow(clippy::unbuffered_bytes)] // Varint parsing requires byte-by-byte reading; caller should use BufReader for efficiency
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         decode_varint_from_bytes(self.bytes())
     }
 
+    #[allow(clippy::unbuffered_bytes)] // Varint parsing requires byte-by-byte reading; caller should use BufReader for efficiency
     fn read_varints(&mut self) -> VarintIterator<::std::io::Bytes<&mut Self>> {
         VarintIterator::new(self.bytes())
     }

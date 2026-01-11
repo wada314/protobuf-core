@@ -103,7 +103,7 @@ pub const MAX_9_BYTE_VARINT: u64 = 0x7FFF_FFFF_FFFF_FFFF;
 pub const MAX_8_BYTE_VARINT: u64 = 0xFF_FFFF_FFFF_FFFF;
 
 /// Maximum variable-length integer value that can be encoded in 7 bytes.
-pub const MAX_7_BYTE_VARINT: u64 = 0x1FFFF_FFFF_FFFF;
+pub const MAX_7_BYTE_VARINT: u64 = 0x0001_FFFF_FFFF_FFFF;
 
 /// Maximum variable-length integer value that can be encoded in 6 bytes.
 pub const MAX_6_BYTE_VARINT: u64 = 0x3FF_FFFF_FFFF;
