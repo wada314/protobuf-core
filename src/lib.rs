@@ -20,7 +20,6 @@
 #[cfg(any(feature = "read", feature = "write"))]
 pub(crate) mod field;
 pub(crate) mod field_number;
-pub(crate) mod slice;
 pub(crate) mod tag;
 pub(crate) mod varint;
 pub(crate) mod wire_format;
@@ -35,7 +34,6 @@ pub use self::field::{
 #[cfg(any(feature = "read", feature = "write"))]
 pub use self::field::{Field, FieldValue};
 pub use self::field_number::FieldNumber;
-pub use self::slice::SliceAdvance;
 pub use self::tag::{IteratorExtTag, ReadExtTag, Tag, TryIteratorExtTag};
 pub use self::varint::{
     IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint, WriteExtVarint,
