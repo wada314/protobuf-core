@@ -23,10 +23,10 @@
 //! This library provides **building blocks** for implementing Protocol Buffers, not a complete
 //! message parser or serializer. It focuses on:
 //!
-//! - Low-level primitives**: Raw field I/O without semantic interpretation
-//! - Flexibility**: Support for both owned and borrowed data
-//! - Minimal dependencies**: Only depends on `thiserror` for error handling
-//! - Clear API**: Trait-based extension methods following Rust conventions
+//! - **Low-level primitives**: Raw field I/O without semantic interpretation
+//! - **Flexibility**: Support for both owned and borrowed data
+//! - **Minimal dependencies**: Only depends on `thiserror` for error handling
+//! - **Clear API**: Trait-based extension methods following Rust conventions
 //!
 //! ## Quick Start
 //!
