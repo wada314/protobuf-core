@@ -23,10 +23,10 @@
 //! This library provides **building blocks** for implementing Protocol Buffers, not a complete
 //! message parser or serializer. It focuses on:
 //!
-//! - **Low-level primitives**: Raw field I/O without semantic interpretation
-//! - **Flexibility**: Support for both owned and borrowed data
-//! - **Minimal dependencies**: Only depends on `thiserror` for error handling
-//! - **Clear API**: Trait-based extension methods following Rust conventions
+//! - Low-level primitives**: Raw field I/O without semantic interpretation
+//! - Flexibility**: Support for both owned and borrowed data
+//! - Minimal dependencies**: Only depends on `thiserror` for error handling
+//! - Clear API**: Trait-based extension methods following Rust conventions
 //!
 //! ## Quick Start
 //!
@@ -70,10 +70,10 @@
 //!
 //! ### Fields
 //!
-//! - **[`Field<L>`]: Represents a raw protobuf field with a field number and value.
+//! - [`Field<L>`]: Represents a raw protobuf field with a field number and value.
 //!   The `L` type parameter represents the type used for length-delimited values (e.g., `Vec<u8>`
 //!   for owned data, `&'a [u8]` for borrowed data).
-//! - **[`FieldValue<L>`]: Represents the raw value of a field. It can be:
+//! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
 //!   - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64,
 //!     Bool, Enum)
 //!   - `I32([u8; 4])`: 32-bit fixed-width values (Fixed32, SFixed32, Float)
@@ -83,47 +83,47 @@
 //!
 //! ### Basic Types
 //!
-//! - **[`Tag`]: Represents a protobuf tag (field number + wire type)
-//! - **[`Varint`]: Represents a deserialized varint value (8-byte internal
+//! - [`Tag`]: Represents a protobuf tag (field number + wire type)
+//! - [`Varint`]: Represents a deserialized varint value (8-byte internal
 //!   representation)
-//! - **[`FieldNumber`]: A validated field number (range: 1 to 2^29 - 1)
-//! - **[`WireType`]: Represents the protobuf wire type (Varint, Int32, Int64,
+//! - [`FieldNumber`]: A validated field number (range: 1 to 2^29 - 1)
+//! - [`WireType`]: Represents the protobuf wire type (Varint, Int32, Int64,
 //!   Len, StartGroup, EndGroup)
 //!
 //! ### Error Handling
 //!
-//! - **[`ProtobufError`]: Unified error type for all protobuf operations
-//! - **[`Result<T>`]: Type alias for `Result<T, ProtobufError>`
+//! - [`ProtobufError`]: Unified error type for all protobuf operations
+//! - [`Result<T>`]: Type alias for `Result<T, ProtobufError>`
 //!
 //! ## Reading Traits
 //!
 //! The library provides several traits for reading protobuf fields from different sources:
 //!
-//! - **[`IteratorExtProtobuf`]: Read fields from `Iterator<Item = u8>`
+//! - [`IteratorExtProtobuf`]: Read fields from `Iterator<Item = u8>`
 //!   - Output: [`Field<Vec<u8>>`] - Len values are owned `Vec<u8>`
-//! - **[`TryIteratorExtProtobuf`]: Read fields from
+//! - [`TryIteratorExtProtobuf`]: Read fields from
 //!   `Iterator<Item = Result<u8, E>>`
 //!   - Output: [`Field<Vec<u8>>`] - Len values are owned `Vec<u8>`
-//! - **[`AsRefExtProtobuf`]: Read fields from `AsRef<[u8]>` types
+//! - [`AsRefExtProtobuf`]: Read fields from `AsRef<[u8]>` types
 //!   (slices, arrays, etc.)
 //!   - Output: [`Field<&[u8]>`] - Len values are borrowed `&[u8]` slices (zero-copy)
-//! - **[`ReadExtProtobuf`]: Read fields from `std::io::Read` types
+//! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types
 //!   - Output: [`Field<Vec<u8>>`] - Len values are owned `Vec<u8>`
 //!
 //! ## Writing Traits
 //!
-//! - **[`WriteExtProtobuf`]: Write fields to `std::io::Write`
+//! - [`WriteExtProtobuf`]: Write fields to `std::io::Write`
 //!
 //! ## Tag/Varint Traits
 //!
 //! For lower-level operations, the library provides traits for reading and writing tags and
 //! varints:
 //!
-//! - **[`IteratorExtTag`]** / **[`TryIteratorExtTag`]**
-//!   / **[`ReadExtTag`]**: Read tags
-//! - **[`IteratorExtVarint`]** / **[`TryIteratorExtVarint`]**
-//!   / **[`ReadExtVarint`]**: Read varints
-//! - **[`WriteExtVarint`]**: Write varints
+//! - [`IteratorExtTag`] / [`TryIteratorExtTag`]
+//!   / [`ReadExtTag`]: Read tags
+//! - [`IteratorExtVarint`] / [`TryIteratorExtVarint`]
+//!   / [`ReadExtVarint`]: Read varints
+//! - [`WriteExtVarint`]: Write varints
 //!
 //! ## Feature Flags
 //!
