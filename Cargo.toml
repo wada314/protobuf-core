@@ -6,6 +6,7 @@ description = "A primitive utility library for Protocol Buffers in Rust"
 license = "Apache-2.0"
 repository = "https://github.com/wada314/protobuf-core"
 documentation = "https://docs.rs/protobuf-core/"
+readme = "README.md"
 
 [dependencies]
 thiserror = "1.0"

@@ -41,7 +41,7 @@ impl FieldNumber {
 
     /// Creates a new field number, validating the range.
     pub fn try_new(value: u32) -> Result<Self, ProtobufError> {
-        if value < Self::MIN.0 || value > Self::MAX.0 {
+        if !(Self::MIN.0..=Self::MAX.0).contains(&value) {
             return Err(ProtobufError::FieldNumberOutOfRange {
                 value: value.to_string(),
             });

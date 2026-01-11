@@ -149,7 +149,6 @@ This project aims to create a **protobuf utility library** that provides common 
      - `Field::new()` - creates a new field with given field number and value
      - `Field::encoded_size()` - calculates total encoded size including tag
    - **ReadExtProtobuf trait** - extension trait for `std::io::Read` types:
-     - `read_protobuf_field()` - reads a single protobuf field (tag + value)
      - `read_protobuf_fields()` - returns an iterator over all fields
    - **ProtobufFieldIterator** - iterator for reading protobuf fields sequentially from a reader
    - **Benefits**:

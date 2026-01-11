@@ -12,29 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Protocol Buffers core library
-//!
-//! This library provides common definitions, constants, enums, and basic logic
-//! for implementing Protocol Buffers in Rust.
+#![doc = include_str!("../README.md")]
 
 #[cfg(any(feature = "read", feature = "write"))]
-pub mod field;
-pub mod field_number;
-pub mod tag;
-pub mod varint;
-pub mod wire_format;
+pub(crate) mod field;
+pub(crate) mod field_number;
+pub(crate) mod tag;
+pub(crate) mod varint;
+pub(crate) mod wire_format;
 
 #[cfg(feature = "write")]
 pub use self::field::WriteExtProtobuf;
+#[cfg(feature = "read")]
+pub use self::field::{
+    AsRefExtProtobuf, IteratorExtProtobuf, ProtobufFieldIterator, ProtobufFieldIteratorFromBytes,
+    ProtobufFieldSliceIterator, ReadExtProtobuf, TryIteratorExtProtobuf,
+};
 #[cfg(any(feature = "read", feature = "write"))]
 pub use self::field::{Field, FieldValue};
-#[cfg(feature = "read")]
-pub use self::field::{ProtobufFieldIterator, ReadExtProtobuf};
 pub use self::field_number::FieldNumber;
-pub use self::tag::{ReadExtTag, Tag, read_tag};
-pub use self::varint::{IteratorExtVarint, ReadExtVarint, Varint, WriteExtVarint};
-pub use self::wire_format::{MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MIN_FIELD_NUMBER, WireType};
+pub use self::tag::{IteratorExtTag, ReadExtTag, Tag, TryIteratorExtTag};
+pub use self::varint::{
+    IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint, WriteExtVarint,
+};
+pub use self::wire_format::{
+    FIELD_NUMBER_SHIFT, FIXED32_BYTES, FIXED64_BYTES, MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT,
+    MAX_3_BYTE_VARINT, MAX_4_BYTE_VARINT, MAX_5_BYTE_VARINT, MAX_6_BYTE_VARINT, MAX_7_BYTE_VARINT,
+    MAX_8_BYTE_VARINT, MAX_9_BYTE_VARINT, MAX_FIELD_NUMBER, MAX_MESSAGE_SIZE, MAX_STRING_SIZE,
+    MAX_VARINT_BYTES, MIN_FIELD_NUMBER, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK,
+    WIRE_TYPE_MASK, WireType,
+};
 
+use ::std::convert::Infallible;
 use ::thiserror::Error;
 
 /// Unified error type for all protobuf operations
@@ -52,6 +61,9 @@ pub enum ProtobufError {
         target_type: &'static str,
     },
 
+    #[error("Varint exceeds maximum length of 10 bytes")]
+    VarintTooLong,
+
     #[error("Failed to downcast field value to expected type: {expected_type}")]
     FieldTypeDowncastError { expected_type: String },
 
@@ -63,6 +75,12 @@ pub enum ProtobufError {
 
     #[error("I/O error: {0}")]
     IoError(#[from] ::std::io::Error),
+}
+
+impl From<Infallible> for ProtobufError {
+    fn from(_: Infallible) -> Self {
+        unreachable!()
+    }
 }
 
 /// Custom Result type for protobuf operations

@@ -19,10 +19,11 @@
 //!
 //! This is a **reference implementation**. Not optimized for performance.
 
-use crate::wire_format::MAX_VARINT_BYTES;
+use crate::wire_format::{MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK};
 use crate::{ProtobufError, Result};
-use ::std::convert::TryFrom;
+use ::std::convert::{Infallible, TryFrom};
 use ::std::io::{Read, Write};
+use ::std::iter::Iterator;
 
 /// A deserialized varint value.
 ///
@@ -39,20 +40,19 @@ impl Varint {
     /// Create a new Varint from raw bytes.
     ///
     /// The bytes given are, essentially, a little-endian encoded u64.
+    /// Note that this is NOT the "protobuf encoded" varint bytes.
     pub fn new(bytes: [u8; 8]) -> Self {
         Self(bytes)
     }
 
     /// Get the underlying byte array, the little-endian encoded u64.
+    /// Note that this is NOT the "protobuf encoded" varint bytes.
     pub fn as_bytes(&self) -> &[u8; 8] {
         &self.0
     }
 
     // ============================================================================
-    // from / to protobuf integer types
-    // Important: Intending NOT from / to the Rust's integer types,
-    // but from / to the protobuf integer types!
-    // Thus, we don't provide the `From` / `Into` traits for the Rust's integer types.
+    // from / to rust integer types, using certain protobuf integer types formats.
     // ============================================================================
 
     /// Create a Varint from `u64`, assuming `UInt64` protobuf type.
@@ -165,7 +165,7 @@ impl Varint {
         if value == 0 {
             1
         } else {
-            (64 - value.leading_zeros() as usize + 6) / 7
+            (64 - value.leading_zeros() as usize).div_ceil(7)
         }
     }
 
@@ -173,37 +173,124 @@ impl Varint {
     ///
     /// Returns a tuple of (bytes, count) where:
     /// - bytes: fixed-size array containing the encoded varint
-    /// - count: actual number of bytes used (1-10)
+    /// - count: actual number of bytes used (1-MAX_VARINT_BYTES)
     ///
     /// # Example
     /// ```
-    /// use protobuf_core::varint::Varint;
+    /// use ::protobuf_core::Varint;
     ///
     /// let varint = Varint::from_uint64(150);
     /// let (bytes, count) = varint.encode();
     /// assert_eq!(count, 2);
     /// assert_eq!(&bytes[..count], &[0x96, 0x01]);
     /// ```
-    pub fn encode(&self) -> ([u8; 10], usize) {
+    pub fn encode(&self) -> ([u8; MAX_VARINT_BYTES], usize) {
         let value = self.to_uint64();
-        let mut bytes = [0u8; 10];
+        let mut bytes = [0u8; MAX_VARINT_BYTES];
         let mut bytes_written = 0;
         let mut remaining_value = value;
 
         for byte in bytes.iter_mut() {
-            *byte = (remaining_value & 0x7F) as u8;
+            *byte = (remaining_value & VARINT_PAYLOAD_MASK as u64) as u8;
             remaining_value >>= 7;
             bytes_written += 1;
 
             if remaining_value == 0 {
                 break;
             } else {
-                *byte |= 0x80; // continuation bit
+                *byte |= VARINT_CONTINUATION_BIT; // continuation bit
             }
         }
 
         (bytes, bytes_written)
     }
+}
+
+/// Iterator that reads multiple varints from a byte iterator.
+///
+/// This iterator yields `Result<Varint>` for each varint read from the underlying iterator.
+/// It stops when there are no more bytes available or an error occurs.
+pub struct VarintIterator<I: Iterator> {
+    bytes: I,
+}
+
+/// Iterator adapter that converts `Iterator<Item = u8>` to `Iterator<Item = Result<u8, Infallible>>`.
+///
+/// This wraps each `u8` value from the inner iterator with `Ok()`.
+pub struct ToResultIterator<I> {
+    inner: I,
+}
+
+impl<I> Iterator for ToResultIterator<I>
+where
+    I: Iterator<Item = u8>,
+{
+    type Item = ::std::result::Result<u8, Infallible>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(Ok)
+    }
+}
+
+impl<I, E> VarintIterator<I>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    fn new(bytes: I) -> Self {
+        Self { bytes }
+    }
+}
+
+impl<I, E> Iterator for VarintIterator<I>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    type Item = Result<Varint>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        decode_varint_from_bytes(&mut self.bytes).transpose()
+    }
+}
+
+/// Decode a varint from a sequence of bytes.
+///
+/// This is a helper function that implements the core varint decoding logic.
+/// It reads bytes from the iterator until it finds a byte with the continuation bit cleared.
+///
+/// Returns `Ok(Some(Varint))` if successfully decoded.
+/// Returns `Ok(None)` if no bytes were read (empty iterator).
+/// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
+/// Returns `Err(ProtobufError)` if an error occurs while reading bytes (the error type `E` is converted via `Into<ProtobufError>`).
+fn decode_varint_from_bytes<I, E>(bytes: I) -> Result<Option<Varint>>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    let mut decoded_value = 0u64;
+    let mut shift = 0;
+    let mut has_data = false;
+
+    for byte_result in bytes.take(MAX_VARINT_BYTES) {
+        let byte = byte_result.map_err(Into::into)?;
+        has_data = true;
+
+        let value = (byte & VARINT_PAYLOAD_MASK) as u64;
+        decoded_value |= value << shift;
+
+        if byte & VARINT_CONTINUATION_BIT == 0 {
+            let result_bytes = decoded_value.to_le_bytes();
+            return Ok(Some(Varint::new(result_bytes)));
+        }
+        shift += 7;
+    }
+
+    if !has_data {
+        return Ok(None);
+    }
+
+    Err(ProtobufError::VarintTooLong)
 }
 
 /// Extension trait for collecting varints from byte iterators.
@@ -213,57 +300,121 @@ impl Varint {
 ///
 /// # Example
 /// ```
-/// use protobuf_core::varint::{IteratorExtVarint, Varint};
+/// use ::protobuf_core::{IteratorExtVarint, Varint};
 ///
 /// let bytes = vec![0x96, 0x01]; // 150 in varint encoding
 /// let mut iter = bytes.into_iter();
-/// let varint: Option<Varint> = iter.try_collect_varint().unwrap();
+/// let varint: Option<Varint> = iter.read_varint().unwrap();
 /// assert_eq!(varint.unwrap().to_uint64(), 150);
 /// ```
 pub trait IteratorExtVarint {
-    /// Collect a varint from this iterator.
+    /// Read a varint from this iterator.
     ///
     /// Returns the Varint `Ok(Some(varint))` if successfully read.
     /// Returns `Ok(None)` if no input is available (empty iterator).
-    /// Returns `Err(VarintError::TooLong)` if the varint exceeds MAX_VARINT_SIZE.
-    fn try_collect_varint(self) -> Result<Option<Varint>>;
+    /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
+    fn read_varint(self) -> Result<Option<Varint>>;
+
+    /// Create an iterator that reads multiple varints from this iterator.
+    ///
+    /// Returns an iterator that yields `Result<Varint>` for each varint read.
+    /// The iterator stops when there are no more bytes available or an error occurs.
+    ///
+    /// # Example
+    /// ```
+    /// use ::protobuf_core::{IteratorExtVarint, Varint};
+    ///
+    /// let bytes = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
+    /// let iter = bytes.into_iter();
+    /// let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
+    /// assert_eq!(varints.len(), 2);
+    /// assert_eq!(varints[0].to_uint64(), 150);
+    /// assert_eq!(varints[1].to_uint64(), 127);
+    /// ```
+    fn read_varints(self) -> VarintIterator<ToResultIterator<Self>>
+    where
+        Self: Sized + Iterator<Item = u8>;
 }
 
 impl<I> IteratorExtVarint for I
 where
     I: Iterator<Item = u8>,
 {
-    fn try_collect_varint(self) -> Result<Option<Varint>> {
-        let mut bytes_read = 0;
-        let mut decoded_value = 0u64;
-        let mut shift = 0;
+    fn read_varint(self) -> Result<Option<Varint>> {
+        decode_varint_from_bytes(self.map(Ok::<u8, Infallible>))
+    }
 
-        for byte in self {
-            if bytes_read >= MAX_VARINT_BYTES {
-                return Err(ProtobufError::VarintDowncastOutOfRange {
-                    value: 0,
-                    target_type: "varint (too long)",
-                }); // Varint too long
-            }
+    fn read_varints(self) -> VarintIterator<ToResultIterator<Self>>
+    where
+        Self: Sized,
+    {
+        VarintIterator::new(ToResultIterator { inner: self })
+    }
+}
 
-            let value = (byte & 0x7F) as u64;
-            decoded_value |= value << shift;
-            bytes_read += 1;
+/// Extension trait for reading varints from byte iterators that yield `Result<u8, E>`.
+///
+/// This trait provides convenient methods to read varints directly from
+/// any iterator that yields `Result<u8, E>`, allowing proper error propagation.
+/// The error type `E` must implement `Into<ProtobufError>`.
+///
+/// # Example
+/// ```
+/// use ::std::io::{Cursor, Read};
+/// use ::protobuf_core::{TryIteratorExtVarint, Varint};
+///
+/// let data = vec![0x96, 0x01]; // 150 in varint encoding
+/// let mut reader = Cursor::new(data);
+/// let iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
+/// let varint = iter.read_varint().unwrap().unwrap();
+/// assert_eq!(varint.to_uint64(), 150);
+/// ```
+pub trait TryIteratorExtVarint {
+    /// Read a varint from this iterator.
+    ///
+    /// Returns the Varint `Ok(Some(varint))` if successfully read.
+    /// Returns `Ok(None)` if no input is available (empty iterator).
+    /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
+    /// Returns `Err(ProtobufError)` if an error occurs while reading bytes (the error type `E` is converted via `Into<ProtobufError>`).
+    fn read_varint(self) -> Result<Option<Varint>>;
 
-            if byte & 0x80 == 0 {
-                break;
-            }
-            shift += 7;
-        }
+    /// Create an iterator that reads multiple varints from this iterator.
+    ///
+    /// Returns an iterator that yields `Result<Varint>` for each varint read.
+    /// The iterator stops when there are no more bytes available or an error occurs.
+    ///
+    /// # Example
+    /// ```
+    /// use ::std::io::{Cursor, Read};
+    /// use ::protobuf_core::{TryIteratorExtVarint, Varint};
+    ///
+    /// let data = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
+    /// let reader = Cursor::new(data);
+    /// let iter = reader.bytes();
+    /// let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
+    /// assert_eq!(varints.len(), 2);
+    /// assert_eq!(varints[0].to_uint64(), 150);
+    /// assert_eq!(varints[1].to_uint64(), 127);
+    /// ```
+    fn read_varints(self) -> VarintIterator<Self>
+    where
+        Self: Sized + Iterator;
+}
 
-        if bytes_read == 0 {
-            return Ok(None); // No bytes read
-        }
+impl<I, E> TryIteratorExtVarint for I
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    fn read_varint(self) -> Result<Option<Varint>> {
+        decode_varint_from_bytes(self)
+    }
 
-        // Convert the decoded u64 value to 8-byte array (little-endian)
-        let result_bytes = decoded_value.to_le_bytes();
-
-        Ok(Some(Varint::new(result_bytes)))
+    fn read_varints(self) -> VarintIterator<Self>
+    where
+        Self: Sized,
+    {
+        VarintIterator::new(self)
     }
 }
 
@@ -272,10 +423,27 @@ where
 /// This trait provides a convenient method to read varints directly from
 /// any type that implements `std::io::Read`.
 ///
+/// # Performance Note
+///
+/// When reading from file handles or network streams, consider wrapping the reader
+/// with [`BufReader`](std::io::BufReader) to avoid inefficient byte-by-byte system calls:
+///
+/// ```no_run
+/// use std::io::{BufReader, Read};
+/// use protobuf_core::ReadExtVarint;
+///
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let file = std::fs::File::open("data.bin")?;
+/// let mut reader = BufReader::new(file);
+/// let varint = reader.read_varint()?;
+/// # Ok(())
+/// # }
+/// ```
+///
 /// # Example
 /// ```
-/// use std::io::Cursor;
-/// use protobuf_core::varint::{ReadExtVarint, Varint};
+/// use ::std::io::Cursor;
+/// use ::protobuf_core::{ReadExtVarint, Varint};
 ///
 /// let data = vec![0x96, 0x01]; // 150 in varint encoding
 /// let mut reader = Cursor::new(data);
@@ -287,38 +455,44 @@ pub trait ReadExtVarint {
     ///
     /// Returns the Varint `Ok(Some(varint))` if successfully read.
     /// Returns `Ok(None)` if no input is available (EOF).
-    /// Returns `Err(VarintError::TooLong)` if the varint exceeds MAX_VARINT_SIZE.
+    /// Returns `Err(ProtobufError::VarintTooLong)` if the varint exceeds MAX_VARINT_BYTES.
     /// Returns `Err(ProtobufError::IoError)` if an I/O error occurs.
     fn read_varint(&mut self) -> Result<Option<Varint>>;
+
+    /// Create an iterator that reads multiple varints from this reader.
+    ///
+    /// Returns an iterator that yields `Result<Varint>` for each varint read.
+    /// The iterator stops when there are no more bytes available (EOF) or an error occurs.
+    ///
+    /// # Example
+    /// ```
+    /// use ::std::io::Cursor;
+    /// use ::protobuf_core::{ReadExtVarint, Varint};
+    ///
+    /// let data = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
+    /// let mut reader = Cursor::new(data);
+    /// let varints: Vec<Varint> = reader.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
+    /// assert_eq!(varints.len(), 2);
+    /// assert_eq!(varints[0].to_uint64(), 150);
+    /// assert_eq!(varints[1].to_uint64(), 127);
+    /// ```
+    fn read_varints(&mut self) -> VarintIterator<::std::io::Bytes<&mut Self>>
+    where
+        Self: ::std::io::Read;
 }
 
 impl<R> ReadExtVarint for R
 where
     R: Read,
 {
+    #[allow(clippy::unbuffered_bytes)] // Varint parsing requires byte-by-byte reading; caller should use BufReader for efficiency
     fn read_varint(&mut self) -> Result<Option<Varint>> {
-        let mut decoded_value = 0u64;
-        let mut shift = 0;
-        let mut buffer = [0u8; 1];
+        decode_varint_from_bytes(self.bytes())
+    }
 
-        for _ in 0..MAX_VARINT_BYTES {
-            let n = self.read(&mut buffer)?;
-            if n == 0 {
-                return Ok(None); // EOF
-            }
-
-            let byte = buffer[0];
-            let value = (byte & 0x7F) as u64;
-            decoded_value |= value << shift;
-
-            if byte & 0x80 == 0 {
-                break;
-            }
-            shift += 7;
-        }
-
-        let result_bytes = decoded_value.to_le_bytes();
-        Ok(Some(Varint::new(result_bytes)))
+    #[allow(clippy::unbuffered_bytes)] // Varint parsing requires byte-by-byte reading; caller should use BufReader for efficiency
+    fn read_varints(&mut self) -> VarintIterator<::std::io::Bytes<&mut Self>> {
+        VarintIterator::new(self.bytes())
     }
 }
 
@@ -329,8 +503,8 @@ where
 ///
 /// # Example
 /// ```
-/// use std::io::Write;
-/// use protobuf_core::varint::{WriteExtVarint, Varint};
+/// use ::std::io::Write;
+/// use ::protobuf_core::{WriteExtVarint, Varint};
 ///
 /// let varint = Varint::from_uint64(150);
 /// let mut writer = Vec::new();
@@ -352,8 +526,8 @@ pub trait WriteExtVarint {
     ///
     /// # Example
     /// ```
-    /// use std::io::Write;
-    /// use protobuf_core::varint::{WriteExtVarint, Varint};
+    /// use ::std::io::Write;
+    /// use ::protobuf_core::{WriteExtVarint, Varint};
     ///
     /// let varint = Varint::from_uint64(150);
     /// let mut buffer = Vec::new();
@@ -361,14 +535,14 @@ pub trait WriteExtVarint {
     /// assert_eq!(bytes_written, 2);
     /// assert_eq!(buffer, vec![0x96, 0x01]);
     /// ```
-    fn write_varint(&mut self, value: &Varint) -> std::io::Result<usize>;
+    fn write_varint(&mut self, value: &Varint) -> ::std::io::Result<usize>;
 }
 
 impl<W> WriteExtVarint for W
 where
     W: Write,
 {
-    fn write_varint(&mut self, value: &Varint) -> std::io::Result<usize> {
+    fn write_varint(&mut self, value: &Varint) -> ::std::io::Result<usize> {
         let (bytes, count) = value.encode();
         self.write_all(&bytes[..count])?;
         Ok(count)
@@ -377,7 +551,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{MAX_VARINT_BYTES, Result, Varint};
+
+    // ============================================================================
+    // Basic Varint tests (no traits)
+    // ============================================================================
 
     #[test]
     fn test_varint_value_creation() {
@@ -398,15 +576,18 @@ mod tests {
             Ok(value) => assert_eq!(value, 406),
             Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
         }
-        let varint = Varint::new(bytes); // Create new varint for next test
+
+        let varint = Varint::new(bytes);
         // 406 in ZigZag encoding represents 203 in signed value
         assert_eq!(varint.to_sint64(), 203);
-        let varint = Varint::new(bytes); // Create new varint for next test
+
+        let varint = Varint::new(bytes);
         match varint.try_to_sint32() {
             Ok(value) => assert_eq!(value, 203),
             Err(e) => panic!("Expected Ok(203), got error: {:?}", e),
         }
-        let varint = Varint::new(bytes); // Create new varint for next test
+
+        let varint = Varint::new(bytes);
         assert_eq!(varint.to_bool(), true);
     }
 
@@ -417,181 +598,11 @@ mod tests {
         let varint = Varint::new(bytes);
 
         assert_eq!(varint.to_sint64(), -1);
-        let varint = Varint::new(bytes); // Create new varint for next test
+
+        let varint = Varint::new(bytes);
         match varint.try_to_sint32() {
             Ok(value) => assert_eq!(value, -1),
             Err(e) => panic!("Expected Ok(-1), got error: {:?}", e),
-        }
-    }
-
-    #[test]
-    fn test_read_varint_from_iterator() {
-        let input = [0x96, 0x01];
-        let iter = input.iter().copied();
-        let varint = iter.try_collect_varint().unwrap().unwrap();
-
-        assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
-    fn test_read_varint_from_reader() {
-        use std::io::Cursor;
-        let input = [0x96, 0x01];
-        let mut reader = Cursor::new(input);
-        let varint = reader.read_varint().unwrap().unwrap();
-
-        assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
-    fn test_read_ext_varint_trait() {
-        use std::io::Cursor;
-        let input = [0x96, 0x01];
-        let mut reader = Cursor::new(input);
-        let varint = reader.read_varint().unwrap().unwrap();
-
-        assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
-    fn test_write_ext_varint_trait() {
-        let varint = Varint::from_uint64(150);
-        let mut writer = Vec::new();
-        let bytes_written = writer.write_varint(&varint).unwrap();
-
-        assert_eq!(bytes_written, 2);
-        assert_eq!(writer, vec![0x96, 0x01]);
-    }
-
-    #[test]
-    fn test_iterator_ext_varint_trait() {
-        let bytes = vec![0x96, 0x01]; // 150 in varint encoding
-        let iter = bytes.into_iter();
-        let varint = iter.try_collect_varint().unwrap().unwrap();
-
-        assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
-    fn test_iterator_ext_varint_empty() {
-        let bytes = vec![];
-        let iter = bytes.into_iter();
-        let varint = iter.try_collect_varint().unwrap();
-
-        assert_eq!(varint, None);
-    }
-
-    #[test]
-    fn test_write_varint() {
-        // Test encoding small values
-        let varint = Varint::from_uint64(150);
-        let mut buffer = Vec::new();
-        let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, 2);
-        assert_eq!(buffer, vec![0x96, 0x01]);
-
-        // Test encoding single-byte values
-        let varint = Varint::from_uint64(127);
-        let mut buffer = Vec::new();
-        let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, 1);
-        assert_eq!(buffer, vec![0x7F]);
-
-        // Test encoding zero
-        let varint = Varint::from_uint64(0);
-        let mut buffer = Vec::new();
-        let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, 1);
-        assert_eq!(buffer, vec![0x00]);
-
-        // Test encoding large values
-        let varint = Varint::from_uint64(0x7FFFFFFFFFFFFFFF);
-        let mut buffer = Vec::new();
-        let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, 9); // 9-byte varint
-
-        // Test encoding maximum varint (10 bytes)
-        let varint = Varint::from_uint64(0xFFFFFFFFFFFFFFFF);
-        let mut buffer = Vec::new();
-        let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, 10); // Maximum varint size
-    }
-
-    #[test]
-    fn test_write_varint_roundtrip() {
-        let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
-
-        for &value in &test_values {
-            // Create Varint from the test value
-            let varint = Varint::from_uint64(value);
-
-            let mut buffer = Vec::new();
-            buffer.write_varint(&varint).unwrap();
-
-            let iter = buffer.iter().copied();
-            let decoded_varint = iter.try_collect_varint().unwrap().unwrap();
-            let decoded_value = decoded_varint.to_uint64();
-
-            assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
-        }
-    }
-
-    #[test]
-    fn test_encode_varint() {
-        // Test encoding small values
-        let varint = Varint::from_uint64(150);
-        let (bytes, count) = varint.encode();
-        assert_eq!(count, 2);
-        assert_eq!(&bytes[..count], &[0x96, 0x01]);
-
-        // Test encoding single-byte values
-        let varint = Varint::from_uint64(127);
-        let (bytes, count) = varint.encode();
-        assert_eq!(count, 1);
-        assert_eq!(&bytes[..count], &[0x7F]);
-
-        // Test encoding zero
-        let varint = Varint::from_uint64(0);
-        let (bytes, count) = varint.encode();
-        assert_eq!(count, 1);
-        assert_eq!(&bytes[..count], &[0x00]);
-
-        // Test encoding large values
-        let varint = Varint::from_uint64(0x7FFFFFFFFFFFFFFF);
-        let (bytes, count) = varint.encode();
-        assert_eq!(count, 9);
-        assert_eq!(
-            &bytes[..count],
-            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]
-        );
-
-        // Test encoding maximum varint (10 bytes)
-        let varint = Varint::from_uint64(0xFFFFFFFFFFFFFFFF);
-        let (bytes, count) = varint.encode();
-        assert_eq!(count, 10);
-        assert_eq!(
-            &bytes[..count],
-            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]
-        );
-    }
-
-    #[test]
-    fn test_all_encoding_methods_consistency() {
-        let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
-
-        for &value in &test_values {
-            // Method 1: encode method
-            let varint = Varint::from_uint64(value);
-            let (array_bytes, array_count) = varint.encode();
-
-            // Method 2: write_varint (std::io::Write)
-            let varint2 = Varint::from_uint64(value);
-            let mut vec_buffer = Vec::new();
-            let vec_count = vec_buffer.write_varint(&varint2).unwrap();
-
-            // Both methods should produce the same result
-            assert_eq!(array_count, vec_count);
-            assert_eq!(&array_bytes[..array_count], &vec_buffer[..]);
         }
     }
 
@@ -686,5 +697,273 @@ mod tests {
         let varint = Varint::from_bool(original);
         let converted = varint.to_bool();
         assert_eq!(converted, original);
+    }
+
+    // ============================================================================
+    // Encoding tests
+    // ============================================================================
+
+    #[test]
+    fn test_encode_varint() {
+        // Test encoding small values
+        let varint = Varint::from_uint64(150);
+        let (bytes, count) = varint.encode();
+        assert_eq!(count, 2);
+        assert_eq!(&bytes[..count], &[0x96, 0x01]);
+
+        // Test encoding single-byte values
+        let varint = Varint::from_uint64(127);
+        let (bytes, count) = varint.encode();
+        assert_eq!(count, 1);
+        assert_eq!(&bytes[..count], &[0x7F]);
+
+        // Test encoding zero
+        let varint = Varint::from_uint64(0);
+        let (bytes, count) = varint.encode();
+        assert_eq!(count, 1);
+        assert_eq!(&bytes[..count], &[0x00]);
+
+        // Test encoding large values
+        let varint = Varint::from_uint64(0x7FFFFFFFFFFFFFFF);
+        let (bytes, count) = varint.encode();
+        assert_eq!(count, 9);
+        assert_eq!(
+            &bytes[..count],
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]
+        );
+
+        // Test encoding maximum varint (MAX_VARINT_BYTES bytes)
+        let varint = Varint::from_uint64(0xFFFFFFFFFFFFFFFF);
+        let (bytes, count) = varint.encode();
+        assert_eq!(count, MAX_VARINT_BYTES);
+        assert_eq!(
+            &bytes[..count],
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]
+        );
+    }
+
+    #[test]
+    fn test_write_varint() {
+        use super::WriteExtVarint;
+
+        // Test encoding small values
+        let varint = Varint::from_uint64(150);
+        let mut buffer = Vec::new();
+        let bytes_written = buffer.write_varint(&varint).unwrap();
+        assert_eq!(bytes_written, 2);
+        assert_eq!(buffer, vec![0x96, 0x01]);
+
+        // Test encoding single-byte values
+        let varint = Varint::from_uint64(127);
+        let mut buffer = Vec::new();
+        let bytes_written = buffer.write_varint(&varint).unwrap();
+        assert_eq!(bytes_written, 1);
+        assert_eq!(buffer, vec![0x7F]);
+
+        // Test encoding zero
+        let varint = Varint::from_uint64(0);
+        let mut buffer = Vec::new();
+        let bytes_written = buffer.write_varint(&varint).unwrap();
+        assert_eq!(bytes_written, 1);
+        assert_eq!(buffer, vec![0x00]);
+
+        // Test encoding large values
+        let varint = Varint::from_uint64(0x7FFFFFFFFFFFFFFF);
+        let mut buffer = Vec::new();
+        let bytes_written = buffer.write_varint(&varint).unwrap();
+        assert_eq!(bytes_written, 9); // 9-byte varint
+
+        // Test encoding maximum varint (MAX_VARINT_BYTES bytes)
+        let varint = Varint::from_uint64(0xFFFFFFFFFFFFFFFF);
+        let mut buffer = Vec::new();
+        let bytes_written = buffer.write_varint(&varint).unwrap();
+        assert_eq!(bytes_written, MAX_VARINT_BYTES); // Maximum varint size
+    }
+
+    #[test]
+    fn test_all_encoding_methods_consistency() {
+        use super::WriteExtVarint;
+
+        let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
+
+        for &value in &test_values {
+            // Method 1: encode method
+            let varint = Varint::from_uint64(value);
+            let (array_bytes, array_count) = varint.encode();
+
+            // Method 2: write_varint (std::io::Write)
+            let varint2 = Varint::from_uint64(value);
+            let mut vec_buffer = Vec::new();
+            let vec_count = vec_buffer.write_varint(&varint2).unwrap();
+
+            // Both methods should produce the same result
+            assert_eq!(array_count, vec_count);
+            assert_eq!(&array_bytes[..array_count], &vec_buffer[..]);
+        }
+    }
+
+    // ============================================================================
+    // IteratorExtVarint tests
+    // ============================================================================
+
+    #[test]
+    fn test_read_varint_from_iterator() {
+        use super::IteratorExtVarint;
+
+        let input = [0x96, 0x01];
+        let iter = input.iter().copied();
+        let varint = iter.read_varint().unwrap().unwrap();
+
+        assert_eq!(varint.to_uint64(), 150);
+    }
+
+    #[test]
+    fn test_iterator_ext_varint_trait() {
+        use super::IteratorExtVarint;
+
+        let bytes = vec![0x96, 0x01]; // 150 in varint encoding
+        let iter = bytes.into_iter();
+        let varint = iter.read_varint().unwrap().unwrap();
+
+        assert_eq!(varint.to_uint64(), 150);
+    }
+
+    #[test]
+    fn test_iterator_ext_varint_empty() {
+        use super::IteratorExtVarint;
+
+        let varint = IteratorExtVarint::read_varint(::std::iter::empty()).unwrap();
+
+        assert_eq!(varint, None);
+    }
+
+    #[test]
+    fn test_iterator_ext_varint_read_varints() {
+        use super::IteratorExtVarint;
+
+        let bytes = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
+        let iter = bytes.into_iter();
+        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
+        assert_eq!(varints.len(), 3);
+        assert_eq!(varints[0].to_uint64(), 150);
+        assert_eq!(varints[1].to_uint64(), 127);
+        assert_eq!(varints[2].to_uint64(), 1);
+    }
+
+    // ============================================================================
+    // TryIteratorExtVarint tests
+    // ============================================================================
+
+    #[test]
+    fn test_try_iterator_ext_varint() {
+        use super::TryIteratorExtVarint;
+        use ::std::io::{Cursor, Read};
+
+        let data = vec![0x96, 0x01]; // 150 in varint encoding
+        let reader = Cursor::new(data);
+        let iter = reader.bytes();
+        let varint = TryIteratorExtVarint::read_varint(iter).unwrap().unwrap();
+        assert_eq!(varint.to_uint64(), 150);
+    }
+
+    #[test]
+    fn test_try_iterator_ext_varint_empty() {
+        use super::TryIteratorExtVarint;
+        use ::std::io::{Cursor, Read};
+
+        let data = vec![];
+        let reader = Cursor::new(data);
+        let iter = reader.bytes();
+        let varint = TryIteratorExtVarint::read_varint(iter).unwrap();
+        assert_eq!(varint, None);
+    }
+
+    #[test]
+    fn test_try_iterator_ext_varint_error() {
+        use super::TryIteratorExtVarint;
+        use crate::ProtobufError;
+        use ::std::io::ErrorKind;
+
+        // Create an iterator that returns an error
+        let error = ::std::io::Error::new(ErrorKind::UnexpectedEof, "test error");
+        let iter = ::std::iter::once(Err(error));
+        let result = TryIteratorExtVarint::read_varint(iter);
+
+        assert!(result.is_err());
+        if let Err(ProtobufError::IoError(io_err)) = result {
+            assert_eq!(io_err.kind(), ErrorKind::UnexpectedEof);
+        } else {
+            panic!("Expected IoError");
+        }
+    }
+
+    #[test]
+    fn test_try_iterator_ext_varint_read_varints() {
+        use super::TryIteratorExtVarint;
+        use ::std::io::{Cursor, Read};
+
+        let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
+        let reader = Cursor::new(data);
+        let iter = reader.bytes();
+        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
+        assert_eq!(varints.len(), 3);
+        assert_eq!(varints[0].to_uint64(), 150);
+        assert_eq!(varints[1].to_uint64(), 127);
+        assert_eq!(varints[2].to_uint64(), 1);
+    }
+
+    // ============================================================================
+    // ReadExtVarint tests
+    // ============================================================================
+
+    #[test]
+    fn test_read_ext_varint_trait() {
+        use super::ReadExtVarint;
+        use ::std::io::Cursor;
+
+        let input = [0x96, 0x01];
+        let mut reader = Cursor::new(input);
+        let varint = reader.read_varint().unwrap().unwrap();
+
+        assert_eq!(varint.to_uint64(), 150);
+    }
+
+    #[test]
+    fn test_read_ext_varint_read_varints() {
+        use super::ReadExtVarint;
+        use ::std::io::Cursor;
+
+        let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
+        let mut reader = Cursor::new(data);
+        let varints: Vec<Varint> = reader.read_varints().collect::<Result<Vec<_>>>().unwrap();
+        assert_eq!(varints.len(), 3);
+        assert_eq!(varints[0].to_uint64(), 150);
+        assert_eq!(varints[1].to_uint64(), 127);
+        assert_eq!(varints[2].to_uint64(), 1);
+    }
+
+    // ============================================================================
+    // Roundtrip tests
+    // ============================================================================
+
+    #[test]
+    fn test_write_varint_roundtrip() {
+        use super::{IteratorExtVarint, WriteExtVarint};
+
+        let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
+
+        for &value in &test_values {
+            // Create Varint from the test value
+            let varint = Varint::from_uint64(value);
+
+            let mut buffer = Vec::new();
+            buffer.write_varint(&varint).unwrap();
+
+            let iter = buffer.iter().copied();
+            let decoded_varint = iter.read_varint().unwrap().unwrap();
+            let decoded_value = decoded_varint.to_uint64();
+
+            assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
+        }
     }
 }
