@@ -30,7 +30,7 @@ You can use features independently:
 
 ```toml
 [dependencies]
-protobuf-core = { version = "0.2.0", default-features = false, features = ["read"] }
+protobuf-core = { version = "0.2.1", default-features = false, features = ["read"] }
 ```
 
 ## Quick Start

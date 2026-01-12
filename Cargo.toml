@@ -1,6 +1,6 @@
 [package]
 name = "protobuf-core"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "A primitive utility library for Protocol Buffers in Rust"
 license = "Apache-2.0"
