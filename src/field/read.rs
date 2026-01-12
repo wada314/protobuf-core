@@ -496,7 +496,7 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
     }
 }
 
-impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> {}
+impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> + ?Sized {}
 
 // ============================================================================
 // Tests
@@ -643,6 +643,29 @@ mod tests {
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 0);
+    }
+
+    #[test]
+    fn test_as_ref_ext_works_with_unsized_type() {
+        use super::AsRefExtProtobuf;
+
+        // This test verifies that ?Sized bound allows the trait to work with unsized types
+        // Without ?Sized, this would fail to compile because [u8] is unsized
+        fn accepts_unsized<T: AsRefExtProtobuf + ?Sized>(x: &T) {
+            let _ = x.read_protobuf_fields();
+        }
+
+        let data = [0x08, 0x96, 0x01]; // field 1: 150
+        accepts_unsized(&data[..]); // &[u8] - unsized type slice
+
+        // Also test with direct unsized slice
+        let slice: &[u8] = &[0x08, 0x96, 0x01];
+        let fields: Vec<_> = slice
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 1);
     }
 
     // ============================================================================
