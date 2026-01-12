@@ -496,7 +496,7 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
     }
 }
 
-impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> {}
+impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> + ?Sized {}
 
 // ============================================================================
 // Tests
