@@ -614,27 +614,30 @@ where
 
         let mut this = self;
         poll_fn(move |cx| {
-            loop {
-                match this.as_mut().try_poll_next(cx) {
-                    Poll::Ready(Some(Ok(byte))) => {
+            for _ in 0..MAX_VARINT_BYTES {
+                let Poll::Ready(item) = this.as_mut().try_poll_next(cx) else {
+                    return Poll::Pending; // Stream not ready; yield to executor
+                };
+                match item {
+                    Some(Ok(byte)) => {
                         read_any = true;
                         let value = (byte & VARINT_PAYLOAD_MASK) as u64;
                         decoded_value |= value << shift;
                         if byte & VARINT_CONTINUATION_BIT == 0 {
-                            return Poll::Ready(Ok(Some(Varint::from_uint64(decoded_value))));
+                            return Poll::Ready(Ok(Some(Varint::from_uint64(decoded_value)))); // Complete varint decoded
                         }
                         shift = shift.saturating_add(7);
                     }
-                    Poll::Ready(Some(Err(e))) => return Poll::Ready(Err(e.into())),
-                    Poll::Ready(None) => {
+                    Some(Err(e)) => return Poll::Ready(Err(e.into())), // Stream error
+                    None => {
                         if read_any {
-                            return Poll::Ready(Err(ProtobufError::UnexpectedEof));
+                            return Poll::Ready(Err(ProtobufError::UnexpectedEof)); // EOF mid-varint
                         }
-                        return Poll::Ready(Ok(None));
+                        return Poll::Ready(Ok(None)); // Empty stream (EOF before any byte)
                     }
-                    Poll::Pending => return Poll::Pending,
                 }
             }
+            Poll::Ready(Err(ProtobufError::VarintTooLong)) // Exceeded max varint length
         })
     }
 }
