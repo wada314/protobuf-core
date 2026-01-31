@@ -1067,44 +1067,12 @@ mod tests {
     #[cfg(feature = "futures")]
     mod stream_ext_varint_tests {
         use super::super::StreamExtVarint;
+        use ::assert_matches::assert_matches;
         use ::futures_executor::block_on;
-        use ::futures_util::stream::{self, Stream};
+        use ::futures_util::stream::{self, poll_fn};
         use ::std::convert::Infallible;
         use ::std::pin::Pin;
-        use ::std::task::{Context, Poll};
-
-        /// A stream that returns Pending once after yielding the first byte (waking the task
-        /// so the executor will poll again), then yields the remaining bytes.
-        struct PendingOnceByteStream {
-            bytes: Vec<u8>,
-            index: std::cell::Cell<usize>,
-            pending_after_first: std::cell::Cell<bool>,
-        }
-
-        impl Stream for PendingOnceByteStream {
-            type Item = Result<u8, Infallible>;
-
-            fn poll_next(
-                self: Pin<&mut Self>,
-                cx: &mut Context<'_>,
-            ) -> Poll<Option<Result<u8, Infallible>>> {
-                let index = self.index.get();
-                if index >= self.bytes.len() {
-                    return Poll::Ready(None);
-                }
-                // After yielding index 0, return Pending once (wake so we get polled again).
-                if index == 1 && !self.pending_after_first.get() {
-                    self.pending_after_first.set(true);
-                    cx.waker().wake_by_ref();
-                    return Poll::Pending;
-                }
-                let byte = self.bytes[index];
-                self.index.set(index + 1);
-                Poll::Ready(Some(Ok(byte)))
-            }
-        }
-
-        impl Unpin for PendingOnceByteStream {}
+        use ::std::task::Poll;
 
         #[test]
         fn test_stream_ext_varint_complete() {
@@ -1112,10 +1080,9 @@ mod tests {
             let mut stream = stream::iter(bytes);
 
             let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            let Ok(Some(varint)) = result else {
-                panic!("Expected Ok(Some(_)), got {:?}", result);
-            };
-            assert_eq!(varint.to_uint64(), 150);
+            assert_matches!(result, Ok(Some(varint)) => {
+                assert_eq!(varint.to_uint64(), 150);
+            });
         }
 
         #[test]
@@ -1124,24 +1091,37 @@ mod tests {
             let mut stream = stream::iter(bytes);
 
             let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            let Ok(None) = result else {
-                panic!("Expected Ok(None), got {:?}", result);
-            };
+            assert_matches!(result, Ok(None));
         }
 
         #[test]
         fn test_stream_ext_varint_resume_from_pending() {
-            let mut stream = PendingOnceByteStream {
-                bytes: vec![0x96, 0x01],
-                index: std::cell::Cell::new(0),
-                pending_after_first: std::cell::Cell::new(false),
-            };
+            // State: 0 = yield 0x96, 1 = return Pending (wake), 2 = yield 0x01, 3 = EOF
+            let mut state = 0u32;
+            let mut stream = poll_fn(move |cx| {
+                let next: Option<Result<u8, Infallible>> = match state {
+                    0 => {
+                        state = 1;
+                        Some(Ok(0x96))
+                    }
+                    1 => {
+                        state = 2;
+                        cx.waker().wake_by_ref();
+                        return Poll::Pending; // Yield once; executor will poll again
+                    }
+                    2 => {
+                        state = 3;
+                        Some(Ok(0x01))
+                    }
+                    _ => None,
+                };
+                Poll::Ready(next)
+            });
 
             let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            let Ok(Some(varint)) = result else {
-                panic!("Expected Ok(Some(_)), got {:?}", result);
-            };
-            assert_eq!(varint.to_uint64(), 150);
+            assert_matches!(result, Ok(Some(varint)) => {
+                assert_eq!(varint.to_uint64(), 150);
+            });
         }
 
         #[test]
@@ -1153,9 +1133,7 @@ mod tests {
             let mut stream = stream::iter(bytes);
 
             let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            let Err(_) = result else {
-                panic!("Expected Err(_), got {:?}", result);
-            };
+            assert_matches!(result, Err(_));
         }
 
         #[test]
@@ -1165,9 +1143,7 @@ mod tests {
             let mut stream = stream::iter(bytes);
 
             let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            let Err(crate::ProtobufError::UnexpectedEof) = result else {
-                panic!("Expected Err(UnexpectedEof), got {:?}", result);
-            };
+            assert_matches!(result, Err(crate::ProtobufError::UnexpectedEof));
         }
 
         #[test]
@@ -1178,9 +1154,7 @@ mod tests {
             let mut stream = stream::iter(bytes);
 
             let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            let Err(crate::ProtobufError::VarintTooLong) = result else {
-                panic!("Expected Err(VarintTooLong), got {:?}", result);
-            };
+            assert_matches!(result, Err(crate::ProtobufError::VarintTooLong));
         }
     }
 }

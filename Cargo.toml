@@ -13,6 +13,7 @@ thiserror = "1.0"
 futures-util = { version = "0.3", optional = true }
 
 [dev-dependencies]
+assert_matches = "1.5"
 futures-executor = "0.3"
 
 [features]
