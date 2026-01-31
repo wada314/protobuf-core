@@ -162,8 +162,9 @@ This project aims to create a **protobuf utility library** that provides common 
 
 9. **Async Varint Reading** (`src/varint.rs`) - **Feature-gated with `futures` feature**
    - **StreamExtVarint trait** - extension for `TryStream<Ok = u8, Error = E>` where `E: Into<ProtobufError>`
-   - **API**: `stream.read_varint().await` (async fn directly on the trait, no wrapper struct)
-   - Uses `futures-util` for `TryStreamExt::try_next().await`; state is retained automatically by the async Future
+   - **API**: `Pin::new(&mut stream).read_varint().await` — uses `Pin<&mut Self>` so both `Unpin` and `!Unpin`
+     streams are supported (more generic than requiring `Unpin`)
+   - Uses `try_poll_next` (not `try_next`) and `poll_fn` to avoid the `Unpin` bound
    - **TryStream is Sealed**: external crates cannot impl TryStream. Consumers impl `Stream<Item = Result<u8, E>>`;
      the futures ecosystem provides the TryStream impl for such streams
    - Tests include resume-from-`Poll::Pending` (stream that yields Pending once with `wake_by_ref()` before continuing)
@@ -199,14 +200,16 @@ This project aims to create a **protobuf utility library** that provides common 
 
 ## Design Decisions
 
-### Async Varint API: async fn over poll (2026-01)
+### Async Varint API: fn returning impl Future instead of async fn (2026-01)
 
-- We use `async fn read_varint()` with `.await` instead of `poll_read_varint(cx)` because:
-  - **State retention**: The generated Future automatically preserves `decoded_value`, `shift`, `read_any` across
-    `.await` points when the stream returns `Poll::Pending` mid-varint. No manual `DecodeState` struct needed.
-  - **Ergonomics**: `decoder.read_varint().await` is simpler than managing a poll loop and state.
-  - **Dependency**: Requires `futures-util` (for `TryStreamExt::try_next`) rather than just `futures-core`;
-    the dependency cost is acceptable since TryStreamExt is commonly used.
+- We use `fn read_varint(...) -> impl Future<Output = ...> + Send` instead of `async fn read_varint(...)` because:
+  - **`async_fn_in_trait` warning**: `async fn` in public traits triggers a lint because the returned Future
+    cannot have explicit auto-trait bounds (e.g. `Send`). Multi-threaded executors require `Send`, but that
+    guarantee cannot be expressed in the trait signature with `async fn`. Using `impl Future + Send` makes
+    the contract explicit and avoids future breaking changes if we needed to relax bounds.
+  - **State retention**: The `poll_fn`-based implementation preserves `decoded_value`, `shift`, `read_any` across
+    `Poll::Pending` returns when the stream yields mid-varint.
+  - **Dependency**: Uses `try_poll_next` (not `try_next`) and `poll_fn` to support `!Unpin` streams.
 
 ### Type Naming Convention - Avoiding Confusion Between Rust Types and Protobuf Types
 

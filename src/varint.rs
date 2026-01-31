@@ -25,6 +25,17 @@ use ::std::convert::{Infallible, TryFrom};
 use ::std::io::{Read, Write};
 use ::std::iter::Iterator;
 
+#[cfg(feature = "futures")]
+use ::std::future::Future;
+#[cfg(feature = "futures")]
+use ::std::task::Poll;
+#[cfg(feature = "futures")]
+use ::futures_util::future::poll_fn;
+#[cfg(feature = "futures")]
+use ::futures_util::stream::TryStream;
+#[cfg(feature = "futures")]
+use ::std::pin::Pin;
+
 /// A deserialized varint value.
 ///
 /// This type represents the decoded 8-byte value from serialized bytes
@@ -553,9 +564,6 @@ where
 // Async Stream extension (TryStream)
 // ============================================================================
 
-#[cfg(feature = "futures")]
-use ::futures_util::stream::{TryStream, TryStreamExt};
-
 /// Extension trait for reading varints from a byte stream.
 ///
 /// This trait provides `read_varint` for types implementing
@@ -563,25 +571,30 @@ use ::futures_util::stream::{TryStream, TryStreamExt};
 /// Consumers implement `Stream<Item = Result<u8, E>>`; the futures
 /// ecosystem provides adapters that implement `TryStream` for such streams.
 ///
+/// Uses `Pin<&mut Self>` so that both `Unpin` and `!Unpin` streams are supported.
+///
 /// # Example
 ///
 /// ```ignore
 /// use futures_util::stream;
 /// use protobuf_core::{StreamExtVarint, Varint};
+/// use std::pin::Pin;
 ///
 /// let bytes = vec![Ok(0x96u8), Ok(0x01)];  // 150 in varint encoding
 /// let mut stream = stream::iter(bytes);
-/// let varint = stream.read_varint().await?.expect("one varint");
+/// let varint = Pin::new(&mut stream).read_varint().await?.expect("one varint");
 /// assert_eq!(varint.to_uint64(), 150);
 /// ```
 #[cfg(feature = "futures")]
-pub trait StreamExtVarint: TryStream<Ok = u8> + Unpin {
+pub trait StreamExtVarint: TryStream<Ok = u8> {
     /// Read the next varint from the stream.
     ///
     /// - `Ok(Some(varint))` when a varint is decoded.
     /// - `Ok(None)` on EOF (no bytes read).
     /// - `Err(...)` on parse or I/O error.
-    fn read_varint(&mut self) -> impl ::core::future::Future<Output = Result<Option<Varint>>> + Send
+    fn read_varint(
+        self: Pin<&mut Self>,
+    ) -> impl Future<Output = Result<Option<Varint>>> + Send
     where
         Self::Error: Into<ProtobufError>;
 }
@@ -589,39 +602,40 @@ pub trait StreamExtVarint: TryStream<Ok = u8> + Unpin {
 #[cfg(feature = "futures")]
 impl<S, E> StreamExtVarint for S
 where
-    S: TryStream<Ok = u8, Error = E> + Unpin + Send,
+    S: TryStream<Ok = u8, Error = E> + Send,
     E: Into<ProtobufError>,
 {
-    fn read_varint(&mut self) -> impl ::core::future::Future<Output = Result<Option<Varint>>> + Send {
-        async move {
-            let mut decoded_value = 0u64;
-            let mut shift = 0u32;
-            let mut read_any = false;
+    fn read_varint(
+        self: Pin<&mut Self>,
+    ) -> impl Future<Output = Result<Option<Varint>>> + Send {
+        let mut decoded_value = 0u64;
+        let mut shift = 0u32;
+        let mut read_any = false;
 
-            for _ in 0..MAX_VARINT_BYTES {
-                let byte = match self.try_next().await {
-                    Ok(Some(b)) => b,
-                    Ok(None) => {
-                        if read_any {
-                            return Err(ProtobufError::UnexpectedEof);
+        let mut this = self;
+        poll_fn(move |cx| {
+            loop {
+                match this.as_mut().try_poll_next(cx) {
+                    Poll::Ready(Some(Ok(byte))) => {
+                        read_any = true;
+                        let value = (byte & VARINT_PAYLOAD_MASK) as u64;
+                        decoded_value |= value << shift;
+                        if byte & VARINT_CONTINUATION_BIT == 0 {
+                            return Poll::Ready(Ok(Some(Varint::from_uint64(decoded_value))));
                         }
-                        return Ok(None);
+                        shift = shift.saturating_add(7);
                     }
-                    Err(e) => return Err(e.into()),
-                };
-
-                read_any = true;
-                let value = (byte & VARINT_PAYLOAD_MASK) as u64;
-                decoded_value |= value << shift;
-
-                if byte & VARINT_CONTINUATION_BIT == 0 {
-                    return Ok(Some(Varint::from_uint64(decoded_value)));
+                    Poll::Ready(Some(Err(e))) => return Poll::Ready(Err(e.into())),
+                    Poll::Ready(None) => {
+                        if read_any {
+                            return Poll::Ready(Err(ProtobufError::UnexpectedEof));
+                        }
+                        return Poll::Ready(Ok(None));
+                    }
+                    Poll::Pending => return Poll::Pending,
                 }
-                shift = shift.saturating_add(7);
             }
-
-            Err(ProtobufError::VarintTooLong)
-        }
+        })
     }
 }
 
@@ -1094,7 +1108,7 @@ mod tests {
             let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x96), Ok(0x01)];
             let mut stream = stream::iter(bytes);
 
-            let result = block_on(stream.read_varint());
+            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
             let Ok(Some(varint)) = result else {
                 panic!("Expected Ok(Some(_)), got {:?}", result);
             };
@@ -1106,7 +1120,7 @@ mod tests {
             let bytes: Vec<Result<u8, Infallible>> = vec![];
             let mut stream = stream::iter(bytes);
 
-            let result = block_on(stream.read_varint());
+            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
             let Ok(None) = result else {
                 panic!("Expected Ok(None), got {:?}", result);
             };
@@ -1120,7 +1134,7 @@ mod tests {
                 pending_after_first: std::cell::Cell::new(false),
             };
 
-            let result = block_on(stream.read_varint());
+            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
             let Ok(Some(varint)) = result else {
                 panic!("Expected Ok(Some(_)), got {:?}", result);
             };
