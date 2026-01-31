@@ -160,7 +160,17 @@ This project aims to create a **protobuf utility library** that provides common 
      - Building blocks for higher-level parsers
    - **Comprehensive Testing**: Covers all wire types and multiple field scenarios
 
-9. **Field Writing Utilities** (`src/field/write.rs`) - **Feature-gated with `write` feature**
+9. **Async Varint Reading** (`src/varint.rs`) - **Feature-gated with `futures` feature**
+   - **StreamExtVarint trait** - extension for `TryStream<Ok = u8, Error = E>` where `E: Into<ProtobufError>`
+   - **VarintDecoder<S>** - wrapper that adds `async fn read_varint(&mut self) -> Result<Option<Varint>>`
+   - Uses `futures-util` for `TryStreamExt::try_next().await`; state is retained automatically by the async Future
+   - **TryStream is Sealed**: external crates cannot impl TryStream. Consumers impl `Stream<Item = Result<u8, E>>`;
+     the futures ecosystem provides the TryStream impl for such streams
+   - **API**: `stream.varint_decoder()` then `decoder.read_varint().await`
+   - Tests include resume-from-`Poll::Pending` (stream that yields Pending once with `wake_by_ref()` before continuing)
+   - **Dependencies**: `futures-util` (optional); tests use `futures-executor::block_on`
+
+10. **Field Writing Utilities** (`src/field/write.rs`) - **Feature-gated with `write` feature**
    - **Low-level primitives for writing protobuf fields** - not a complete message serializer, but building blocks for serialization
    - **WriteExtProtobuf trait** - extension trait for `std::io::Write` types:
      - `write_protobuf_field()` - writes a single protobuf field (tag + value), returns bytes written
@@ -184,11 +194,20 @@ This project aims to create a **protobuf utility library** that provides common 
    - **Comprehensive Testing**: Includes roundtrip tests verifying read/write symmetry for all field types
 
 ### 🔄 Next Steps
-10. **Documentation improvements** - Add comprehensive examples and usage guides
-11. **Performance optimizations** - Optimize critical paths if needed
-12. **Additional utilities** - Add more helper methods for common field operations
+11. **Documentation improvements** - Add comprehensive examples and usage guides
+12. **Performance optimizations** - Optimize critical paths if needed
+13. **Additional utilities** - Add more helper methods for common field operations
 
 ## Design Decisions
+
+### Async Varint API: async fn over poll (2026-01)
+
+- We use `async fn read_varint()` with `.await` instead of `poll_read_varint(cx)` because:
+  - **State retention**: The generated Future automatically preserves `decoded_value`, `shift`, `read_any` across
+    `.await` points when the stream returns `Poll::Pending` mid-varint. No manual `DecodeState` struct needed.
+  - **Ergonomics**: `decoder.read_varint().await` is simpler than managing a poll loop and state.
+  - **Dependency**: Requires `futures-util` (for `TryStreamExt::try_next`) rather than just `futures-core`;
+    the dependency cost is acceptable since TryStreamExt is commonly used.
 
 ### Type Naming Convention - Avoiding Confusion Between Rust Types and Protobuf Types
 

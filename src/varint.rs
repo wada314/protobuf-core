@@ -549,6 +549,97 @@ where
     }
 }
 
+// ============================================================================
+// Async Stream extension (TryStream)
+// ============================================================================
+
+#[cfg(feature = "futures")]
+mod stream_ext {
+    use super::{Varint, MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK};
+    use crate::{ProtobufError, Result};
+    use ::futures_util::stream::{TryStream, TryStreamExt};
+
+    /// Wrapper that adds async varint decoding to a `TryStream<Ok = u8, Error = E>`.
+    ///
+    /// Use [`StreamExtVarint::varint_decoder`] to create this from a stream.
+    #[derive(Debug)]
+    pub struct VarintDecoder<S> {
+        stream: S,
+    }
+
+    impl<S> VarintDecoder<S> {
+        /// Create a new decoder wrapping the given stream.
+        pub fn new(stream: S) -> Self {
+            Self { stream }
+        }
+
+        /// Read the next varint from the stream.
+        ///
+        /// - `Ok(Some(varint))` when a varint is decoded.
+        /// - `Ok(None)` on EOF (no bytes read).
+        /// - `Err(...)` on parse or I/O error.
+        pub async fn read_varint(&mut self) -> Result<Option<Varint>>
+        where
+            S: TryStream<Ok = u8> + Unpin,
+            S::Error: Into<ProtobufError>,
+        {
+            let mut decoded_value = 0u64;
+            let mut shift = 0u32;
+            let mut read_any = false;
+
+            for _ in 0..MAX_VARINT_BYTES {
+                let byte = match self.stream.try_next().await {
+                    Ok(Some(b)) => b,
+                    Ok(None) => {
+                        if read_any {
+                            return Err(ProtobufError::UnexpectedEof);
+                        }
+                        return Ok(None);
+                    }
+                    Err(e) => return Err(e.into()),
+                };
+
+                read_any = true;
+                let value = (byte & VARINT_PAYLOAD_MASK) as u64;
+                decoded_value |= value << shift;
+
+                if byte & VARINT_CONTINUATION_BIT == 0 {
+                    return Ok(Some(Varint::from_uint64(decoded_value)));
+                }
+                shift = shift.saturating_add(7);
+            }
+
+            Err(ProtobufError::VarintTooLong)
+        }
+    }
+
+    /// Extension trait for creating a varint decoder from a byte stream.
+    ///
+    /// This trait provides `varint_decoder` for types implementing
+    /// `TryStream<Ok = u8, Error = E>` where `E: Into<ProtobufError>`.
+    /// Consumers implement `Stream<Item = Result<u8, E>>`; the futures
+    /// ecosystem provides adapters that implement `TryStream` for such streams.
+    pub trait StreamExtVarint {
+        /// Wrap this stream in a decoder that can read varints.
+        fn varint_decoder(self) -> VarintDecoder<Self>
+        where
+            Self: Sized;
+    }
+
+    impl<S, E> StreamExtVarint for S
+    where
+        S: TryStream<Ok = u8, Error = E> + Sized,
+        E: Into<ProtobufError>,
+    {
+        fn varint_decoder(self) -> VarintDecoder<Self> {
+            VarintDecoder::new(self)
+        }
+    }
+}
+
+#[cfg(feature = "futures")]
+pub use stream_ext::{StreamExtVarint, VarintDecoder};
+
 #[cfg(test)]
 mod tests {
     use super::{MAX_VARINT_BYTES, Result, Varint};
@@ -964,6 +1055,94 @@ mod tests {
             let decoded_value = decoded_varint.to_uint64();
 
             assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
+        }
+    }
+
+    // ============================================================================
+    // StreamExtVarint tests (requires futures feature)
+    // ============================================================================
+
+    #[cfg(feature = "futures")]
+    mod stream_ext_varint_tests {
+        use super::super::StreamExtVarint;
+        use ::futures_executor::block_on;
+        use ::futures_util::stream::{self, Stream};
+        use ::std::convert::Infallible;
+        use ::std::pin::Pin;
+        use ::std::task::{Context, Poll};
+
+        /// A stream that returns Pending once after yielding the first byte (waking the task
+        /// so the executor will poll again), then yields the remaining bytes.
+        struct PendingOnceByteStream {
+            bytes: Vec<u8>,
+            index: std::cell::Cell<usize>,
+            pending_after_first: std::cell::Cell<bool>,
+        }
+
+        impl Stream for PendingOnceByteStream {
+            type Item = Result<u8, Infallible>;
+
+            fn poll_next(
+                self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+            ) -> Poll<Option<Result<u8, Infallible>>> {
+                let index = self.index.get();
+                if index >= self.bytes.len() {
+                    return Poll::Ready(None);
+                }
+                // After yielding index 0, return Pending once (wake so we get polled again).
+                if index == 1 && !self.pending_after_first.get() {
+                    self.pending_after_first.set(true);
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending;
+                }
+                let byte = self.bytes[index];
+                self.index.set(index + 1);
+                Poll::Ready(Some(Ok(byte)))
+            }
+        }
+
+        impl Unpin for PendingOnceByteStream {}
+
+        #[test]
+        fn test_stream_ext_varint_complete() {
+            let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x96), Ok(0x01)];
+            let stream = stream::iter(bytes);
+            let mut decoder = stream.varint_decoder();
+
+            let result = block_on(decoder.read_varint());
+            let Ok(Some(varint)) = result else {
+                panic!("Expected Ok(Some(_)), got {:?}", result);
+            };
+            assert_eq!(varint.to_uint64(), 150);
+        }
+
+        #[test]
+        fn test_stream_ext_varint_eof() {
+            let bytes: Vec<Result<u8, Infallible>> = vec![];
+            let stream = stream::iter(bytes);
+            let mut decoder = stream.varint_decoder();
+
+            let result = block_on(decoder.read_varint());
+            let Ok(None) = result else {
+                panic!("Expected Ok(None), got {:?}", result);
+            };
+        }
+
+        #[test]
+        fn test_stream_ext_varint_resume_from_pending() {
+            let stream = PendingOnceByteStream {
+                bytes: vec![0x96, 0x01],
+                index: std::cell::Cell::new(0),
+                pending_after_first: std::cell::Cell::new(false),
+            };
+            let mut decoder = stream.varint_decoder();
+
+            let result = block_on(decoder.read_varint());
+            let Ok(Some(varint)) = result else {
+                panic!("Expected Ok(Some(_)), got {:?}", result);
+            };
+            assert_eq!(varint.to_uint64(), 150);
         }
     }
 }
