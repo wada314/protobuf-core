@@ -1143,5 +1143,44 @@ mod tests {
             };
             assert_eq!(varint.to_uint64(), 150);
         }
+
+        #[test]
+        fn test_stream_ext_varint_stream_error() {
+            let bytes: Vec<Result<u8, std::io::Error>> = vec![
+                Ok(0x80),
+                Err(std::io::Error::new(std::io::ErrorKind::Other, "stream error")),
+            ];
+            let mut stream = stream::iter(bytes);
+
+            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
+            let Err(_) = result else {
+                panic!("Expected Err(_), got {:?}", result);
+            };
+        }
+
+        #[test]
+        fn test_stream_ext_varint_eof_mid_varint() {
+            // One byte with continuation bit set, then EOF (malformed)
+            let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x80)];
+            let mut stream = stream::iter(bytes);
+
+            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
+            let Err(crate::ProtobufError::UnexpectedEof) = result else {
+                panic!("Expected Err(UnexpectedEof), got {:?}", result);
+            };
+        }
+
+        #[test]
+        fn test_stream_ext_varint_too_long() {
+            // 11 bytes, all with continuation bit set - exceeds MAX_VARINT_BYTES (10)
+            let bytes: Vec<Result<u8, Infallible>> =
+                (0..=super::MAX_VARINT_BYTES).map(|_| Ok(0x80)).collect();
+            let mut stream = stream::iter(bytes);
+
+            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
+            let Err(crate::ProtobufError::VarintTooLong) = result else {
+                panic!("Expected Err(VarintTooLong), got {:?}", result);
+            };
+        }
     }
 }
