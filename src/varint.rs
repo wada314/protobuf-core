@@ -554,41 +554,52 @@ where
 // ============================================================================
 
 #[cfg(feature = "futures")]
-mod stream_ext {
-    use super::{Varint, MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK};
-    use crate::{ProtobufError, Result};
-    use ::futures_util::stream::{TryStream, TryStreamExt};
+use ::futures_util::stream::{TryStream, TryStreamExt};
 
-    /// Wrapper that adds async varint decoding to a `TryStream<Ok = u8, Error = E>`.
+/// Extension trait for reading varints from a byte stream.
+///
+/// This trait provides `read_varint` for types implementing
+/// `TryStream<Ok = u8, Error = E>` where `E: Into<ProtobufError>`.
+/// Consumers implement `Stream<Item = Result<u8, E>>`; the futures
+/// ecosystem provides adapters that implement `TryStream` for such streams.
+///
+/// # Example
+///
+/// ```ignore
+/// use futures_util::stream;
+/// use protobuf_core::{StreamExtVarint, Varint};
+///
+/// let bytes = vec![Ok(0x96u8), Ok(0x01)];  // 150 in varint encoding
+/// let mut stream = stream::iter(bytes);
+/// let varint = stream.read_varint().await?.expect("one varint");
+/// assert_eq!(varint.to_uint64(), 150);
+/// ```
+#[cfg(feature = "futures")]
+pub trait StreamExtVarint: TryStream<Ok = u8> + Unpin {
+    /// Read the next varint from the stream.
     ///
-    /// Use [`StreamExtVarint::varint_decoder`] to create this from a stream.
-    #[derive(Debug)]
-    pub struct VarintDecoder<S> {
-        stream: S,
-    }
+    /// - `Ok(Some(varint))` when a varint is decoded.
+    /// - `Ok(None)` on EOF (no bytes read).
+    /// - `Err(...)` on parse or I/O error.
+    fn read_varint(&mut self) -> impl ::core::future::Future<Output = Result<Option<Varint>>> + Send
+    where
+        Self::Error: Into<ProtobufError>;
+}
 
-    impl<S> VarintDecoder<S> {
-        /// Create a new decoder wrapping the given stream.
-        pub fn new(stream: S) -> Self {
-            Self { stream }
-        }
-
-        /// Read the next varint from the stream.
-        ///
-        /// - `Ok(Some(varint))` when a varint is decoded.
-        /// - `Ok(None)` on EOF (no bytes read).
-        /// - `Err(...)` on parse or I/O error.
-        pub async fn read_varint(&mut self) -> Result<Option<Varint>>
-        where
-            S: TryStream<Ok = u8> + Unpin,
-            S::Error: Into<ProtobufError>,
-        {
+#[cfg(feature = "futures")]
+impl<S, E> StreamExtVarint for S
+where
+    S: TryStream<Ok = u8, Error = E> + Unpin + Send,
+    E: Into<ProtobufError>,
+{
+    fn read_varint(&mut self) -> impl ::core::future::Future<Output = Result<Option<Varint>>> + Send {
+        async move {
             let mut decoded_value = 0u64;
             let mut shift = 0u32;
             let mut read_any = false;
 
             for _ in 0..MAX_VARINT_BYTES {
-                let byte = match self.stream.try_next().await {
+                let byte = match self.try_next().await {
                     Ok(Some(b)) => b,
                     Ok(None) => {
                         if read_any {
@@ -612,33 +623,7 @@ mod stream_ext {
             Err(ProtobufError::VarintTooLong)
         }
     }
-
-    /// Extension trait for creating a varint decoder from a byte stream.
-    ///
-    /// This trait provides `varint_decoder` for types implementing
-    /// `TryStream<Ok = u8, Error = E>` where `E: Into<ProtobufError>`.
-    /// Consumers implement `Stream<Item = Result<u8, E>>`; the futures
-    /// ecosystem provides adapters that implement `TryStream` for such streams.
-    pub trait StreamExtVarint {
-        /// Wrap this stream in a decoder that can read varints.
-        fn varint_decoder(self) -> VarintDecoder<Self>
-        where
-            Self: Sized;
-    }
-
-    impl<S, E> StreamExtVarint for S
-    where
-        S: TryStream<Ok = u8, Error = E> + Sized,
-        E: Into<ProtobufError>,
-    {
-        fn varint_decoder(self) -> VarintDecoder<Self> {
-            VarintDecoder::new(self)
-        }
-    }
 }
-
-#[cfg(feature = "futures")]
-pub use stream_ext::{StreamExtVarint, VarintDecoder};
 
 #[cfg(test)]
 mod tests {
@@ -1107,10 +1092,9 @@ mod tests {
         #[test]
         fn test_stream_ext_varint_complete() {
             let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x96), Ok(0x01)];
-            let stream = stream::iter(bytes);
-            let mut decoder = stream.varint_decoder();
+            let mut stream = stream::iter(bytes);
 
-            let result = block_on(decoder.read_varint());
+            let result = block_on(stream.read_varint());
             let Ok(Some(varint)) = result else {
                 panic!("Expected Ok(Some(_)), got {:?}", result);
             };
@@ -1120,10 +1104,9 @@ mod tests {
         #[test]
         fn test_stream_ext_varint_eof() {
             let bytes: Vec<Result<u8, Infallible>> = vec![];
-            let stream = stream::iter(bytes);
-            let mut decoder = stream.varint_decoder();
+            let mut stream = stream::iter(bytes);
 
-            let result = block_on(decoder.read_varint());
+            let result = block_on(stream.read_varint());
             let Ok(None) = result else {
                 panic!("Expected Ok(None), got {:?}", result);
             };
@@ -1131,14 +1114,13 @@ mod tests {
 
         #[test]
         fn test_stream_ext_varint_resume_from_pending() {
-            let stream = PendingOnceByteStream {
+            let mut stream = PendingOnceByteStream {
                 bytes: vec![0x96, 0x01],
                 index: std::cell::Cell::new(0),
                 pending_after_first: std::cell::Cell::new(false),
             };
-            let mut decoder = stream.varint_decoder();
 
-            let result = block_on(decoder.read_varint());
+            let result = block_on(stream.read_varint());
             let Ok(Some(varint)) = result else {
                 panic!("Expected Ok(Some(_)), got {:?}", result);
             };

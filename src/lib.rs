@@ -123,14 +123,14 @@
 //!   / [`ReadExtTag`]: Read tags
 //! - [`IteratorExtVarint`] / [`TryIteratorExtVarint`]
 //!   / [`ReadExtVarint`]: Read varints (sync)
-//! - [`StreamExtVarint`] / [`VarintDecoder`]: Read varints from async byte streams (requires `futures` feature)
+//! - [`StreamExtVarint`]: Read varints from async byte streams (requires `futures` feature)
 //! - [`WriteExtVarint`]: Write varints
 //!
 //! ## Feature Flags
 //!
 //! - `read` (enabled by default): Enables field reading utilities
 //! - `write` (enabled by default): Enables field writing utilities
-//! - `futures`: Enables async varint reading via [`StreamExtVarint`] and [`VarintDecoder`] for `TryStream<Ok = u8, Error = E>`
+//! - `futures`: Enables async varint reading via [`StreamExtVarint`] for `TryStream<Ok = u8, Error = E>`
 //!
 //! You can use features independently:
 //!
@@ -169,7 +169,7 @@ pub use self::varint::{
     IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint, WriteExtVarint,
 };
 #[cfg(feature = "futures")]
-pub use self::varint::{StreamExtVarint, VarintDecoder};
+pub use self::varint::StreamExtVarint;
 pub use self::wire_format::{
     FIELD_NUMBER_SHIFT, FIXED32_BYTES, FIXED64_BYTES, MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT,
     MAX_3_BYTE_VARINT, MAX_4_BYTE_VARINT, MAX_5_BYTE_VARINT, MAX_6_BYTE_VARINT, MAX_7_BYTE_VARINT,

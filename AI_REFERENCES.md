@@ -162,11 +162,10 @@ This project aims to create a **protobuf utility library** that provides common 
 
 9. **Async Varint Reading** (`src/varint.rs`) - **Feature-gated with `futures` feature**
    - **StreamExtVarint trait** - extension for `TryStream<Ok = u8, Error = E>` where `E: Into<ProtobufError>`
-   - **VarintDecoder<S>** - wrapper that adds `async fn read_varint(&mut self) -> Result<Option<Varint>>`
+   - **API**: `stream.read_varint().await` (async fn directly on the trait, no wrapper struct)
    - Uses `futures-util` for `TryStreamExt::try_next().await`; state is retained automatically by the async Future
    - **TryStream is Sealed**: external crates cannot impl TryStream. Consumers impl `Stream<Item = Result<u8, E>>`;
      the futures ecosystem provides the TryStream impl for such streams
-   - **API**: `stream.varint_decoder()` then `decoder.read_varint().await`
    - Tests include resume-from-`Poll::Pending` (stream that yields Pending once with `wake_by_ref()` before continuing)
    - **Dependencies**: `futures-util` (optional); tests use `futures-executor::block_on`
 
