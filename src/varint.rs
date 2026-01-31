@@ -26,15 +26,15 @@ use ::std::io::{Read, Write};
 use ::std::iter::Iterator;
 
 #[cfg(feature = "futures")]
-use ::std::future::Future;
-#[cfg(feature = "futures")]
-use ::std::task::Poll;
-#[cfg(feature = "futures")]
 use ::futures_util::future::poll_fn;
 #[cfg(feature = "futures")]
 use ::futures_util::stream::TryStream;
 #[cfg(feature = "futures")]
+use ::std::future::Future;
+#[cfg(feature = "futures")]
 use ::std::pin::Pin;
+#[cfg(feature = "futures")]
+use ::std::task::Poll;
 
 /// A deserialized varint value.
 ///
@@ -592,9 +592,7 @@ pub trait StreamExtVarint: TryStream<Ok = u8> {
     /// - `Ok(Some(varint))` when a varint is decoded.
     /// - `Ok(None)` on EOF (no bytes read).
     /// - `Err(...)` on parse or I/O error.
-    fn read_varint(
-        self: Pin<&mut Self>,
-    ) -> impl Future<Output = Result<Option<Varint>>> + Send
+    fn read_varint(self: Pin<&mut Self>) -> impl Future<Output = Result<Option<Varint>>> + Send
     where
         Self::Error: Into<ProtobufError>;
 }
@@ -605,9 +603,7 @@ where
     S: TryStream<Ok = u8, Error = E> + Send,
     E: Into<ProtobufError>,
 {
-    fn read_varint(
-        self: Pin<&mut Self>,
-    ) -> impl Future<Output = Result<Option<Varint>>> + Send {
+    fn read_varint(self: Pin<&mut Self>) -> impl Future<Output = Result<Option<Varint>>> + Send {
         let mut decoded_value = 0u64;
         let mut shift = 0u32;
         let mut read_any = false;
@@ -644,7 +640,22 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_VARINT_BYTES, Result, Varint};
+    use super::{MAX_VARINT_BYTES, Varint};
+
+    #[cfg(feature = "futures")]
+    use super::StreamExtVarint;
+    #[cfg(feature = "futures")]
+    use ::assert_matches::assert_matches;
+    #[cfg(feature = "futures")]
+    use ::futures_executor::block_on;
+    #[cfg(feature = "futures")]
+    use ::futures_util::stream::{self, poll_fn};
+    #[cfg(feature = "futures")]
+    use ::std::convert::Infallible;
+    #[cfg(feature = "futures")]
+    use ::std::pin::Pin;
+    #[cfg(feature = "futures")]
+    use ::std::task::Poll;
 
     // ============================================================================
     // Basic Varint tests (no traits)
@@ -936,7 +947,7 @@ mod tests {
 
         let bytes = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
         let iter = bytes.into_iter();
-        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
+        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(varints.len(), 3);
         assert_eq!(varints[0].to_uint64(), 150);
         assert_eq!(varints[1].to_uint64(), 127);
@@ -998,7 +1009,7 @@ mod tests {
         let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
         let reader = Cursor::new(data);
         let iter = reader.bytes();
-        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>>>().unwrap();
+        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(varints.len(), 3);
         assert_eq!(varints[0].to_uint64(), 150);
         assert_eq!(varints[1].to_uint64(), 127);
@@ -1028,7 +1039,7 @@ mod tests {
 
         let data = vec![0x96, 0x01, 0x7F, 0x01]; // 150, 127, 1 in varint encoding
         let mut reader = Cursor::new(data);
-        let varints: Vec<Varint> = reader.read_varints().collect::<Result<Vec<_>>>().unwrap();
+        let varints: Vec<Varint> = reader.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(varints.len(), 3);
         assert_eq!(varints[0].to_uint64(), 150);
         assert_eq!(varints[1].to_uint64(), 127);
@@ -1065,96 +1076,93 @@ mod tests {
     // ============================================================================
 
     #[cfg(feature = "futures")]
-    mod stream_ext_varint_tests {
-        use super::super::StreamExtVarint;
-        use ::assert_matches::assert_matches;
-        use ::futures_executor::block_on;
-        use ::futures_util::stream::{self, poll_fn};
-        use ::std::convert::Infallible;
-        use ::std::pin::Pin;
-        use ::std::task::Poll;
+    #[test]
+    fn test_stream_ext_varint_complete() {
+        let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x96), Ok(0x01)];
+        let mut stream = stream::iter(bytes);
 
-        #[test]
-        fn test_stream_ext_varint_complete() {
-            let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x96), Ok(0x01)];
-            let mut stream = stream::iter(bytes);
+        let result = block_on(async { Pin::new(&mut stream).read_varint().await });
+        assert_matches!(result, Ok(Some(varint)) => {
+            assert_eq!(varint.to_uint64(), 150);
+        });
+    }
 
-            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            assert_matches!(result, Ok(Some(varint)) => {
-                assert_eq!(varint.to_uint64(), 150);
-            });
-        }
+    #[cfg(feature = "futures")]
+    #[test]
+    fn test_stream_ext_varint_eof() {
+        let mut stream = stream::empty::<Result<u8, Infallible>>();
 
-        #[test]
-        fn test_stream_ext_varint_eof() {
-            let bytes: Vec<Result<u8, Infallible>> = vec![];
-            let mut stream = stream::iter(bytes);
+        let result = block_on(async { Pin::new(&mut stream).read_varint().await });
+        assert_matches!(result, Ok(None));
+    }
 
-            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            assert_matches!(result, Ok(None));
-        }
+    #[cfg(feature = "futures")]
+    #[test]
+    fn test_stream_ext_varint_resume_from_pending() {
+        // State: 0 = yield 0x96, 1 = return Pending (wake), 2 = yield 0x01, 3 = EOF
+        let mut state = 0u32;
+        let mut stream = poll_fn(move |cx| {
+            let next: Option<Result<u8, Infallible>> = match state {
+                0 => {
+                    state = 1;
+                    Some(Ok(0x96))
+                }
+                1 => {
+                    state = 2;
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending; // Yield once; executor will poll again
+                }
+                2 => {
+                    state = 3;
+                    Some(Ok(0x01))
+                }
+                _ => None,
+            };
+            Poll::Ready(next)
+        });
 
-        #[test]
-        fn test_stream_ext_varint_resume_from_pending() {
-            // State: 0 = yield 0x96, 1 = return Pending (wake), 2 = yield 0x01, 3 = EOF
-            let mut state = 0u32;
-            let mut stream = poll_fn(move |cx| {
-                let next: Option<Result<u8, Infallible>> = match state {
-                    0 => {
-                        state = 1;
-                        Some(Ok(0x96))
-                    }
-                    1 => {
-                        state = 2;
-                        cx.waker().wake_by_ref();
-                        return Poll::Pending; // Yield once; executor will poll again
-                    }
-                    2 => {
-                        state = 3;
-                        Some(Ok(0x01))
-                    }
-                    _ => None,
-                };
-                Poll::Ready(next)
-            });
+        let result = block_on(async { Pin::new(&mut stream).read_varint().await });
+        assert_matches!(result, Ok(Some(varint)) => {
+            assert_eq!(varint.to_uint64(), 150);
+        });
+    }
 
-            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            assert_matches!(result, Ok(Some(varint)) => {
-                assert_eq!(varint.to_uint64(), 150);
-            });
-        }
+    #[cfg(feature = "futures")]
+    #[test]
+    fn test_stream_ext_varint_stream_error() {
+        let bytes: Vec<Result<u8, std::io::Error>> = vec![
+            Ok(0x80),
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "stream error",
+            )),
+        ];
+        let mut stream = stream::iter(bytes);
 
-        #[test]
-        fn test_stream_ext_varint_stream_error() {
-            let bytes: Vec<Result<u8, std::io::Error>> = vec![
-                Ok(0x80),
-                Err(std::io::Error::new(std::io::ErrorKind::Other, "stream error")),
-            ];
-            let mut stream = stream::iter(bytes);
+        let result = block_on(async { Pin::new(&mut stream).read_varint().await });
+        assert_matches!(result, Err(_));
+    }
 
-            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            assert_matches!(result, Err(_));
-        }
+    #[cfg(feature = "futures")]
+    #[test]
+    fn test_stream_ext_varint_eof_mid_varint() {
+        // One byte with continuation bit set, then EOF (malformed)
+        let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x80)];
+        let mut stream = stream::iter(bytes);
 
-        #[test]
-        fn test_stream_ext_varint_eof_mid_varint() {
-            // One byte with continuation bit set, then EOF (malformed)
-            let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x80)];
-            let mut stream = stream::iter(bytes);
+        let result = block_on(async { Pin::new(&mut stream).read_varint().await });
+        assert_matches!(result, Err(crate::ProtobufError::UnexpectedEof));
+    }
 
-            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            assert_matches!(result, Err(crate::ProtobufError::UnexpectedEof));
-        }
+    #[cfg(feature = "futures")]
+    #[test]
+    fn test_stream_ext_varint_too_long() {
+        // 11 bytes, all with continuation bit set - exceeds MAX_VARINT_BYTES (10)
+        let bytes: Vec<Result<u8, Infallible>> =
+            (0..=MAX_VARINT_BYTES).map(|_| Ok(0x80)).collect();
+        let mut stream = stream::iter(bytes);
 
-        #[test]
-        fn test_stream_ext_varint_too_long() {
-            // 11 bytes, all with continuation bit set - exceeds MAX_VARINT_BYTES (10)
-            let bytes: Vec<Result<u8, Infallible>> =
-                (0..=super::MAX_VARINT_BYTES).map(|_| Ok(0x80)).collect();
-            let mut stream = stream::iter(bytes);
-
-            let result = block_on(async { Pin::new(&mut stream).read_varint().await });
-            assert_matches!(result, Err(crate::ProtobufError::VarintTooLong));
-        }
+        let result = block_on(async { Pin::new(&mut stream).read_varint().await });
+        assert_matches!(result, Err(crate::ProtobufError::VarintTooLong));
     }
 }
