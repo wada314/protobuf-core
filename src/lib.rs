@@ -167,7 +167,7 @@ pub use self::field::{Field, FieldValue};
 pub use self::field_number::FieldNumber;
 #[cfg(feature = "futures")]
 pub use self::tag::StreamExtTag;
-pub use self::tag::{IteratorExtTag, ReadExtTag, Tag, TryIteratorExtTag};
+pub use self::tag::{IteratorExtTag, Outcome as TagOutcome, ReadExtTag, Tag, TryIteratorExtTag};
 #[cfg(feature = "futures")]
 pub use self::varint::StreamExtVarint;
 pub use self::varint::{
