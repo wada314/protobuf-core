@@ -116,7 +116,7 @@ where
     fn read_tag(&mut self) -> Result<Option<Tag>> {
         use crate::varint::{DecodeOutcome, IteratorExtVarint};
 
-        match self.read_varint()? {
+        match self.read_varint_partial()? {
             DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
             DecodeOutcome::Empty => Ok(None),
             DecodeOutcome::Incomplete(s) => Err(ProtobufError::IncompleteVarint(s)),
@@ -158,7 +158,7 @@ where
     fn read_tag(&mut self) -> Result<Option<Tag>> {
         use crate::varint::{DecodeOutcome, TryIteratorExtVarint};
 
-        match self.read_varint()? {
+        match self.read_varint_partial()? {
             DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
             DecodeOutcome::Empty => Ok(None),
             DecodeOutcome::Incomplete(s) => Err(ProtobufError::IncompleteVarint(s)),
@@ -197,7 +197,7 @@ where
     fn read_tag(&mut self) -> Result<Option<Tag>> {
         use crate::varint::{DecodeOutcome, ReadExtVarint};
 
-        match self.read_varint()? {
+        match self.read_varint_partial()? {
             DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
             DecodeOutcome::Empty => Ok(None),
             DecodeOutcome::Incomplete(s) => Err(ProtobufError::IncompleteVarint(s)),
@@ -251,7 +251,7 @@ where
         use crate::varint::DecodeOutcome;
 
         async move {
-            let outcome = StreamExtVarint::read_varint(self).await?;
+            let outcome = StreamExtVarint::read_varint_partial(self).await?;
             match outcome {
                 DecodeOutcome::Complete(v) => Tag::from_encoded(v).map(Some),
                 DecodeOutcome::Empty => Ok(None),
