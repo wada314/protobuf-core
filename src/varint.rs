@@ -31,9 +31,6 @@ pub use read::{
     DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint,
     VarintIterator,
 };
-#[cfg(feature = "futures")]
-pub use read::StreamExtVarint;
-
 /// A deserialized varint value.
 ///
 /// This type represents the decoded 8-byte value from serialized bytes

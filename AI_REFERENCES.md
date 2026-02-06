@@ -160,17 +160,7 @@ This project aims to create a **protobuf utility library** that provides common 
      - Building blocks for higher-level parsers
    - **Comprehensive Testing**: Covers all wire types and multiple field scenarios
 
-9. **Async Varint Reading** (`src/varint.rs`) - **Feature-gated with `futures` feature**
-   - **StreamExtVarint trait** - extension for `TryStream<Ok = u8, Error = E>` where `E: Into<ProtobufError>`
-   - **API**: `Pin::new(&mut stream).read_varint().await` — uses `Pin<&mut Self>` so both `Unpin` and `!Unpin`
-     streams are supported (more generic than requiring `Unpin`)
-   - Uses `try_poll_next` (not `try_next`) and `poll_fn` to avoid the `Unpin` bound
-   - **TryStream is Sealed**: external crates cannot impl TryStream. Consumers impl `Stream<Item = Result<u8, E>>`;
-     the futures ecosystem provides the TryStream impl for such streams
-   - Tests include resume-from-`Poll::Pending` (stream that yields Pending once with `wake_by_ref()` before continuing)
-   - **Dependencies**: `futures-util` (optional); tests use `futures-executor::block_on`
-
-10. **Field Writing Utilities** (`src/field/write.rs`) - **Feature-gated with `write` feature**
+9. **Field Writing Utilities** (`src/field/write.rs`) - **Feature-gated with `write` feature**
    - **Low-level primitives for writing protobuf fields** - not a complete message serializer, but building blocks for serialization
    - **WriteExtProtobuf trait** - extension trait for `std::io::Write` types:
      - `write_protobuf_field()` - writes a single protobuf field (tag + value), returns bytes written
@@ -199,17 +189,6 @@ This project aims to create a **protobuf utility library** that provides common 
 13. **Additional utilities** - Add more helper methods for common field operations
 
 ## Design Decisions
-
-### Async Varint API: fn returning impl Future instead of async fn (2026-01)
-
-- We use `fn read_varint(...) -> impl Future<Output = ...> + Send` instead of `async fn read_varint(...)` because:
-  - **`async_fn_in_trait` warning**: `async fn` in public traits triggers a lint because the returned Future
-    cannot have explicit auto-trait bounds (e.g. `Send`). Multi-threaded executors require `Send`, but that
-    guarantee cannot be expressed in the trait signature with `async fn`. Using `impl Future + Send` makes
-    the contract explicit and avoids future breaking changes if we needed to relax bounds.
-  - **State retention**: The `poll_fn`-based implementation preserves `decoded_value`, `shift`, `read_any` across
-    `Poll::Pending` returns when the stream yields mid-varint.
-  - **Dependency**: Uses `try_poll_next` (not `try_next`) and `poll_fn` to support `!Unpin` streams.
 
 ### Type Naming Convention - Avoiding Confusion Between Rust Types and Protobuf Types
 
@@ -259,9 +238,9 @@ This project aims to create a **protobuf utility library** that provides common 
 
 **Decision**: protobuf-core stays **sync-only** for the core parsing primitives. Do not bake async into the field parser. Users who need async I/O can: (1) read into a buffer with `reader.read().await`, (2) call sync `parse_field` (or partial/resume) on that buffer. The "basic building blocks" principle: protobuf-core provides sync primitives; composition with async is the user's (or puroro's) responsibility.
 
-### Stream Interface and Async Building Blocks (2026-02)
+### No Stream-Based Async API (2026-02)
 
-**Stream as adapter**: We provide tag/varint APIs for `TryStream<Ok = u8>` because it is convertible from major async input types (AsyncRead via `reader.bytes()`, etc.). Most users do not work with Stream directly at the application level; it serves as the bridge layer.
+**Decision**: We do **not** provide Stream-based async APIs (`StreamExtVarint`, `StreamExtTag`). Per the "basic building blocks" principle: protobuf-core provides sync primitives (including partial/resume for chunked input); composition with async is the user's (or puroro's) responsibility. Upper-level libraries buffer bytes from `AsyncRead` and call sync partial/resume on that buffer.
 
 **read_exact / fixed-length reads**: Upper-level I/O libraries (tokio, futures-util) provide `read_exact` for AsyncRead. We do not add it to protobuf-core. Our responsibility is protobuf-specific wire format logic (tag, varint); generic "read N bytes" belongs in the I/O layer.
 

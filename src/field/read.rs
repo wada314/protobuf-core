@@ -20,7 +20,7 @@
 
 use crate::field::{Field, FieldValue};
 use crate::tag::Tag;
-use crate::varint::DecodeOutcome;
+use crate::varint::{DecodeOutcome, Varint};
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
@@ -37,17 +37,16 @@ use ::std::io::Read;
 pub(crate) trait FieldValueReader<L> {
     /// Read a tag (field number + wire type)
     ///
-    /// Default implementation uses `read_varint_partial` and converts the varint to a tag.
+    /// Default implementation uses `read_varint` and converts the varint to a tag.
     fn read_tag(&mut self) -> Result<Option<Tag>> {
-        match self.read_varint_partial()? {
-            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
-            DecodeOutcome::Empty => Ok(None),
-            DecodeOutcome::Incomplete(s) => Err(ProtobufError::IncompleteVarint(s)),
+        match self.read_varint()? {
+            Some(varint) => Tag::from_encoded(varint).map(Some),
+            None => Ok(None),
         }
     }
 
-    /// Read a varint value (may be called multiple times for Len wire type), supporting incomplete input.
-    fn read_varint_partial(&mut self) -> Result<DecodeOutcome>;
+    /// Read a varint value (returns None when the stream is empty)
+    fn read_varint(&mut self) -> Result<Option<Varint>>;
 
     /// Read exactly N bytes (for fixed-size wire types like Int32, Int64, Fixed32, Fixed64)
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]>;
@@ -75,11 +74,7 @@ where
     // Parse value based on wire type
     let value = match tag.wire_type {
         WireType::Varint => {
-            let varint = match reader.read_varint_partial()? {
-                DecodeOutcome::Complete(v) => v,
-                DecodeOutcome::Empty => return Err(ProtobufError::UnexpectedEof),
-                DecodeOutcome::Incomplete(s) => return Err(ProtobufError::IncompleteVarint(s)),
-            };
+            let varint = reader.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
             FieldValue::Varint(varint)
         }
         WireType::Int32 => {
@@ -92,11 +87,7 @@ where
         }
         WireType::Len => {
             // Read length prefix (varint)
-            let length_varint = match reader.read_varint_partial()? {
-                DecodeOutcome::Complete(v) => v,
-                DecodeOutcome::Empty => return Err(ProtobufError::UnexpectedEof),
-                DecodeOutcome::Incomplete(s) => return Err(ProtobufError::IncompleteVarint(s)),
-            };
+            let length_varint = reader.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
             let length = length_varint.try_to_uint32()? as usize;
             let data = reader.read_length_delimited(length)?;
             FieldValue::Len(data)
@@ -127,9 +118,13 @@ impl<'a, I> FieldValueReader<Vec<u8>> for IteratorReader<'a, I>
 where
     I: Iterator<Item = u8>,
 {
-    fn read_varint_partial(&mut self) -> Result<DecodeOutcome> {
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::IteratorExtVarint;
-        self.0.read_varint_partial()
+        match self.0.read_varint_partial()? {
+            DecodeOutcome::Complete(v) => Ok(Some(v)),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
+        }
     }
 
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
@@ -221,9 +216,13 @@ where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
-    fn read_varint_partial(&mut self) -> Result<DecodeOutcome> {
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::TryIteratorExtVarint;
-        self.0.read_varint_partial()
+        match self.0.read_varint_partial()? {
+            DecodeOutcome::Complete(v) => Ok(Some(v)),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
+        }
     }
 
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
@@ -328,9 +327,13 @@ impl<'a, R> FieldValueReader<Vec<u8>> for ReadReader<'a, R>
 where
     R: Read,
 {
-    fn read_varint_partial(&mut self) -> Result<DecodeOutcome> {
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::ReadExtVarint;
-        self.0.read_varint_partial()
+        match self.0.read_varint_partial()? {
+            DecodeOutcome::Complete(v) => Ok(Some(v)),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
+        }
     }
 
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
@@ -428,9 +431,13 @@ pub(crate) struct SliceReader<'a, 'b> {
 }
 
 impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
-    fn read_varint_partial(&mut self) -> Result<DecodeOutcome> {
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::ReadExtVarint;
-        self.slice.read_varint_partial()
+        match self.slice.read_varint_partial()? {
+            DecodeOutcome::Complete(v) => Ok(Some(v)),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
+        }
     }
 
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {

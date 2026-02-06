@@ -22,22 +22,13 @@ use crate::{ProtobufError, Result};
 use ::std::io::Read;
 use ::std::iter::Iterator;
 
-#[cfg(feature = "futures")]
-use ::futures_util::future::poll_fn;
-#[cfg(feature = "futures")]
-use ::futures_util::stream::TryStream;
-#[cfg(feature = "futures")]
-use ::std::future::Future;
-#[cfg(feature = "futures")]
-use ::std::pin::Pin;
-#[cfg(feature = "futures")]
-use ::std::task::Poll;
-
 use super::Varint;
 
 /// Parser state when varint decoding runs out of bytes before completing.
 ///
-/// Returned in [`ProtobufError::IncompleteVarint`](crate::ProtobufError::IncompleteVarint).
+/// Returned in [`DecodeOutcome::Incomplete`]. Use with [`read_varint_resume`] to continue parsing.
+///
+/// [`read_varint_resume`]: ReadExtVarint::read_varint_resume
 /// Varint parsing is performed only through the extension traits
 /// ([`IteratorExtVarint`], [`TryIteratorExtVarint`], [`ReadExtVarint`], etc.).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -152,7 +143,7 @@ where
         match DecodeState::new().feed(&mut self.bytes) {
             Ok(DecodeOutcome::Complete(v)) => Some(Ok(v)),
             Ok(DecodeOutcome::Empty) => None,
-            Ok(DecodeOutcome::Incomplete(s)) => Some(Err(ProtobufError::IncompleteVarint(s))),
+            Ok(DecodeOutcome::Incomplete(_)) => Some(Err(ProtobufError::UnexpectedEof)),
             Err(e) => Some(Err(e)),
         }
     }
@@ -399,111 +390,6 @@ where
 }
 
 // ============================================================================
-// Async Stream extension (TryStream)
-// ============================================================================
-
-/// Extension trait for reading varints from a byte stream.
-///
-/// This trait provides `read_varint_partial` for types implementing
-/// `TryStream<Ok = u8, Error = E>` where `E: Into<ProtobufError>`.
-/// Consumers implement `Stream<Item = Result<u8, E>>`; the futures
-/// ecosystem provides adapters that implement `TryStream` for such streams.
-///
-/// Uses `Pin<&mut Self>` so that both `Unpin` and `!Unpin` streams are supported.
-///
-/// # Example
-///
-/// ```ignore
-/// use futures_util::stream;
-/// use protobuf_core::{StreamExtVarint, Varint};
-/// use std::pin::Pin;
-///
-/// let bytes = vec![Ok(0x96u8), Ok(0x01)];  // 150 in varint encoding
-/// let mut stream = stream::iter(bytes);
-/// let varint = Pin::new(&mut stream).read_varint_partial().await?.expect("one varint");
-/// assert_eq!(varint.to_uint64(), 150);
-/// ```
-#[cfg(feature = "futures")]
-pub trait StreamExtVarint: TryStream<Ok = u8> {
-    /// Read the next varint from the stream, supporting incomplete input.
-    fn read_varint_partial(self: Pin<&mut Self>) -> impl Future<Output = Result<DecodeOutcome>> + Send
-    where
-        Self::Error: Into<ProtobufError>;
-
-    /// Resume varint decoding with additional bytes from this stream.
-    fn read_varint_resume(
-        self: Pin<&mut Self>,
-        state: DecodeState,
-    ) -> impl Future<Output = Result<DecodeOutcome>> + Send
-    where
-        Self::Error: Into<ProtobufError>;
-}
-
-#[cfg(feature = "futures")]
-impl<S, E> StreamExtVarint for S
-where
-    S: TryStream<Ok = u8, Error = E> + Send,
-    E: Into<ProtobufError>,
-{
-    fn read_varint_partial(self: Pin<&mut Self>) -> impl Future<Output = Result<DecodeOutcome>> + Send {
-        let mut state = DecodeState::new();
-        let mut this = self;
-        poll_fn(move |cx| {
-            for _ in 0..MAX_VARINT_BYTES {
-                let Poll::Ready(item) = this.as_mut().try_poll_next(cx) else {
-                    return Poll::Pending;
-                };
-                match item {
-                    Some(Ok(byte)) => match state.feed(::std::iter::once(Ok::<u8, E>(byte))) {
-                        Ok(DecodeOutcome::Complete(v)) => {
-                            return Poll::Ready(Ok(DecodeOutcome::Complete(v)));
-                        }
-                        Ok(DecodeOutcome::Incomplete(s)) => state = s,
-                        Ok(DecodeOutcome::Empty) => unreachable!(),
-                        Err(e) => return Poll::Ready(Err(e)),
-                    },
-                    Some(Err(e)) => return Poll::Ready(Err(e.into())),
-                    None => {
-                        if state.bytes_consumed() > 0 {
-                            return Poll::Ready(Ok(DecodeOutcome::Incomplete(state)));
-                        }
-                        return Poll::Ready(Ok(DecodeOutcome::Empty));
-                    }
-                }
-            }
-            Poll::Ready(Err(ProtobufError::VarintTooLong))
-        })
-    }
-
-    fn read_varint_resume(
-        self: Pin<&mut Self>,
-        mut state: DecodeState,
-    ) -> impl Future<Output = Result<DecodeOutcome>> + Send {
-        let mut this = self;
-        poll_fn(move |cx| {
-            for _ in 0..(MAX_VARINT_BYTES - state.bytes_consumed()) {
-                let Poll::Ready(item) = this.as_mut().try_poll_next(cx) else {
-                    return Poll::Pending;
-                };
-                match item {
-                    Some(Ok(byte)) => match state.feed(::std::iter::once(Ok::<u8, E>(byte))) {
-                        Ok(DecodeOutcome::Complete(v)) => {
-                            return Poll::Ready(Ok(DecodeOutcome::Complete(v)));
-                        }
-                        Ok(DecodeOutcome::Incomplete(s)) => state = s,
-                        Ok(DecodeOutcome::Empty) => unreachable!(),
-                        Err(e) => return Poll::Ready(Err(e)),
-                    },
-                    Some(Err(e)) => return Poll::Ready(Err(e.into())),
-                    None => return Poll::Ready(Ok(DecodeOutcome::Incomplete(state))),
-                }
-            }
-            Poll::Ready(Err(ProtobufError::VarintTooLong))
-        })
-    }
-}
-
-// ============================================================================
 // Tests
 // ============================================================================
 
@@ -512,21 +398,6 @@ mod tests {
     use super::{DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint};
     use crate::ProtobufError;
     use crate::varint::Varint;
-
-    #[cfg(feature = "futures")]
-    use super::StreamExtVarint;
-    #[cfg(feature = "futures")]
-    use ::assert_matches::assert_matches;
-    #[cfg(feature = "futures")]
-    use ::futures_executor::block_on;
-    #[cfg(feature = "futures")]
-    use ::futures_util::stream::{self, poll_fn};
-    #[cfg(feature = "futures")]
-    use ::std::convert::Infallible;
-    #[cfg(feature = "futures")]
-    use ::std::pin::Pin;
-    #[cfg(feature = "futures")]
-    use ::std::task::Poll;
 
     #[test]
     fn test_read_varint_from_iterator() {
@@ -761,93 +632,5 @@ mod tests {
 
             assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
         }
-    }
-
-    #[cfg(feature = "futures")]
-    #[test]
-    fn test_stream_ext_varint_complete() {
-        let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x96), Ok(0x01)];
-        let mut stream = stream::iter(bytes);
-
-        let result = block_on(async { Pin::new(&mut stream).read_varint_partial().await });
-        assert_matches!(result, Ok(DecodeOutcome::Complete(varint)) => {
-            assert_eq!(varint.to_uint64(), 150);
-        });
-    }
-
-    #[cfg(feature = "futures")]
-    #[test]
-    fn test_stream_ext_varint_eof() {
-        let mut stream = stream::empty::<Result<u8, Infallible>>();
-
-        let result = block_on(async { Pin::new(&mut stream).read_varint_partial().await });
-        assert_matches!(result, Ok(DecodeOutcome::Empty));
-    }
-
-    #[cfg(feature = "futures")]
-    #[test]
-    fn test_stream_ext_varint_resume_from_pending() {
-        let mut state = 0u32;
-        let mut stream = poll_fn(move |cx| {
-            let next: Option<Result<u8, Infallible>> = match state {
-                0 => {
-                    state = 1;
-                    Some(Ok(0x96))
-                }
-                1 => {
-                    state = 2;
-                    cx.waker().wake_by_ref();
-                    return Poll::Pending;
-                }
-                2 => {
-                    state = 3;
-                    Some(Ok(0x01))
-                }
-                _ => None,
-            };
-            Poll::Ready(next)
-        });
-
-        let result = block_on(async { Pin::new(&mut stream).read_varint_partial().await });
-        assert_matches!(result, Ok(DecodeOutcome::Complete(varint)) => {
-            assert_eq!(varint.to_uint64(), 150);
-        });
-    }
-
-    #[cfg(feature = "futures")]
-    #[test]
-    fn test_stream_ext_varint_stream_error() {
-        let bytes: Vec<Result<u8, std::io::Error>> = vec![
-            Ok(0x80),
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "stream error",
-            )),
-        ];
-        let mut stream = stream::iter(bytes);
-
-        let result = block_on(async { Pin::new(&mut stream).read_varint_partial().await });
-        assert_matches!(result, Err(_));
-    }
-
-    #[cfg(feature = "futures")]
-    #[test]
-    fn test_stream_ext_varint_eof_mid_varint() {
-        let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x80)];
-        let mut stream = stream::iter(bytes);
-
-        let result = block_on(async { Pin::new(&mut stream).read_varint_partial().await });
-        assert_matches!(result, Ok(DecodeOutcome::Incomplete(_)));
-    }
-
-    #[cfg(feature = "futures")]
-    #[test]
-    fn test_stream_ext_varint_too_long() {
-        use crate::wire_format::MAX_VARINT_BYTES;
-        let bytes: Vec<Result<u8, Infallible>> = (0..=MAX_VARINT_BYTES).map(|_| Ok(0x80)).collect();
-        let mut stream = stream::iter(bytes);
-
-        let result = block_on(async { Pin::new(&mut stream).read_varint_partial().await });
-        assert_matches!(result, Err(ProtobufError::VarintTooLong));
     }
 }

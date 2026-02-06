@@ -120,18 +120,15 @@
 //! varints:
 //!
 //! - [`IteratorExtTag`] / [`TryIteratorExtTag`]
-//!   / [`ReadExtTag`]: Read tags (sync)
+//!   / [`ReadExtTag`]: Read tags (sync, with partial/resume for chunked input)
 //! - [`IteratorExtVarint`] / [`TryIteratorExtVarint`]
-//!   / [`ReadExtVarint`]: Read varints (sync)
-//! - [`StreamExtTag`]: Read tags from async byte streams (requires `futures` feature)
-//! - [`StreamExtVarint`]: Read varints from async byte streams (requires `futures` feature)
+//!   / [`ReadExtVarint`]: Read varints (sync, with partial/resume for chunked input)
 //! - [`WriteExtVarint`]: Write varints
 //!
 //! ## Feature Flags
 //!
 //! - `read` (enabled by default): Enables field reading utilities
 //! - `write` (enabled by default): Enables field writing utilities
-//! - `futures`: Enables async reading via [`StreamExtTag`] and [`StreamExtVarint`] for `TryStream<Ok = u8, Error = E>`
 //!
 //! You can use features independently:
 //!
@@ -165,11 +162,7 @@ pub use self::field::{
 #[cfg(any(feature = "read", feature = "write"))]
 pub use self::field::{Field, FieldValue};
 pub use self::field_number::FieldNumber;
-#[cfg(feature = "futures")]
-pub use self::tag::StreamExtTag;
 pub use self::tag::{IteratorExtTag, Outcome as TagOutcome, ReadExtTag, Tag, TryIteratorExtTag};
-#[cfg(feature = "futures")]
-pub use self::varint::StreamExtVarint;
 pub use self::varint::{
     DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint,
     WriteExtVarint,
@@ -211,11 +204,6 @@ pub enum ProtobufError {
 
     #[error("Unexpected EOF while parsing field")]
     UnexpectedEof,
-
-    /// Varint decoding ran out of bytes before completing.
-    /// Contains parser state for resuming with additional input.
-    #[error("Varint decoding incomplete: need more bytes")]
-    IncompleteVarint(crate::varint::DecodeState),
 
     #[error("I/O error: {0}")]
     IoError(#[from] ::std::io::Error),
