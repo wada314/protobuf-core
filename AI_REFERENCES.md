@@ -240,6 +240,42 @@ This project aims to create a **protobuf utility library** that provides common 
 - Example: `from_int32(value: i32)` vs `from_sint32(value: i32)` - both take Rust `i32`, but represent different Protobuf types with different encodings
 
 
+### Partial/Resume API and Async Strategy (2026-02)
+
+**Context**: We introduced `read_varint_partial` / `read_varint_resume` and `read_tag_partial` / `read_tag_resume` to support incomplete input (e.g., chunked reads from network).
+
+**Field parser**: The partial approach is not feasible for the slice-based field parser (which yields `Field<&[u8]>` for Len values) — you need the full slice to exist. Only the owned parser (`Field<Vec<u8>>`) can support partial/resume. The internal state for that becomes complex (NeedTag, NeedLenVarint, NeedLenBytes, etc.).
+
+**Rust alternatives for simplifying state**:
+- Nightly generators (`yield`) — unstable
+- `async`/`await` — compiles to a state machine, linear control flow
+- Explicit state machine (enum + loop) — verbose but no Future overhead
+
+**Async approach**: With async, the input source is passed in as `&mut R: AsyncRead` at the start. When more bytes are needed, we `r.read().await` — same reader, no separate "supply" step. The caller doesn't feed chunks manually.
+
+**Interface incompatibility**: The sync `_partial` / `_resume` interface cannot be reused as the public async API. In async, there's one call that internally awaits. However, we can use `_partial` / `_resume` as the *internal* parsing implementation: async layer reads into a buffer, then calls sync partial/resume on an iterator over that buffer.
+
+**Future cost**: Creating a Future per operation (e.g., per field) has non-trivial overhead — the state machine size grows with `.await` points and locals. For a "very basic" primitives library, this cost is undesirable.
+
+**Decision**: protobuf-core stays **sync-only** for the core parsing primitives. Do not bake async into the field parser. Users who need async I/O can: (1) read into a buffer with `reader.read().await`, (2) call sync `parse_field` (or partial/resume) on that buffer. The "basic building blocks" principle: protobuf-core provides sync primitives; composition with async is the user's (or puroro's) responsibility.
+
+### Stream Interface and Async Building Blocks (2026-02)
+
+**Stream as adapter**: We provide tag/varint APIs for `TryStream<Ok = u8>` because it is convertible from major async input types (AsyncRead via `reader.bytes()`, etc.). Most users do not work with Stream directly at the application level; it serves as the bridge layer.
+
+**read_exact / fixed-length reads**: Upper-level I/O libraries (tokio, futures-util) provide `read_exact` for AsyncRead. We do not add it to protobuf-core. Our responsibility is protobuf-specific wire format logic (tag, varint); generic "read N bytes" belongs in the I/O layer.
+
+### Field Partial/Resume (2026-02)
+
+**Decision**: Do **not** provide partial/resumable field parsing (`read_field_partial` / `read_field_resume`).
+
+**Rationale**:
+- The main async pattern is "buffer first, then sync parse" — no need for field-level partial.
+- Users who need chunked field parsing can compose from tag + varint partial/resume primitives.
+- Field partial state is complex (tag, length varint, length-delimited bytes, etc.); beyond "basic" scope.
+- Slice-based parser (`Field<&[u8]>`) cannot support partial; owned-only would be asymmetric.
+- Upper-level libraries (e.g. puroro) can implement field-level composition when needed.
+
 ### File Organization
 - `wire_format.rs` - Core constants and wire type definitions
 - `varint.rs` - Varint encoding/decoding logic
