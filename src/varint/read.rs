@@ -171,6 +171,12 @@ where
 /// assert_eq!(varint.to_uint64(), 150);
 /// ```
 pub trait IteratorExtVarint {
+    /// Read a varint from this iterator (consumes bytes from the iterator).
+    ///
+    /// Returns `Ok(Some(varint))` when a complete varint was read, `Ok(None)` when the input
+    /// is empty, and `Err` when the input is incomplete or invalid.
+    fn read_varint(self) -> Result<Option<Varint>>;
+
     /// Read a varint from this iterator, supporting incomplete input.
     fn read_varint_partial(self) -> Result<DecodeOutcome>;
 
@@ -205,6 +211,15 @@ impl<I> IteratorExtVarint for I
 where
     I: Iterator<Item = u8>,
 {
+    fn read_varint(self) -> Result<Option<Varint>> {
+        match DecodeState::new().feed(self.map(Ok::<u8, ::std::convert::Infallible>)) {
+            Ok(DecodeOutcome::Complete(v)) => Ok(Some(v)),
+            Ok(DecodeOutcome::Empty) => Ok(None),
+            Ok(DecodeOutcome::Incomplete(_)) => Err(crate::ProtobufError::UnexpectedEof),
+            Err(e) => Err(e),
+        }
+    }
+
     fn read_varint_partial(self) -> Result<DecodeOutcome> {
         DecodeState::new().feed(self.map(Ok::<u8, ::std::convert::Infallible>))
     }
@@ -247,6 +262,12 @@ where
 /// assert_eq!(varint.to_uint64(), 150);
 /// ```
 pub trait TryIteratorExtVarint {
+    /// Read a varint from this iterator (consumes bytes from the iterator).
+    ///
+    /// Returns `Ok(Some(varint))` when a complete varint was read, `Ok(None)` when the input
+    /// is empty, and `Err` when the input is incomplete or invalid.
+    fn read_varint(self) -> Result<Option<Varint>>;
+
     /// Read a varint from this iterator, supporting incomplete input.
     fn read_varint_partial(self) -> Result<DecodeOutcome>;
 
@@ -281,6 +302,15 @@ where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
+    fn read_varint(self) -> Result<Option<Varint>> {
+        match DecodeState::new().feed(self) {
+            Ok(DecodeOutcome::Complete(v)) => Ok(Some(v)),
+            Ok(DecodeOutcome::Empty) => Ok(None),
+            Ok(DecodeOutcome::Incomplete(_)) => Err(crate::ProtobufError::UnexpectedEof),
+            Err(e) => Err(e),
+        }
+    }
+
     fn read_varint_partial(self) -> Result<DecodeOutcome> {
         DecodeState::new().feed(self)
     }
@@ -341,6 +371,18 @@ where
 /// assert_eq!(varint.to_uint64(), 150);
 /// ```
 pub trait ReadExtVarint {
+    /// Read a varint from this reader.
+    ///
+    /// Returns `Ok(Some(varint))` when a complete varint was read, `Ok(None)` when the input
+    /// is empty (EOF), and `Err` when the input is incomplete or invalid.
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        match self.read_varint_partial()? {
+            DecodeOutcome::Complete(v) => Ok(Some(v)),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(crate::ProtobufError::UnexpectedEof),
+        }
+    }
+
     /// Read a varint from this reader, supporting incomplete input.
     fn read_varint_partial(&mut self) -> Result<DecodeOutcome>;
 

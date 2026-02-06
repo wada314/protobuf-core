@@ -329,11 +329,7 @@ where
 {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::ReadExtVarint;
-        match self.0.read_varint_partial()? {
-            DecodeOutcome::Complete(v) => Ok(Some(v)),
-            DecodeOutcome::Empty => Ok(None),
-            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
-        }
+        self.0.read_varint()
     }
 
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
@@ -433,11 +429,7 @@ pub(crate) struct SliceReader<'a, 'b> {
 impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::ReadExtVarint;
-        match self.slice.read_varint_partial()? {
-            DecodeOutcome::Complete(v) => Ok(Some(v)),
-            DecodeOutcome::Empty => Ok(None),
-            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
-        }
+        self.slice.read_varint()
     }
 
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
