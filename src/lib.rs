@@ -120,9 +120,10 @@
 //! varints:
 //!
 //! - [`IteratorExtTag`] / [`TryIteratorExtTag`]
-//!   / [`ReadExtTag`]: Read tags
+//!   / [`ReadExtTag`]: Read tags (sync)
 //! - [`IteratorExtVarint`] / [`TryIteratorExtVarint`]
 //!   / [`ReadExtVarint`]: Read varints (sync)
+//! - [`StreamExtTag`]: Read tags from async byte streams (requires `futures` feature)
 //! - [`StreamExtVarint`]: Read varints from async byte streams (requires `futures` feature)
 //! - [`WriteExtVarint`]: Write varints
 //!
@@ -130,7 +131,7 @@
 //!
 //! - `read` (enabled by default): Enables field reading utilities
 //! - `write` (enabled by default): Enables field writing utilities
-//! - `futures`: Enables async varint reading via [`StreamExtVarint`] for `TryStream<Ok = u8, Error = E>`
+//! - `futures`: Enables async reading via [`StreamExtTag`] and [`StreamExtVarint`] for `TryStream<Ok = u8, Error = E>`
 //!
 //! You can use features independently:
 //!
@@ -164,12 +165,15 @@ pub use self::field::{
 #[cfg(any(feature = "read", feature = "write"))]
 pub use self::field::{Field, FieldValue};
 pub use self::field_number::FieldNumber;
+#[cfg(feature = "futures")]
+pub use self::tag::StreamExtTag;
 pub use self::tag::{IteratorExtTag, ReadExtTag, Tag, TryIteratorExtTag};
-pub use self::varint::{
-    IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint, WriteExtVarint,
-};
 #[cfg(feature = "futures")]
 pub use self::varint::StreamExtVarint;
+pub use self::varint::{
+    DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint,
+    WriteExtVarint,
+};
 pub use self::wire_format::{
     FIELD_NUMBER_SHIFT, FIXED32_BYTES, FIXED64_BYTES, MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT,
     MAX_3_BYTE_VARINT, MAX_4_BYTE_VARINT, MAX_5_BYTE_VARINT, MAX_6_BYTE_VARINT, MAX_7_BYTE_VARINT,
@@ -207,6 +211,11 @@ pub enum ProtobufError {
 
     #[error("Unexpected EOF while parsing field")]
     UnexpectedEof,
+
+    /// Varint decoding ran out of bytes before completing.
+    /// Contains parser state for resuming with additional input.
+    #[error("Varint decoding incomplete: need more bytes")]
+    IncompleteVarint(crate::varint::DecodeState),
 
     #[error("I/O error: {0}")]
     IoError(#[from] ::std::io::Error),

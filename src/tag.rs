@@ -25,6 +25,15 @@ use crate::wire_format::{FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK, WireType};
 use ::std::convert::{From, Into, TryFrom};
 use ::std::io::Read;
 
+#[cfg(feature = "futures")]
+use crate::varint::StreamExtVarint;
+#[cfg(feature = "futures")]
+use ::futures_util::stream::TryStream;
+#[cfg(feature = "futures")]
+use ::std::future::Future;
+#[cfg(feature = "futures")]
+use ::std::pin::Pin;
+
 /// A protobuf tag containing field number and wire type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tag {
@@ -105,14 +114,13 @@ where
     I: Iterator<Item = u8>,
 {
     fn read_tag(&mut self) -> Result<Option<Tag>> {
-        use crate::varint::IteratorExtVarint;
+        use crate::varint::{DecodeOutcome, IteratorExtVarint};
 
-        let varint_result = self.read_varint()?;
-        let Some(varint) = varint_result else {
-            return Ok(None);
-        };
-        let tag = Tag::from_encoded(varint)?;
-        Ok(Some(tag))
+        match self.read_varint()? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(s) => Err(ProtobufError::IncompleteVarint(s)),
+        }
     }
 }
 
@@ -148,14 +156,13 @@ where
     E: Into<ProtobufError>,
 {
     fn read_tag(&mut self) -> Result<Option<Tag>> {
-        use crate::varint::TryIteratorExtVarint;
+        use crate::varint::{DecodeOutcome, TryIteratorExtVarint};
 
-        let varint_result = self.read_varint()?;
-        let Some(varint) = varint_result else {
-            return Ok(None);
-        };
-        let tag = Tag::from_encoded(varint)?;
-        Ok(Some(tag))
+        match self.read_varint()? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(s) => Err(ProtobufError::IncompleteVarint(s)),
+        }
     }
 }
 
@@ -188,14 +195,69 @@ where
     R: Read,
 {
     fn read_tag(&mut self) -> Result<Option<Tag>> {
-        use crate::varint::ReadExtVarint;
+        use crate::varint::{DecodeOutcome, ReadExtVarint};
 
-        let Some(varint) = self.read_varint()? else {
-            return Ok(None);
-        };
+        match self.read_varint()? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(s) => Err(ProtobufError::IncompleteVarint(s)),
+        }
+    }
+}
 
-        let tag = Tag::from_encoded(varint)?;
-        Ok(Some(tag))
+// ============================================================================
+// Async Stream extension (TryStream)
+// ============================================================================
+
+/// Extension trait for reading tags from async byte streams.
+///
+/// This trait provides `read_tag` for types implementing
+/// `TryStream<Ok = u8, Error = E>` where `E: Into<ProtobufError>`.
+/// It reads a varint and parses it as a protobuf tag.
+///
+/// Uses `Pin<&mut Self>` so that both `Unpin` and `!Unpin` streams are supported.
+///
+/// # Example
+///
+/// ```ignore
+/// use futures_util::stream;
+/// use protobuf_core::{StreamExtTag, Tag};
+/// use std::pin::Pin;
+///
+/// let bytes = vec![Ok(0x08u8)]; // tag 1:0 (field 1, wire type 0)
+/// let mut stream = stream::iter(bytes);
+/// let tag = Pin::new(&mut stream).read_tag().await?.expect("one tag");
+/// assert_eq!(tag.field_number.as_u32(), 1);
+/// ```
+#[cfg(feature = "futures")]
+pub trait StreamExtTag: TryStream<Ok = u8> {
+    /// Read the next tag from the stream.
+    ///
+    /// - `Ok(Some(tag))` when a tag is successfully decoded.
+    /// - `Ok(None)` on EOF (no bytes read).
+    /// - `Err(...)` on parse or I/O error.
+    fn read_tag(self: Pin<&mut Self>) -> impl Future<Output = Result<Option<Tag>>> + Send
+    where
+        Self::Error: Into<ProtobufError>;
+}
+
+#[cfg(feature = "futures")]
+impl<S, E> StreamExtTag for S
+where
+    S: TryStream<Ok = u8, Error = E> + Send,
+    E: Into<ProtobufError>,
+{
+    fn read_tag(self: Pin<&mut Self>) -> impl Future<Output = Result<Option<Tag>>> + Send {
+        use crate::varint::DecodeOutcome;
+
+        async move {
+            let outcome = StreamExtVarint::read_varint(self).await?;
+            match outcome {
+                DecodeOutcome::Complete(v) => Tag::from_encoded(v).map(Some),
+                DecodeOutcome::Empty => Ok(None),
+                DecodeOutcome::Incomplete(s) => Err(ProtobufError::IncompleteVarint(s)),
+            }
+        }
     }
 }
 
@@ -439,5 +501,65 @@ mod tests {
         let mut reader = Cursor::new(data);
         let tag = reader.read_tag().unwrap();
         assert_eq!(tag, None);
+    }
+
+    // ============================================================================
+    // StreamExtTag tests (requires futures feature)
+    // ============================================================================
+
+    #[cfg(feature = "futures")]
+    #[test]
+    fn test_stream_ext_tag_complete() {
+        use super::StreamExtTag;
+        use ::futures_executor::block_on;
+        use ::futures_util::stream;
+        use ::std::convert::Infallible;
+        use ::std::pin::Pin;
+
+        let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x08)]; // tag 1:0 (field 1, wire type 0)
+        let mut stream = stream::iter(bytes);
+
+        let result = block_on(async { Pin::new(&mut stream).read_tag().await });
+        assert!(result.is_ok());
+        let tag = result.unwrap().unwrap();
+        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
+        assert_eq!(tag.wire_type, WireType::Varint);
+    }
+
+    #[cfg(feature = "futures")]
+    #[test]
+    fn test_stream_ext_tag_eof() {
+        use super::StreamExtTag;
+        use ::futures_executor::block_on;
+        use ::futures_util::stream;
+        use ::std::convert::Infallible;
+        use ::std::pin::Pin;
+
+        let mut stream = stream::empty::<Result<u8, Infallible>>();
+
+        let result = block_on(async { Pin::new(&mut stream).read_tag().await });
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[cfg(feature = "futures")]
+    #[test]
+    fn test_stream_ext_tag_invalid_wire_type() {
+        use super::StreamExtTag;
+        use ::futures_executor::block_on;
+        use ::futures_util::stream;
+        use ::std::convert::Infallible;
+        use ::std::pin::Pin;
+
+        // tag field 1 wire type 6 (invalid)
+        let bytes: Vec<Result<u8, Infallible>> = vec![Ok(0x0E)]; // (1 << 3) | 6 = 14 = 0x0E
+        let mut stream = stream::iter(bytes);
+
+        let result = block_on(async { Pin::new(&mut stream).read_tag().await });
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(ProtobufError::InvalidWireType { value: 6 })
+        ));
     }
 }
