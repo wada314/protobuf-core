@@ -70,8 +70,7 @@ This project aims to create a **protobuf utility library** that provides common 
    - `Tag` struct - represents a protobuf tag with field number and wire type
    - `Tag::to_encoded()` - construct encoded tag value as Varint
    - `Tag::from_encoded()` - parse tag from encoded Varint value
-   - `read_tag()` - standalone function to read tag from byte iterator
-   - `ReadExtTag` trait - extension trait for reading tags from `std::io::Read` types
+   - `IteratorExtTag`, `TryIteratorExtTag`, `ReadExtTag` traits - provide `read_tag()`, `read_tag_partial()`, and `read_tag_resume()` for reading tags from iterators or `std::io::Read`
 
 4. **Field Number Type** (`src/field_number.rs`)
    - `FieldNumber` wrapper type for validated protobuf field numbers
@@ -92,6 +91,7 @@ This project aims to create a **protobuf utility library** that provides common 
      - `FieldNumberOutOfRange` - field number out of valid range [1, 2^29 - 1]
      - `InvalidWireType` - invalid wire type value (must be 0-5)
      - `VarintDowncastOutOfRange` - varint value out of range when downcasting
+     - `VarintTooLong` - varint exceeds maximum length of 10 bytes
      - `FieldTypeDowncastError` - failed to downcast field value to expected type
      - `MalformedTag` - tag contains invalid field number or wire type
      - `UnexpectedEof` - unexpected end of file while parsing
@@ -257,7 +257,8 @@ This project aims to create a **protobuf utility library** that provides common 
 
 ### File Organization
 - `wire_format.rs` - Core constants and wire type definitions
-- `varint.rs` - Varint encoding/decoding logic
+- `varint.rs` - Varint encoding/decoding entry point
+- `varint/read.rs` - Varint read traits (`IteratorExtVarint`, `TryIteratorExtVarint`, `ReadExtVarint`) and partial/resume API
 - `tag.rs` - Tag construction and parsing operations
 - `field_number.rs` - Field number validation and utilities
 - `field/` - Field-level I/O utilities module
