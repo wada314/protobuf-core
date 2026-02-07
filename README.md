@@ -1,5 +1,14 @@
 # protobuf-core
 
+---
+
+## ⚠️ NOT A GOOGLE OFFICIAL PRODUCT
+
+**This library is not an official Google product.**  
+Google provides its own Protocol Buffers implementation for Rust (see [protocolbuffers/protobuf](https://github.com/protocolbuffers/protobuf) and official Rust support). This project is an **independent, community-maintained** library.
+
+---
+
 A primitive utility library for Protocol Buffers in Rust.
 
 This library provides common definitions, constants, enums, and basic logic for implementing Protocol Buffers. It is designed to minimize entry barriers for developers who want to implement Protocol Buffers functionality.
