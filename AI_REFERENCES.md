@@ -70,8 +70,7 @@ This project aims to create a **protobuf utility library** that provides common 
    - `Tag` struct - represents a protobuf tag with field number and wire type
    - `Tag::to_encoded()` - construct encoded tag value as Varint
    - `Tag::from_encoded()` - parse tag from encoded Varint value
-   - `read_tag()` - standalone function to read tag from byte iterator
-   - `ReadExtTag` trait - extension trait for reading tags from `std::io::Read` types
+   - `IteratorExtTag`, `TryIteratorExtTag`, `ReadExtTag` traits - provide `read_tag()`, `read_tag_partial()`, and `read_tag_resume()` for reading tags from iterators or `std::io::Read`
 
 4. **Field Number Type** (`src/field_number.rs`)
    - `FieldNumber` wrapper type for validated protobuf field numbers
@@ -92,6 +91,7 @@ This project aims to create a **protobuf utility library** that provides common 
      - `FieldNumberOutOfRange` - field number out of valid range [1, 2^29 - 1]
      - `InvalidWireType` - invalid wire type value (must be 0-5)
      - `VarintDowncastOutOfRange` - varint value out of range when downcasting
+     - `VarintTooLong` - varint exceeds maximum length of 10 bytes
      - `FieldTypeDowncastError` - failed to downcast field value to expected type
      - `MalformedTag` - tag contains invalid field number or wire type
      - `UnexpectedEof` - unexpected end of file while parsing
@@ -184,9 +184,9 @@ This project aims to create a **protobuf utility library** that provides common 
    - **Comprehensive Testing**: Includes roundtrip tests verifying read/write symmetry for all field types
 
 ### 🔄 Next Steps
-10. **Documentation improvements** - Add comprehensive examples and usage guides
-11. **Performance optimizations** - Optimize critical paths if needed
-12. **Additional utilities** - Add more helper methods for common field operations
+11. **Documentation improvements** - Add comprehensive examples and usage guides
+12. **Performance optimizations** - Optimize critical paths if needed
+13. **Additional utilities** - Add more helper methods for common field operations
 
 ## Design Decisions
 
@@ -219,9 +219,46 @@ This project aims to create a **protobuf utility library** that provides common 
 - Example: `from_int32(value: i32)` vs `from_sint32(value: i32)` - both take Rust `i32`, but represent different Protobuf types with different encodings
 
 
+### Partial/Resume API and Async Strategy (2026-02)
+
+**Context**: We introduced `read_varint_partial` / `read_varint_resume` and `read_tag_partial` / `read_tag_resume` to support incomplete input (e.g., chunked reads from network).
+
+**Field parser**: The partial approach is not feasible for the slice-based field parser (which yields `Field<&[u8]>` for Len values) — you need the full slice to exist. Only the owned parser (`Field<Vec<u8>>`) can support partial/resume. The internal state for that becomes complex (NeedTag, NeedLenVarint, NeedLenBytes, etc.).
+
+**Rust alternatives for simplifying state**:
+- Nightly generators (`yield`) — unstable
+- `async`/`await` — compiles to a state machine, linear control flow
+- Explicit state machine (enum + loop) — verbose but no Future overhead
+
+**Async approach**: With async, the input source is passed in as `&mut R: AsyncRead` at the start. When more bytes are needed, we `r.read().await` — same reader, no separate "supply" step. The caller doesn't feed chunks manually.
+
+**Interface incompatibility**: The sync `_partial` / `_resume` interface cannot be reused as the public async API. In async, there's one call that internally awaits. However, we can use `_partial` / `_resume` as the *internal* parsing implementation: async layer reads into a buffer, then calls sync partial/resume on an iterator over that buffer.
+
+**Future cost**: Creating a Future per operation (e.g., per field) has non-trivial overhead — the state machine size grows with `.await` points and locals. For a "very basic" primitives library, this cost is undesirable.
+
+**Decision**: protobuf-core stays **sync-only** for the core parsing primitives. Do not bake async into the field parser. Users who need async I/O can: (1) read into a buffer with `reader.read().await`, (2) call sync `parse_field` (or partial/resume) on that buffer. The "basic building blocks" principle: protobuf-core provides sync primitives; composition with async is the user's (or puroro's) responsibility.
+
+### No Stream-Based Async API (2026-02)
+
+**Decision**: We do **not** provide Stream-based async APIs (`StreamExtVarint`, `StreamExtTag`). Per the "basic building blocks" principle: protobuf-core provides sync primitives (including partial/resume for chunked input); composition with async is the user's (or puroro's) responsibility. Upper-level libraries buffer bytes from `AsyncRead` and call sync partial/resume on that buffer.
+
+**read_exact / fixed-length reads**: Upper-level I/O libraries (tokio, futures-util) provide `read_exact` for AsyncRead. We do not add it to protobuf-core. Our responsibility is protobuf-specific wire format logic (tag, varint); generic "read N bytes" belongs in the I/O layer.
+
+### Field Partial/Resume (2026-02)
+
+**Decision**: Do **not** provide partial/resumable field parsing (`read_field_partial` / `read_field_resume`).
+
+**Rationale**:
+- The main async pattern is "buffer first, then sync parse" — no need for field-level partial.
+- Users who need chunked field parsing can compose from tag + varint partial/resume primitives.
+- Field partial state is complex (tag, length varint, length-delimited bytes, etc.); beyond "basic" scope.
+- Slice-based parser (`Field<&[u8]>`) cannot support partial; owned-only would be asymmetric.
+- Upper-level libraries (e.g. puroro) can implement field-level composition when needed.
+
 ### File Organization
 - `wire_format.rs` - Core constants and wire type definitions
-- `varint.rs` - Varint encoding/decoding logic
+- `varint.rs` - Varint encoding/decoding entry point
+- `varint/read.rs` - Varint read traits (`IteratorExtVarint`, `TryIteratorExtVarint`, `ReadExtVarint`) and partial/resume API
 - `tag.rs` - Tag construction and parsing operations
 - `field_number.rs` - Field number validation and utilities
 - `field/` - Field-level I/O utilities module

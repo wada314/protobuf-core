@@ -11,6 +11,9 @@ readme = "README.md"
 [dependencies]
 thiserror = "1.0"
 
+[dev-dependencies]
+assert_matches = "1.5"
+
 [features]
 default = ["read", "write"]
 read = []

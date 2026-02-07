@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.1] - Unreleased
 
+This release is intended to be **backward compatible** with 0.2.0: existing method signatures (`read_varint(self)`, `read_tag(&mut self)`, etc.) and types are unchanged; only new types and methods were added.
+
 ### Added
+
+#### Partial / resumable tag and varint reading
+- **Varint**: `DecodeState` and `DecodeOutcome` for incremental decoding when input is split across chunks
+- **Varint**: `read_varint_partial()` and `read_varint_resume(state)` on `IteratorExtVarint`, `TryIteratorExtVarint`, and `ReadExtVarint`
+- **Tag**: `Outcome` (re-exported as `TagOutcome`) with variants `Complete(Tag)`, `Empty`, and `Incomplete(DecodeState)`
+- **Tag**: `read_tag_partial()` and `read_tag_resume(state)` on `IteratorExtTag`, `TryIteratorExtTag`, and `ReadExtTag`
+
 - Test case to verify `?Sized` bound on `AsRefExtProtobuf` trait implementation
 
 ### Fixed

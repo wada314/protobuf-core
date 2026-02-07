@@ -20,7 +20,7 @@
 use crate::ProtobufError;
 use crate::Result;
 use crate::field_number::FieldNumber;
-use crate::varint::Varint;
+use crate::varint::{DecodeState, Varint};
 use crate::wire_format::{FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK, WireType};
 use ::std::convert::{From, Into, TryFrom};
 use ::std::io::Read;
@@ -77,6 +77,23 @@ impl TryFrom<Varint> for Tag {
     }
 }
 
+/// Result of a tag read step.
+///
+/// Returned by [`IteratorExtTag::read_tag_partial`], [`ReadExtTag::read_tag_partial`],
+/// and their `read_tag_resume` variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    /// Parsing completed successfully.
+    Complete(Tag),
+    /// No bytes were read (empty input).
+    Empty,
+    /// Parser ran out of input. Use [`read_tag_resume`] with the state
+    /// to continue from another reader/iterator/stream.
+    ///
+    /// [`read_tag_resume`]: ReadExtTag::read_tag_resume
+    Incomplete(DecodeState),
+}
+
 /// Extension trait for reading tag from byte iterators.
 ///
 /// This trait provides a convenient method to read tag directly from
@@ -93,11 +110,13 @@ impl TryFrom<Varint> for Tag {
 /// ```
 pub trait IteratorExtTag {
     /// Read a tag from this iterator.
-    ///
-    /// Returns the Tag `Ok(Some(tag))` if successfully read.
-    /// Returns `Ok(None)` if no input is available (empty iterator).
-    /// Returns `Err(ProtobufError)` if the tag is malformed.
     fn read_tag(&mut self) -> Result<Option<Tag>>;
+
+    /// Read a tag from this iterator, supporting incomplete input.
+    fn read_tag_partial(&mut self) -> Result<Outcome>;
+
+    /// Resume tag decoding with additional bytes from this iterator.
+    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome>;
 }
 
 impl<I> IteratorExtTag for I
@@ -105,14 +124,33 @@ where
     I: Iterator<Item = u8>,
 {
     fn read_tag(&mut self) -> Result<Option<Tag>> {
-        use crate::varint::IteratorExtVarint;
+        use crate::varint::{DecodeOutcome, IteratorExtVarint};
 
-        let varint_result = self.read_varint()?;
-        let Some(varint) = varint_result else {
-            return Ok(None);
-        };
-        let tag = Tag::from_encoded(varint)?;
-        Ok(Some(tag))
+        match self.read_varint_partial()? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
+        }
+    }
+
+    fn read_tag_partial(&mut self) -> Result<Outcome> {
+        use crate::varint::{DecodeOutcome, IteratorExtVarint};
+
+        match self.read_varint_partial()? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
+            DecodeOutcome::Empty => Ok(Outcome::Empty),
+            DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
+        }
+    }
+
+    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome> {
+        use crate::varint::{DecodeOutcome, IteratorExtVarint};
+
+        match self.read_varint_resume(state)? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
+            DecodeOutcome::Empty => Ok(Outcome::Empty),
+            DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
+        }
     }
 }
 
@@ -135,11 +173,13 @@ where
 /// ```
 pub trait TryIteratorExtTag {
     /// Read a tag from this iterator.
-    ///
-    /// Returns the Tag `Ok(Some(tag))` if successfully read.
-    /// Returns `Ok(None)` if no input is available (empty iterator).
-    /// Returns `Err(ProtobufError)` if the tag is malformed or an I/O error occurs.
     fn read_tag(&mut self) -> Result<Option<Tag>>;
+
+    /// Read a tag from this iterator, supporting incomplete input.
+    fn read_tag_partial(&mut self) -> Result<Outcome>;
+
+    /// Resume tag decoding with additional bytes from this iterator.
+    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome>;
 }
 
 impl<I, E> TryIteratorExtTag for I
@@ -148,14 +188,33 @@ where
     E: Into<ProtobufError>,
 {
     fn read_tag(&mut self) -> Result<Option<Tag>> {
-        use crate::varint::TryIteratorExtVarint;
+        use crate::varint::{DecodeOutcome, TryIteratorExtVarint};
 
-        let varint_result = self.read_varint()?;
-        let Some(varint) = varint_result else {
-            return Ok(None);
-        };
-        let tag = Tag::from_encoded(varint)?;
-        Ok(Some(tag))
+        match self.read_varint_partial()? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
+        }
+    }
+
+    fn read_tag_partial(&mut self) -> Result<Outcome> {
+        use crate::varint::{DecodeOutcome, TryIteratorExtVarint};
+
+        match self.read_varint_partial()? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
+            DecodeOutcome::Empty => Ok(Outcome::Empty),
+            DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
+        }
+    }
+
+    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome> {
+        use crate::varint::{DecodeOutcome, TryIteratorExtVarint};
+
+        match self.read_varint_resume(state)? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
+            DecodeOutcome::Empty => Ok(Outcome::Empty),
+            DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
+        }
     }
 }
 
@@ -176,11 +235,13 @@ where
 /// ```
 pub trait ReadExtTag {
     /// Read a tag from this reader.
-    ///
-    /// Returns the Tag `Ok(Some(tag))` if successfully read.
-    /// Returns `Ok(None)` if no input is available (EOF).
-    /// Returns `Err(ProtobufError)` if the tag is malformed.
     fn read_tag(&mut self) -> Result<Option<Tag>>;
+
+    /// Read a tag from this reader, supporting incomplete input.
+    fn read_tag_partial(&mut self) -> Result<Outcome>;
+
+    /// Resume tag decoding with additional bytes from this reader.
+    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome>;
 }
 
 impl<R> ReadExtTag for R
@@ -188,14 +249,33 @@ where
     R: Read,
 {
     fn read_tag(&mut self) -> Result<Option<Tag>> {
-        use crate::varint::ReadExtVarint;
+        use crate::varint::{DecodeOutcome, ReadExtVarint};
 
-        let Some(varint) = self.read_varint()? else {
-            return Ok(None);
-        };
+        match self.read_varint_partial()? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
+        }
+    }
 
-        let tag = Tag::from_encoded(varint)?;
-        Ok(Some(tag))
+    fn read_tag_partial(&mut self) -> Result<Outcome> {
+        use crate::varint::{DecodeOutcome, ReadExtVarint};
+
+        match self.read_varint_partial()? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
+            DecodeOutcome::Empty => Ok(Outcome::Empty),
+            DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
+        }
+    }
+
+    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome> {
+        use crate::varint::{DecodeOutcome, ReadExtVarint};
+
+        match self.read_varint_resume(state)? {
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
+            DecodeOutcome::Empty => Ok(Outcome::Empty),
+            DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
+        }
     }
 }
 
@@ -344,6 +424,53 @@ mod tests {
 
         let tag = IteratorExtTag::read_tag(&mut ::std::iter::empty()).unwrap();
         assert_eq!(tag, None);
+    }
+
+    #[test]
+    fn test_iterator_ext_tag_partial_complete() {
+        use super::{IteratorExtTag, Outcome};
+
+        let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
+        let mut iter = bytes.into_iter();
+        let outcome = iter.read_tag_partial().unwrap();
+        assert!(matches!(outcome, Outcome::Complete(t) if t.field_number.as_u32() == 1));
+    }
+
+    #[test]
+    fn test_iterator_ext_tag_partial_empty() {
+        use super::{IteratorExtTag, Outcome};
+
+        let outcome = IteratorExtTag::read_tag_partial(&mut ::std::iter::empty()).unwrap();
+        assert!(matches!(outcome, Outcome::Empty));
+    }
+
+    #[test]
+    fn test_iterator_ext_tag_partial_resume() {
+        use super::{IteratorExtTag, Outcome};
+
+        // Split tag 0x08 across two chunks: first byte is continuation (0x80), second completes
+        // Actually 0x08 is a complete 1-byte tag. For incomplete, we need a multi-byte varint.
+        // Tag (field 1, wire 0) = 8 = 0x08 - single byte.
+        // For a 2-byte varint: 0x80 0x01 = 128 (field 16, wire 0).
+        let first_chunk: Vec<u8> = vec![0x80]; // incomplete - continuation bit set
+        let second_chunk: Vec<u8> = vec![0x01]; // completes to 128
+
+        let mut iter = first_chunk.into_iter();
+        let outcome = iter.read_tag_partial().unwrap();
+        let state = match outcome {
+            Outcome::Incomplete(s) => s,
+            _ => panic!("expected Incomplete, got {:?}", outcome),
+        };
+
+        let mut iter2 = second_chunk.into_iter();
+        let outcome2 = iter2.read_tag_resume(state).unwrap();
+        match outcome2 {
+            Outcome::Complete(tag) => {
+                assert_eq!(tag.field_number.as_u32(), 16);
+                assert_eq!(tag.wire_type, WireType::Varint);
+            }
+            _ => panic!("expected Complete, got {:?}", outcome2),
+        }
     }
 
     #[test]

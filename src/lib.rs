@@ -120,9 +120,9 @@
 //! varints:
 //!
 //! - [`IteratorExtTag`] / [`TryIteratorExtTag`]
-//!   / [`ReadExtTag`]: Read tags
+//!   / [`ReadExtTag`]: Read tags (sync, with partial/resume for chunked input)
 //! - [`IteratorExtVarint`] / [`TryIteratorExtVarint`]
-//!   / [`ReadExtVarint`]: Read varints
+//!   / [`ReadExtVarint`]: Read varints (sync, with partial/resume for chunked input)
 //! - [`WriteExtVarint`]: Write varints
 //!
 //! ## Feature Flags
@@ -162,9 +162,10 @@ pub use self::field::{
 #[cfg(any(feature = "read", feature = "write"))]
 pub use self::field::{Field, FieldValue};
 pub use self::field_number::FieldNumber;
-pub use self::tag::{IteratorExtTag, ReadExtTag, Tag, TryIteratorExtTag};
+pub use self::tag::{IteratorExtTag, Outcome as TagOutcome, ReadExtTag, Tag, TryIteratorExtTag};
 pub use self::varint::{
-    IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint, WriteExtVarint,
+    DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint,
+    WriteExtVarint,
 };
 pub use self::wire_format::{
     FIELD_NUMBER_SHIFT, FIXED32_BYTES, FIXED64_BYTES, MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT,
