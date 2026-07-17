@@ -279,7 +279,7 @@ mod tests {
             FieldValue::I32(_)
         ));
         assert!(matches!(
-            FieldValue::<Vec<u8>>::from_float(3.14),
+            FieldValue::<Vec<u8>>::from_float(1.5),
             FieldValue::I32(_)
         ));
         assert!(matches!(
@@ -291,7 +291,7 @@ mod tests {
             FieldValue::I64(_)
         ));
         assert!(matches!(
-            FieldValue::<Vec<u8>>::from_double(3.14),
+            FieldValue::<Vec<u8>>::from_double(1.5),
             FieldValue::I64(_)
         ));
 

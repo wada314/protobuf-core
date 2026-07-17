@@ -302,7 +302,7 @@ mod tests {
         }
 
         let varint = Varint::new(bytes);
-        assert_eq!(varint.to_bool(), true);
+        assert!(varint.to_bool());
     }
 
     #[test]
@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(varint.to_sint64(), -1);
 
         let varint = Varint::from_bool(true);
-        assert_eq!(varint.to_bool(), true);
+        assert!(varint.to_bool());
 
         let varint = Varint::from_int32(150);
         assert_eq!(varint.to_int64(), 150);
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(varint.try_to_uint32().unwrap(), 150);
         assert_eq!(varint.try_to_sint32().unwrap(), 75);
         assert_eq!(varint.to_sint64(), 75);
-        assert_eq!(varint.to_bool(), true);
+        assert!(varint.to_bool());
         assert_eq!(varint.try_to_int32().unwrap(), 150);
         assert_eq!(varint.to_int64(), 150);
     }

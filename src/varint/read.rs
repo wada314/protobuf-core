@@ -437,7 +437,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint};
+    use super::{
+        DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint,
+    };
     use crate::ProtobufError;
     use crate::varint::Varint;
 
