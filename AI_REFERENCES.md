@@ -92,8 +92,6 @@ This project aims to create a **protobuf utility library** that provides common 
      - `InvalidWireType` - invalid wire type value (must be 0-5)
      - `VarintDowncastOutOfRange` - varint value out of range when downcasting
      - `VarintTooLong` - varint exceeds maximum length of 10 bytes
-     - `FieldTypeDowncastError` - failed to downcast field value to expected type
-     - `MalformedTag` - tag contains invalid field number or wire type
      - `UnexpectedEof` - unexpected end of file while parsing
      - `IoError` - I/O error (wrapped from `std::io::Error`)
    - **Custom Result type**: `Result<T>` alias for `std::result::Result<T, ProtobufError>`

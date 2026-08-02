@@ -204,12 +204,6 @@ pub enum ProtobufError {
     #[error("Varint exceeds maximum length of 10 bytes")]
     VarintTooLong,
 
-    #[error("Failed to downcast field value to expected type: {expected_type}")]
-    FieldTypeDowncastError { expected_type: String },
-
-    #[error("Malformed tag: field_number={field_number}, wire_type={wire_type}")]
-    MalformedTag { field_number: u32, wire_type: u8 },
-
     #[error("Unexpected EOF while parsing field")]
     UnexpectedEof,
 
