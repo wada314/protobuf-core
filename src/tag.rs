@@ -47,7 +47,11 @@ impl Tag {
         let wire_type_value = value & WIRE_TYPE_MASK;
 
         // Create field number
-        let field_number = FieldNumber::try_new(field_number_value)?;
+        let field_number = FieldNumber::try_new(field_number_value).map_err(|value| {
+            ProtobufError::FieldNumberOutOfRange {
+                value: i64::from(value),
+            }
+        })?;
 
         // Parse wire type
         let wire_type = WireType::try_from(wire_type_value as u8)?;

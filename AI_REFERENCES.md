@@ -267,11 +267,10 @@ This project aims to create a **protobuf utility library** that provides common 
 
 ## Design notes (ongoing)
 
-### `FieldNumberOutOfRange` stores `i64`, not `String` (2026-08)
-- No need to allocate / format the bad input just to report it; keep a numeric value for `Display`.
-- `i64` covers `u32` field numbers and negative `i32` `TryFrom` inputs. The extra width is cheap and not worth optimizing away.
-- Keep `TryFrom<i32>`: `FieldDescriptorProto.number` (and related descriptor fields) are `int32` in `descriptor.proto`, so an `i32` → `FieldNumber` cast at that boundary is inevitable even though wire field numbers are conceptually unsigned.
-- Enables `FieldNumber::try_new` (and `as_u32` / `as_i32` / `as_usize`) to be `const fn`, so callers can build validated numbers in const contexts (e.g. from catalog `const FIELD: u32`).
+### `FieldNumber` construction errors (2026-08)
+- `try_new(u32) -> Result<Self, u32>` and `TryFrom<u32>` / `TryFrom<i32>` return the bad input (`u32` / `i32`), not `ProtobufError`. Thin newtype style; keeps `try_new` usable in `const fn` (no non-const-drop error type).
+- Keep `TryFrom<i32>`: `FieldDescriptorProto.number` is `int32` in `descriptor.proto`.
+- Wire / IO boundaries (`Tag::from_encoded`, plugin I/O) map into `ProtobufError::FieldNumberOutOfRange { value: i64 }` via `map_err`. The `i64` payload covers `u32` and negative `i32` for `Display`.
 
 ## Official Protocol Buffer Documentation:
 https://protobuf.dev/

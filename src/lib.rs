@@ -67,7 +67,7 @@
 //!
 //! let mut buffer = Vec::new();
 //! let field: Field<Vec<u8>> = Field::new(
-//!     FieldNumber::try_from(1)?,
+//!     FieldNumber::try_new(1).unwrap(),
 //!     FieldValue::from_uint64(150)
 //! );
 //! buffer.write_protobuf_field(&field)?;

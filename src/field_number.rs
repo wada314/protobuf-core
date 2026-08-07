@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//      http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::ProtobufError;
 use ::std::convert::TryFrom;
+
 /// A validated Protocol Buffers field number.
 ///
 /// Field numbers must be in the range [1, 2^29 - 1].
@@ -40,11 +40,11 @@ impl FieldNumber {
     pub const RESERVED_RANGE_END: u32 = 19999;
 
     /// Creates a new field number, validating the range.
-    pub const fn try_new(value: u32) -> Result<Self, ProtobufError> {
+    ///
+    /// On failure, returns the input `value` (a thin-wrapper style error).
+    pub const fn try_new(value: u32) -> Result<Self, u32> {
         if value < Self::MIN.0 || value > Self::MAX.0 {
-            return Err(ProtobufError::FieldNumberOutOfRange {
-                value: value as i64,
-            });
+            return Err(value);
         }
         Ok(Self(value))
     }
@@ -99,7 +99,7 @@ impl FieldNumber {
 }
 
 impl TryFrom<u32> for FieldNumber {
-    type Error = ProtobufError;
+    type Error = u32;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         Self::try_new(value)
@@ -113,14 +113,15 @@ impl From<FieldNumber> for u32 {
 }
 
 impl TryFrom<i32> for FieldNumber {
-    type Error = ProtobufError;
+    type Error = i32;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         match u32::try_from(value) {
-            Ok(v) => Self::try_new(v),
-            Err(_) => Err(ProtobufError::FieldNumberOutOfRange {
-                value: i64::from(value),
-            }),
+            Ok(v) => match Self::try_new(v) {
+                Ok(n) => Ok(n),
+                Err(_) => Err(value),
+            },
+            Err(_) => Err(value),
         }
     }
 }
@@ -147,8 +148,8 @@ mod tests {
         assert!(FieldNumber::try_new(16).is_ok());
         assert!(FieldNumber::try_new(536_870_911).is_ok());
 
-        assert!(FieldNumber::try_new(0).is_err());
-        assert!(FieldNumber::try_new(536_870_912).is_err());
+        assert_eq!(FieldNumber::try_new(0), Err(0));
+        assert_eq!(FieldNumber::try_new(536_870_912), Err(536_870_912));
     }
 
     #[test]
@@ -167,13 +168,8 @@ mod tests {
         let field_number = result.unwrap();
         assert_eq!(field_number.as_u32(), 1);
 
-        let result = FieldNumber::try_from(0);
-        assert!(result.is_err());
-        if let Err(ProtobufError::FieldNumberOutOfRange { value }) = result {
-            assert_eq!(value, 0);
-        } else {
-            panic!("Expected FieldNumberOutOfRange error");
-        }
+        assert_eq!(FieldNumber::try_from(0), Err(0));
+        assert_eq!(FieldNumber::try_from(-1), Err(-1));
     }
 
     #[test]

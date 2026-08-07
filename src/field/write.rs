@@ -40,7 +40,7 @@ pub trait WriteExtProtobuf {
     ///     let mut buffer = Vec::new();
     ///     
     ///     let field: Field<Vec<u8>> = Field::new(
-    ///         FieldNumber::try_from(1)?,
+    ///         FieldNumber::try_new(1).unwrap(),
     ///         FieldValue::from_uint64(150)
     ///     );
     ///     
@@ -63,8 +63,8 @@ pub trait WriteExtProtobuf {
     ///     let mut buffer = Vec::new();
     ///     
     ///     let fields = vec![
-    ///         Field::new(FieldNumber::try_from(1)?, FieldValue::from_uint64(150)),
-    ///         Field::new(FieldNumber::try_from(2)?, FieldValue::Len("Hello".to_string().into_bytes())),
+    ///         Field::new(FieldNumber::try_new(1).unwrap(), FieldValue::from_uint64(150)),
+    ///         Field::new(FieldNumber::try_new(2).unwrap(), FieldValue::Len("Hello".to_string().into_bytes())),
     ///     ];
     ///     
     ///     buffer.write_protobuf_fields(&fields)?;
@@ -146,7 +146,7 @@ mod tests {
         let mut buffer = Vec::new();
 
         let field: Field<Vec<u8>> = Field::new(
-            FieldNumber::try_from(1).unwrap(),
+            FieldNumber::try_new(1).unwrap(),
             FieldValue::from_uint64(150),
         );
 
@@ -203,7 +203,7 @@ mod tests {
 
         let fields: Vec<Field<Vec<u8>>> = vec![
             Field::new(
-                FieldNumber::try_from(1).unwrap(),
+                FieldNumber::try_new(1).unwrap(),
                 FieldValue::from_uint64(150),
             ),
             Field::new(
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn test_field_encoded_size() {
         let field: Field<Vec<u8>> = Field::new(
-            FieldNumber::try_from(1).unwrap(),
+            FieldNumber::try_new(1).unwrap(),
             FieldValue::from_uint64(150),
         );
         assert_eq!(field.encoded_size(), 3); // tag (1 byte) + value (2 bytes)
@@ -315,7 +315,7 @@ mod tests {
 
             // Write
             let original_field: Field<Vec<u8>> = Field::new(
-                FieldNumber::try_from(1).unwrap(),
+                FieldNumber::try_new(1).unwrap(),
                 FieldValue::from_uint64(150),
             );
             buffer.write_protobuf_field(&original_field).unwrap();
@@ -360,7 +360,7 @@ mod tests {
             // Write
             let original_fields: Vec<Field<Vec<u8>>> = vec![
                 Field::new(
-                    FieldNumber::try_from(1).unwrap(),
+                    FieldNumber::try_new(1).unwrap(),
                     FieldValue::from_uint64(150),
                 ),
                 Field::new(
