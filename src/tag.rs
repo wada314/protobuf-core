@@ -332,7 +332,7 @@ mod tests {
         assert!(result.is_err());
 
         if let Err(ProtobufError::FieldNumberOutOfRange { value }) = result {
-            assert_eq!(value, "0");
+            assert_eq!(value, 0);
         } else {
             panic!("Expected FieldNumberOutOfRange error");
         }
@@ -381,7 +381,7 @@ mod tests {
         assert!(result.is_err());
 
         if let Err(ProtobufError::FieldNumberOutOfRange { value }) = result {
-            assert_eq!(value, "0");
+            assert_eq!(value, 0);
         } else {
             panic!("Expected FieldNumberOutOfRange error");
         }

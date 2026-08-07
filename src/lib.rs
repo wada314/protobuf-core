@@ -190,7 +190,7 @@ use ::thiserror::Error;
 #[derive(Error, Debug)]
 pub enum ProtobufError {
     #[error("Field number {value} is out of valid range [1, 536_870_911]")]
-    FieldNumberOutOfRange { value: String },
+    FieldNumberOutOfRange { value: i64 },
 
     #[error("Invalid wire type: {value} (must be 0-5)")]
     InvalidWireType { value: u8 },

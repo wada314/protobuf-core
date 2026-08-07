@@ -265,6 +265,14 @@ This project aims to create a **protobuf utility library** that provides common 
   - `write.rs` - Field writing utilities (`write` feature)
 
 
+## Design notes (ongoing)
+
+### `FieldNumberOutOfRange` stores `i64`, not `String` (2026-08)
+- No need to allocate / format the bad input just to report it; keep a numeric value for `Display`.
+- `i64` covers `u32` field numbers and negative `i32` `TryFrom` inputs. The extra width is cheap and not worth optimizing away.
+- Keep `TryFrom<i32>`: `FieldDescriptorProto.number` (and related descriptor fields) are `int32` in `descriptor.proto`, so an `i32` → `FieldNumber` cast at that boundary is inevitable even though wire field numbers are conceptually unsigned.
+- Enables `FieldNumber::try_new` (and `as_u32` / `as_i32` / `as_usize`) to be `const fn`, so callers can build validated numbers in const contexts (e.g. from catalog `const FIELD: u32`).
+
 ## Official Protocol Buffer Documentation:
 https://protobuf.dev/
 

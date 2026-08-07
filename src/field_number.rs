@@ -40,10 +40,10 @@ impl FieldNumber {
     pub const RESERVED_RANGE_END: u32 = 19999;
 
     /// Creates a new field number, validating the range.
-    pub fn try_new(value: u32) -> Result<Self, ProtobufError> {
-        if !(Self::MIN.0..=Self::MAX.0).contains(&value) {
+    pub const fn try_new(value: u32) -> Result<Self, ProtobufError> {
+        if value < Self::MIN.0 || value > Self::MAX.0 {
             return Err(ProtobufError::FieldNumberOutOfRange {
-                value: value.to_string(),
+                value: value as i64,
             });
         }
         Ok(Self(value))
@@ -83,17 +83,17 @@ impl FieldNumber {
     }
 
     /// Returns the field number as a `u32`.
-    pub fn as_u32(&self) -> u32 {
+    pub const fn as_u32(self) -> u32 {
         self.0
     }
 
-    /// Returns the filed number as a `i32`
-    pub fn as_i32(&self) -> i32 {
+    /// Returns the field number as a `i32`.
+    pub const fn as_i32(self) -> i32 {
         self.0 as i32
     }
 
     /// Returns the field number as a `usize`.
-    pub fn as_usize(&self) -> usize {
+    pub const fn as_usize(self) -> usize {
         self.0 as usize
     }
 }
@@ -116,13 +116,12 @@ impl TryFrom<i32> for FieldNumber {
     type Error = ProtobufError;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
-        Self::try_new(
-            value
-                .try_into()
-                .map_err(|_| ProtobufError::FieldNumberOutOfRange {
-                    value: value.to_string(),
-                })?,
-        )
+        match u32::try_from(value) {
+            Ok(v) => Self::try_new(v),
+            Err(_) => Err(ProtobufError::FieldNumberOutOfRange {
+                value: i64::from(value),
+            }),
+        }
     }
 }
 
@@ -171,7 +170,7 @@ mod tests {
         let result = FieldNumber::try_from(0);
         assert!(result.is_err());
         if let Err(ProtobufError::FieldNumberOutOfRange { value }) = result {
-            assert_eq!(value, "0");
+            assert_eq!(value, 0);
         } else {
             panic!("Expected FieldNumberOutOfRange error");
         }
