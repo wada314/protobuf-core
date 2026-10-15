@@ -1,5 +1,7 @@
 # AI References for protobuf-core Project
 
+Living notes for agents working on this crate. Inventory below is reconciled with **0.2.2** (`CHANGELOG.md` / `src/lib.rs`). Policy decisions (sync-only, no field partial/resume, no Stream APIs) still apply.
+
 ## Project Overview
 This project aims to create a **protobuf utility library** that provides common definitions, constants, enums, and trivial logic implementations. The goal is to minimize entry barriers for developers who want to implement Protocol Buffers.
 
@@ -43,7 +45,7 @@ This project aims to create a **protobuf utility library** that provides common 
    - Message size limits (MAX_MESSAGE_SIZE, MAX_STRING_SIZE)
    - Tag encoding constants (WIRE_TYPE_MASK, FIELD_NUMBER_SHIFT)
    - Varint encoding constants (VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK)
-   - Size constants for fixed-width types (FIXED32_SIZE, FIXED64_SIZE, etc.)
+   - Size constants for fixed-width types (`FIXED32_BYTES`, `FIXED64_BYTES`, etc.)
    - Comprehensive test coverage
 
 2. **Varint Encoding/Decoding** (`src/varint.rs`)
@@ -81,8 +83,8 @@ This project aims to create a **protobuf utility library** that provides common 
      - `is_in_range()` - checks if field number is within a specific range
      - `encoded_size()` - calculates tag size considering 3-bit shift for wire type
      - `as_u32()`, `as_i32()`, `as_usize()` - conversion methods
-   - Proper error handling via `ProtobufError::FieldNumberOutOfRange`
-   - Implements `TryFrom<u32>`, `TryFrom<i32>`, `From<FieldNumber>` traits
+   - Construction: `try_new(u32) -> Result<Self, u32>` and `TryFrom<u32>` / `TryFrom<i32>` return the bad input, not `ProtobufError` (see Design notes 2026-08)
+   - Wire / IO boundaries map into `ProtobufError::FieldNumberOutOfRange { value: i64 }`
    - Integration with existing tag and wire_format modules
    - Comprehensive test coverage including edge cases
 
@@ -109,7 +111,7 @@ This project aims to create a **protobuf utility library** that provides common 
      - `src/tag.rs` - tag construction and parsing operations
      - `src/varint.rs` - varint encoding/decoding logic
      - `src/wire_format.rs` - wire format constants and definitions
-     - `src/parser.rs` - low-level field reading utilities (feature-gated)
+     - `src/field.rs` / `src/field/read.rs` / `src/field/write.rs` - field I/O (feature-gated `read` / `write`)
    - **Benefits**: Clearer namespace hierarchy, better maintainability, follows modern Rust practices
 
 7. **Enhanced Varint I/O API** (`src/varint.rs`)
@@ -127,7 +129,7 @@ This project aims to create a **protobuf utility library** that provides common 
      - Clean separation: I/O operations are extension methods, encoding is a varint method
      - Clean imports: Uses `std::io::{Read, Write}` imports instead of full paths
      - Iterator integration: `try_collect_varint()` provides `FromIterator`-like functionality for varints
-     - API unification: All operations use methods, standalone function `read_tag()` remains for compatibility
+     - API unification: tag/varint I/O is trait methods only (`IteratorExtTag` / `ReadExtTag` / …). The standalone `read_tag()` function was removed in 0.2.0
    - **Error Handling**: Added `ProtobufError::IoError` variant for I/O errors
    - **Comprehensive Testing**: All APIs tested with both unit tests and doc tests
 
@@ -146,9 +148,12 @@ This project aims to create a **protobuf utility library** that provides common 
    - **Field struct** - represents a parsed field with field number and raw value
      - `Field::new()` - creates a new field with given field number and value
      - `Field::encoded_size()` - calculates total encoded size including tag
-   - **ReadExtProtobuf trait** - extension trait for `std::io::Read` types:
-     - `read_protobuf_fields()` - returns an iterator over all fields
-   - **ProtobufFieldIterator** - iterator for reading protobuf fields sequentially from a reader
+   - **Reading traits** (all feature-gated `read`):
+     - `IteratorExtProtobuf` — `Iterator<Item = u8>` → `Field<Vec<u8>>` (`protobuf_fields()`)
+     - `TryIteratorExtProtobuf` — `Iterator<Item = Result<u8, E>>` → `Field<Vec<u8>>`
+     - `AsRefExtProtobuf` — `AsRef<[u8]>` (slices) → `Field<&[u8]>` (zero-copy `Len`)
+     - `ReadExtProtobuf` — `std::io::Read` → `Field<Vec<u8>>` (`read_protobuf_fields()`)
+   - **ProtobufFieldIterator** / **ProtobufFieldSliceIterator** — sequential field iterators
    - **Benefits**:
      - Simple, low-level utilities for reading raw protobuf fields
      - Works with any `std::io::Read` source
@@ -182,9 +187,7 @@ This project aims to create a **protobuf utility library** that provides common 
    - **Comprehensive Testing**: Includes roundtrip tests verifying read/write symmetry for all field types
 
 ### 🔄 Next Steps
-11. **Documentation improvements** - Add comprehensive examples and usage guides
-12. **Performance optimizations** - Optimize critical paths if needed
-13. **Additional utilities** - Add more helper methods for common field operations
+Core primitives through 0.2.2 are shipped (including `IteratorExtProtobuf` / `AsRefExtProtobuf` and tag/varint partial/resume). Do **not** add field-level partial/resume or async Stream APIs (see decisions below). Remaining work is documentation polish and helpers only when a caller (e.g. puroro) actually needs them.
 
 ## Design Decisions
 
