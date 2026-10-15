@@ -1,6 +1,6 @@
 # AI References for protobuf-core Project
 
-Living notes for agents working on this crate. Inventory below is reconciled with **0.2.2** (`CHANGELOG.md` / `src/lib.rs`). Policy decisions (sync-only, no field partial/resume, no Stream APIs) still apply.
+Historical design discussion. **Start with [`AGENTS.md`](AGENTS.md)** (the agent entry point). Do not treat this file as the place for build commands or new standing instructions.
 
 ## Project Overview
 This project aims to create a **protobuf utility library** that provides common definitions, constants, enums, and trivial logic implementations. The goal is to minimize entry barriers for developers who want to implement Protocol Buffers.

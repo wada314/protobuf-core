@@ -1,7 +1,8 @@
 ---
 description: Project-specific rules for protobuf-core
-globs: **/*.rs, AI_REFERENCES.md
+globs: **/*.rs, AGENTS.md, AI_REFERENCES.md
 alwaysApply: true
 ---
 
-- `AI_REFERENCES.md` contains our discussion history with AI. Please update it when you think you need to record something for future reference.
+- [`AGENTS.md`](AGENTS.md) is the agent entry point (build/test, constraints). Keep it current when commands or standing rules change.
+- [`AI_REFERENCES.md`](AI_REFERENCES.md) is optional design-history. Do not put new setup instructions there.
