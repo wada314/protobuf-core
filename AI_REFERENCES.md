@@ -187,7 +187,7 @@ This project aims to create a **protobuf utility library** that provides common 
    - **Comprehensive Testing**: Includes roundtrip tests verifying read/write symmetry for all field types
 
 ### 🔄 Next Steps
-Core primitives through 0.2.2 are shipped (including `IteratorExtProtobuf` / `AsRefExtProtobuf` and tag/varint partial/resume). Do **not** add field-level partial/resume or async Stream APIs (see decisions below). Remaining work is documentation polish and helpers only when a caller (e.g. puroro) actually needs them.
+Core primitives through 0.3.0 are shipped (including `IteratorExtProtobuf` / `AsRefExtProtobuf` and tag/varint partial/resume). 0.3.0 changes `FieldNumber::try_new` to return the rejected `u32` and removes `FieldTypeDowncastError` / `MalformedTag`. Do **not** add field-level partial/resume or async Stream APIs (see decisions below). Remaining work is documentation polish and helpers only when a caller (e.g. puroro) actually needs them.
 
 ## Design Decisions
 

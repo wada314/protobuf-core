@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0]
+
+Breaking field-number and error-enum changes. Callers that matched `ProtobufError` exhaustively, or that used `FieldNumber::try_new` / `TryFrom` errors as `ProtobufError`, must update.
+
+### Changed
+
+- `FieldNumber::try_new` is `const fn` and returns `Result<Self, u32>` (the rejected input) instead of `Result<Self, ProtobufError>`.
+- `TryFrom<u32> for FieldNumber` uses `Error = u32`. `TryFrom<i32> for FieldNumber` uses `Error = i32`, and returns that original `i32` for both negative values and out-of-range magnitudes.
+- `ProtobufError::FieldNumberOutOfRange.value` is `i64` instead of `String`. Tag parsing still reports this variant, converting the rejected `u32` with `i64::from`.
+- `FieldNumber::as_u32`, `as_i32`, and `as_usize` are `const fn` and take `self` by value.
+
+### Removed
+
+- `ProtobufError::FieldTypeDowncastError`
+- `ProtobufError::MalformedTag`
+
 ## [0.2.2]
 
 This release is intended to be **backward compatible** with 0.2.0: existing method signatures (`read_varint(self)`, `read_tag(&mut self)`, etc.) and types are unchanged; only new types and methods were added.
