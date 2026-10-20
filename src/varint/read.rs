@@ -1,4 +1,4 @@
-//! Varint decoding (reading) from iterators, Read, and async streams.
+//! Varint decoding (reading) from iterators and `std::io::Read`.
 //!
 //! This module provides extension traits and types for reading varints from
 //! various sources, including partial decoding and resume support.
@@ -61,6 +61,14 @@ impl DecodeState {
             self.bytes_consumed += 1;
 
             let value = (byte & VARINT_PAYLOAD_MASK) as u64;
+            // Bytes 1-9 contribute 7 bits each. The 10th byte may only set bit 63.
+            if self.shift >= 64 {
+                return Err(ProtobufError::VarintTooLong);
+            }
+            let bits_left = 64 - self.shift;
+            if bits_left < 7 && value >> bits_left != 0 {
+                return Err(ProtobufError::VarintTooLong);
+            }
             self.decoded_value |= value << self.shift;
 
             if byte & VARINT_CONTINUATION_BIT == 0 {
@@ -662,5 +670,31 @@ mod tests {
 
             assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
         }
+    }
+
+    #[test]
+    fn test_read_varint_tenth_byte_overflow() {
+        use crate::ProtobufError;
+
+        // Nine continuation bytes, then a payload that does not fit in bit 63.
+        let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02];
+        let result = bytes.into_iter().read_varint();
+        assert!(matches!(result, Err(ProtobufError::VarintTooLong)));
+
+        let bytes = vec![0x80u8; 10];
+        let result = bytes.into_iter().read_varint();
+        assert!(matches!(result, Err(ProtobufError::VarintTooLong)));
+    }
+
+    #[test]
+    fn test_read_varint_u64_max_and_overlong_zero() {
+        let bytes = vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
+        let varint = bytes.into_iter().read_varint().unwrap().unwrap();
+        assert_eq!(varint.to_uint64(), u64::MAX);
+
+        // Overlong encoding of 0: the 10th byte contributes no bits. Parsers accept it.
+        let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00];
+        let varint = bytes.into_iter().read_varint().unwrap().unwrap();
+        assert_eq!(varint.to_uint64(), 0);
     }
 }

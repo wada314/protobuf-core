@@ -16,6 +16,11 @@ Breaking field-number and error-enum changes. Callers that matched `ProtobufErro
 - `ProtobufError::FieldNumberOutOfRange.value` is `i64` instead of `String`. Tag parsing still reports this variant, converting the rejected `u32` with `i64::from`.
 - `FieldNumber::as_u32`, `as_i32`, and `as_usize` are `const fn` and take `self` by value.
 
+### Fixed
+
+- `Varint::from_sint64(i64::MIN)` no longer panics. It ZigZag-encodes as `u64::MAX`.
+- A 10-byte varint whose last byte sets more than bit 63 is `ProtobufError::VarintTooLong`. Previously the extra bits were discarded and decoding returned success.
+
 ### Removed
 
 - Per-file copyright and Apache boilerplate comments. The crate license remains Apache-2.0 (`LICENSE` and `license` in `Cargo.toml`).
@@ -112,11 +117,9 @@ Added constants in `wire_format` module:
      let field: Field<&[u8]> = ...;
      ```
 
-3. **`FieldValue::from_bytes()` and `from_string()` moved**
-   - **Previous**: Available on `impl FieldValue`
-   - **Current**: Available only on `impl FieldValue<Vec<u8>>`
-   - **Impact**: These methods are now clearly marked as for owned data only
-   - **Migration**: No code changes needed if you were using them with `Vec<u8>` data
+3. **`FieldValue::from_bytes()` and `from_string()` removed**
+   - Length-delimited values are constructed as `FieldValue::Len(...)`.
+   - There is no `from_bytes` or `from_string` constructor.
 
 ### Documentation
 

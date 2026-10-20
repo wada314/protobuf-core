@@ -61,11 +61,8 @@ impl Varint {
 
     /// Create a Varint from `i64`, assuming `SInt64` protobuf type.
     pub fn from_sint64(value: i64) -> Self {
-        let zigzag_value = if value < 0 {
-            ((-value) as u64) * 2 - 1
-        } else {
-            (value as u64) * 2
-        };
+        // ZigZag on unsigned bits. Negating `i64::MIN` overflows, so do not use `-value`.
+        let zigzag_value = ((value as u64) << 1) ^ ((value >> 63) as u64);
         let bytes = zigzag_value.to_le_bytes();
         Self(bytes)
     }
@@ -327,6 +324,29 @@ mod tests {
 
         let varint = Varint::from_int64(150);
         assert_eq!(varint.to_int64(), 150);
+    }
+
+    #[test]
+    fn test_sint64_extremes() {
+        let min_varint = Varint::from_sint64(i64::MIN);
+        assert_eq!(min_varint.to_uint64(), u64::MAX);
+        assert_eq!(min_varint.to_sint64(), i64::MIN);
+        let (bytes, count) = min_varint.encode();
+        assert_eq!(count, 10);
+        assert_eq!(
+            &bytes[..count],
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]
+        );
+
+        let max_varint = Varint::from_sint64(i64::MAX);
+        assert_eq!(max_varint.to_uint64(), u64::MAX - 1);
+        assert_eq!(max_varint.to_sint64(), i64::MAX);
+
+        assert_eq!(Varint::from_sint64(-1).to_uint64(), 1);
+        assert_eq!(
+            Varint::from_sint32(i32::MIN).to_sint64(),
+            i64::from(i32::MIN)
+        );
     }
 
     #[test]
