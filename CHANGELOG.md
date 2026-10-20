@@ -11,6 +11,7 @@ Breaking field-number and error-enum changes. Callers that matched `ProtobufErro
 
 ### Changed
 
+- Source file copyright notice is `Copyright 2025-2026 Shohei Wada`. The previous `Copyright 2021 Google LLC` line was Apache boilerplate added in this repository; it does not record Google ownership.
 - `FieldNumber::try_new` is `const fn` and returns `Result<Self, u32>` (the rejected input) instead of `Result<Self, ProtobufError>`.
 - `TryFrom<u32> for FieldNumber` uses `Error = u32`. `TryFrom<i32> for FieldNumber` uses `Error = i32`, and returns that original `i32` for both negative values and out-of-range magnitudes.
 - `ProtobufError::FieldNumberOutOfRange.value` is `i64` instead of `String`. Tag parsing still reports this variant, converting the rejected `u32` with `i64::from`.
