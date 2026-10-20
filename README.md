@@ -62,13 +62,15 @@ let fields: Vec<Field<Vec<u8>>> = bytes
 ```rust
 use protobuf_core::{WriteExtProtobuf, Field, FieldValue, FieldNumber};
 
-let mut buffer = Vec::new();
-let field: Field<Vec<u8>> = Field::new(
-    FieldNumber::try_new(1).unwrap(),
-    FieldValue::from_uint64(150)
-);
-buffer.write_protobuf_field(&field)?;
-# Ok::<(), protobuf_core::ProtobufError>(())
+fn main() -> Result<(), protobuf_core::ProtobufError> {
+    let mut buffer = Vec::new();
+    let field: Field<Vec<u8>> = Field::new(
+        FieldNumber::try_new(1).unwrap(),
+        FieldValue::from_uint64(150),
+    );
+    buffer.write_protobuf_field(&field)?;
+    Ok(())
+}
 ```
 
 ## Design Philosophy
