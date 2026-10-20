@@ -36,4 +36,4 @@ cargo clippy --all-targets
 ## Docs
 
 - User API: [`README.md`](README.md), [`CHANGELOG.md`](CHANGELOG.md), rustdoc on `src/lib.rs`.
-- Older design discussion (not the agent entry point): [`AI_REFERENCES.md`](AI_REFERENCES.md). Put new durable instructions here in `AGENTS.md`.
+- Put durable instructions in this file. Do not add a second design-history document.
