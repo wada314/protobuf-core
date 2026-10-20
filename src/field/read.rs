@@ -1068,4 +1068,71 @@ mod tests {
             .unwrap();
         assert_eq!(fields.len(), 0);
     }
+
+    #[test]
+    fn test_as_ref_ext_algorithm_edges() {
+        use super::AsRefExtProtobuf;
+        use crate::ProtobufError;
+
+        let multi_byte_tag = &[0x80, 0x01, 0x01][..];
+        let fields: Vec<_> = multi_byte_tag
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields[0].field_number.as_u32(), 16);
+        match &fields[0].value {
+            FieldValue::Varint(varint) => assert_eq!(varint.to_uint64(), 1),
+            other => panic!("expected varint, got {other:?}"),
+        }
+
+        let empty_len = &[0x0A, 0x00][..];
+        let fields: Vec<_> = empty_len
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        match &fields[0].value {
+            FieldValue::Len(data) => assert!(data.is_empty()),
+            other => panic!("expected empty len, got {other:?}"),
+        }
+
+        let truncated_i32 = (&[0x0D, 0x01, 0x02, 0x03][..])
+            .read_protobuf_fields()
+            .next()
+            .unwrap();
+        assert!(matches!(truncated_i32, Err(ProtobufError::UnexpectedEof)));
+
+        let truncated_i64 = (&[0x09, 0, 0, 0, 0, 0, 0, 0][..])
+            .read_protobuf_fields()
+            .next()
+            .unwrap();
+        assert!(matches!(truncated_i64, Err(ProtobufError::UnexpectedEof)));
+
+        let truncated_len = (&[0x0A, 0x05, b'a', b'b'][..])
+            .read_protobuf_fields()
+            .next()
+            .unwrap();
+        assert!(matches!(truncated_len, Err(ProtobufError::UnexpectedEof)));
+
+        let length_past_u32 = (&[0x0A, 0x80, 0x80, 0x80, 0x80, 0x10][..])
+            .read_protobuf_fields()
+            .next()
+            .unwrap();
+        assert!(matches!(
+            length_past_u32,
+            Err(ProtobufError::VarintDowncastOutOfRange {
+                value: 0x1_0000_0000,
+                target_type: "u32",
+            })
+        ));
+
+        // Wire types 3 and 4 are groups. The reader rejects them.
+        for (byte, wire) in [(0x0Bu8, 3u8), (0x0C, 4)] {
+            let bytes = [byte];
+            let value = match (&bytes[..]).read_protobuf_fields().next().unwrap() {
+                Err(ProtobufError::InvalidWireType { value }) => value,
+                other => panic!("expected InvalidWireType, got {other:?}"),
+            };
+            assert_eq!(value, wire);
+        }
+    }
 }

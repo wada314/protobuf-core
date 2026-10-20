@@ -213,4 +213,36 @@ mod tests {
         assert_eq!(max_field.as_usize(), 536_870_911);
         assert_eq!(mid_field.as_usize(), 1000);
     }
+
+    #[test]
+    fn test_field_number_range_edges() {
+        assert_eq!(FieldNumber::MAX.as_i32(), 536_870_911);
+        assert_eq!(i32::from(FieldNumber::MAX), 536_870_911);
+
+        assert_eq!(FieldNumber::try_from(536_870_912i32), Err(536_870_912));
+        assert_eq!(FieldNumber::try_from(i32::MIN), Err(i32::MIN));
+        assert_eq!(
+            FieldNumber::try_from(FieldNumber::MAX.as_u32()).unwrap(),
+            FieldNumber::MAX
+        );
+
+        let below = FieldNumber::try_new(18_999).unwrap();
+        let start = FieldNumber::try_new(19_000).unwrap();
+        let end = FieldNumber::try_new(19_999).unwrap();
+        let above = FieldNumber::try_new(20_000).unwrap();
+        assert!(!below.is_reserved());
+        assert!(start.is_reserved());
+        assert!(end.is_reserved());
+        assert!(!above.is_reserved());
+
+        // encoded_size uses the largest wire type, so these are the byte-length boundaries.
+        assert_eq!(FieldNumber::try_new(15).unwrap().encoded_size(), 1);
+        assert_eq!(FieldNumber::try_new(2_047).unwrap().encoded_size(), 2);
+        assert_eq!(FieldNumber::try_new(2_048).unwrap().encoded_size(), 3);
+        assert_eq!(FieldNumber::try_new(262_143).unwrap().encoded_size(), 3);
+        assert_eq!(FieldNumber::try_new(262_144).unwrap().encoded_size(), 4);
+        assert_eq!(FieldNumber::try_new(33_554_431).unwrap().encoded_size(), 4);
+        assert_eq!(FieldNumber::try_new(33_554_432).unwrap().encoded_size(), 5);
+        assert_eq!(FieldNumber::MAX.encoded_size(), 5);
+    }
 }
