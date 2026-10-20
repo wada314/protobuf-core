@@ -84,4 +84,6 @@ For comprehensive API documentation, see [docs.rs](https://docs.rs/protobuf-core
 
 ## License
 
+Copyright 2025-2026 Shohei Wada.
+
 Licensed under the Apache License, Version 2.0.

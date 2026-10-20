@@ -18,6 +18,7 @@ Breaking field-number and error-enum changes. Callers that matched `ProtobufErro
 
 ### Removed
 
+- Per-file copyright and Apache boilerplate comments. The crate license remains Apache-2.0 (`LICENSE` and `license` in `Cargo.toml`).
 - `ProtobufError::FieldTypeDowncastError`
 - `ProtobufError::MalformedTag`
 
