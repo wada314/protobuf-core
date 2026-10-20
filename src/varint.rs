@@ -350,6 +350,88 @@ mod tests {
     }
 
     #[test]
+    fn test_integer_wire_edges() {
+        use crate::ProtobufError;
+
+        // ZigZag pairs. 0, -1, 1, -2, 2 are the encoding guide's examples.
+        let zigzag = [
+            (0i64, 0u64),
+            (-1, 1),
+            (1, 2),
+            (-2, 3),
+            (2, 4),
+            (i64::from(i32::MAX), 4_294_967_294),
+            (i64::from(i32::MIN), 4_294_967_295),
+            (i64::MAX, u64::MAX - 1),
+            (i64::MIN, u64::MAX),
+        ];
+        for (signed, wire) in zigzag {
+            let encoded = Varint::from_sint64(signed);
+            assert_eq!(encoded.to_uint64(), wire, "zigzag encode {signed}");
+            assert_eq!(encoded.to_sint64(), signed, "zigzag decode {signed}");
+            assert_eq!(Varint::from_uint64(wire).to_sint64(), signed);
+        }
+
+        // int32/int64 sign-extend. -1 occupies all 64 bits and is 10 bytes on the wire.
+        let neg_one = Varint::from_int32(-1);
+        assert_eq!(neg_one.to_uint64(), u64::MAX);
+        assert_eq!(neg_one.varint_size(), 10);
+        assert_eq!(neg_one.try_to_int32().unwrap(), -1);
+        assert_eq!(Varint::from_int64(-1).to_int64(), -1);
+        assert_eq!(Varint::from_int64(i64::MIN).to_int64(), i64::MIN);
+        assert_eq!(
+            Varint::from_int32(i32::MAX).try_to_int32().unwrap(),
+            i32::MAX
+        );
+
+        assert!(!Varint::from_bool(false).to_bool());
+        assert!(Varint::from_bool(true).to_bool());
+        assert!(Varint::from_uint64(2).to_bool());
+
+        assert_eq!(
+            Varint::from_uint32(u32::MAX).try_to_uint32().unwrap(),
+            u32::MAX
+        );
+        let too_wide = Varint::from_uint64(u64::from(u32::MAX) + 1);
+        match too_wide.try_to_uint32() {
+            Err(ProtobufError::VarintDowncastOutOfRange { value, target_type }) => {
+                assert_eq!(value, u64::from(u32::MAX) + 1);
+                assert_eq!(target_type, "u32");
+            }
+            other => panic!("expected u32 downcast error, got {other:?}"),
+        }
+
+        assert!(
+            Varint::from_int64(i64::from(i32::MAX) + 1)
+                .try_to_int32()
+                .is_err()
+        );
+        assert!(
+            Varint::from_int64(i64::from(i32::MIN) - 1)
+                .try_to_int32()
+                .is_err()
+        );
+
+        // sint32 range uses the decoded ZigZag integer in the error payload.
+        let wide_sint = Varint::from_sint64(i64::from(i32::MAX) + 1);
+        match wide_sint.try_to_sint32() {
+            Err(ProtobufError::VarintDowncastOutOfRange { value, target_type }) => {
+                assert_eq!(target_type, "i32");
+                assert_eq!(value, u64::try_from(i64::from(i32::MAX) + 1).unwrap());
+            }
+            other => panic!("expected sint32 downcast error, got {other:?}"),
+        }
+        assert_eq!(
+            Varint::from_sint32(i32::MAX).try_to_sint32().unwrap(),
+            i32::MAX
+        );
+        assert_eq!(
+            Varint::from_sint32(i32::MIN).try_to_sint32().unwrap(),
+            i32::MIN
+        );
+    }
+
+    #[test]
     fn test_to_methods() {
         let bytes = [150, 0, 0, 0, 0, 0, 0, 0];
         let varint = Varint::new(bytes);

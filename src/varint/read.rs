@@ -697,4 +697,70 @@ mod tests {
         let varint = bytes.into_iter().read_varint().unwrap().unwrap();
         assert_eq!(varint.to_uint64(), 0);
     }
+
+    #[test]
+    fn test_varint_length_boundaries_roundtrip() {
+        use crate::varint::WriteExtVarint;
+        use crate::wire_format::{
+            MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT, MAX_3_BYTE_VARINT, MAX_4_BYTE_VARINT,
+            MAX_5_BYTE_VARINT, MAX_6_BYTE_VARINT, MAX_7_BYTE_VARINT, MAX_8_BYTE_VARINT,
+            MAX_9_BYTE_VARINT,
+        };
+
+        let bounds = [
+            (0u64, 1usize),
+            (MAX_1_BYTE_VARINT, 1),
+            (MAX_1_BYTE_VARINT + 1, 2),
+            (MAX_2_BYTE_VARINT, 2),
+            (MAX_2_BYTE_VARINT + 1, 3),
+            (MAX_3_BYTE_VARINT, 3),
+            (MAX_3_BYTE_VARINT + 1, 4),
+            (MAX_4_BYTE_VARINT, 4),
+            (MAX_4_BYTE_VARINT + 1, 5),
+            (MAX_5_BYTE_VARINT, 5),
+            (MAX_5_BYTE_VARINT + 1, 6),
+            (MAX_6_BYTE_VARINT, 6),
+            (MAX_6_BYTE_VARINT + 1, 7),
+            (MAX_7_BYTE_VARINT, 7),
+            (MAX_7_BYTE_VARINT + 1, 8),
+            (MAX_8_BYTE_VARINT, 8),
+            (MAX_8_BYTE_VARINT + 1, 9),
+            (MAX_9_BYTE_VARINT, 9),
+            (MAX_9_BYTE_VARINT + 1, 10),
+            (u64::MAX, 10),
+        ];
+
+        for (value, size) in bounds {
+            let varint = Varint::from_uint64(value);
+            assert_eq!(varint.varint_size(), size, "size of {value:#x}");
+            let (bytes, count) = varint.encode();
+            assert_eq!(count, size, "encode length of {value:#x}");
+
+            let mut buffer = Vec::new();
+            assert_eq!(buffer.write_varint(&varint).unwrap(), size);
+            assert_eq!(buffer, bytes[..count]);
+
+            let decoded = buffer.into_iter().read_varint().unwrap().unwrap();
+            assert_eq!(decoded.to_uint64(), value, "roundtrip {value:#x}");
+        }
+    }
+
+    #[test]
+    fn test_read_varint_truncated_and_public_resume() {
+        use crate::ProtobufError;
+
+        let truncated = vec![0x80u8].into_iter().read_varint();
+        assert!(matches!(truncated, Err(ProtobufError::UnexpectedEof)));
+
+        let mut first = vec![0x80u8].into_iter();
+        let state = match (&mut first).read_varint_partial().unwrap() {
+            DecodeOutcome::Incomplete(state) => state,
+            other => panic!("expected Incomplete, got {other:?}"),
+        };
+        let mut second = vec![0x01u8].into_iter();
+        match (&mut second).read_varint_resume(state).unwrap() {
+            DecodeOutcome::Complete(varint) => assert_eq!(varint.to_uint64(), 128),
+            other => panic!("expected Complete, got {other:?}"),
+        }
+    }
 }

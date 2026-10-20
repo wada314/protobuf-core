@@ -289,6 +289,53 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn test_scalar_encoding_bytes_and_sizes() {
+        match FieldValue::<Vec<u8>>::from_float(-0.0) {
+            FieldValue::I32(bytes) => assert_eq!(bytes, (-0.0f32).to_le_bytes()),
+            other => panic!("expected f32 bytes, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_double(1.5) {
+            FieldValue::I64(bytes) => assert_eq!(bytes, 1.5f64.to_le_bytes()),
+            other => panic!("expected f64 bytes, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_sfixed32(i32::MIN) {
+            FieldValue::I32(bytes) => assert_eq!(bytes, i32::MIN.to_le_bytes()),
+            other => panic!("expected sfixed32 bytes, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_sfixed64(i64::MIN) {
+            FieldValue::I64(bytes) => assert_eq!(bytes, i64::MIN.to_le_bytes()),
+            other => panic!("expected sfixed64 bytes, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_fixed32(u32::MAX) {
+            FieldValue::I32(bytes) => assert_eq!(bytes, u32::MAX.to_le_bytes()),
+            other => panic!("expected fixed32 bytes, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_fixed64(u64::MAX) {
+            FieldValue::I64(bytes) => assert_eq!(bytes, u64::MAX.to_le_bytes()),
+            other => panic!("expected fixed64 bytes, got {other:?}"),
+        }
+
+        let empty: Field<Vec<u8>> = Field::new(
+            FieldNumber::try_new(1).unwrap(),
+            FieldValue::Len(Vec::new()),
+        );
+        assert_eq!(empty.value.encoded_size(), 1);
+        assert_eq!(empty.encoded_size(), 2);
+        let mut buffer = Vec::new();
+        assert_eq!(buffer.write_protobuf_field(&empty).unwrap(), 2);
+        assert_eq!(buffer, vec![0x0A, 0x00]);
+
+        let negative: Field<Vec<u8>> =
+            Field::new(FieldNumber::try_new(1).unwrap(), FieldValue::from_int32(-1));
+        assert_eq!(negative.value.encoded_size(), 10);
+        assert_eq!(negative.encoded_size(), 11);
+        let mut buffer = Vec::new();
+        assert_eq!(buffer.write_protobuf_field(&negative).unwrap(), 11);
+        assert_eq!(buffer.len(), 11);
+        assert_eq!(buffer[0], 0x08);
+    }
+
     // Roundtrip tests (require both read and write features)
     #[cfg(feature = "read")]
     mod roundtrip_tests {
@@ -367,6 +414,56 @@ mod tests {
                 .collect::<::std::result::Result<Vec<_>, _>>()
                 .unwrap();
 
+            assert_eq!(read_fields, original_fields);
+        }
+
+        #[test]
+        fn test_roundtrip_scalar_edges() {
+            let original_fields: Vec<Field<Vec<u8>>> = vec![
+                Field::new(FieldNumber::try_new(1).unwrap(), FieldValue::from_int32(-1)),
+                Field::new(
+                    FieldNumber::try_new(2).unwrap(),
+                    FieldValue::from_sint32(i32::MIN),
+                ),
+                Field::new(
+                    FieldNumber::try_new(3).unwrap(),
+                    FieldValue::from_sint64(i64::MIN),
+                ),
+                Field::new(
+                    FieldNumber::try_new(4).unwrap(),
+                    FieldValue::from_float(-0.0),
+                ),
+                Field::new(
+                    FieldNumber::try_new(5).unwrap(),
+                    FieldValue::from_double(1.5),
+                ),
+                Field::new(
+                    FieldNumber::try_new(6).unwrap(),
+                    FieldValue::from_sfixed64(i64::MIN),
+                ),
+                Field::new(
+                    FieldNumber::try_new(7).unwrap(),
+                    FieldValue::from_bool(false),
+                ),
+                Field::new(
+                    FieldNumber::try_new(16).unwrap(),
+                    FieldValue::Len(Vec::new()),
+                ),
+            ];
+
+            let mut buffer = Vec::new();
+            let written = buffer.write_protobuf_fields(&original_fields).unwrap();
+            let expected = original_fields
+                .iter()
+                .map(|field| field.encoded_size())
+                .sum::<usize>();
+            assert_eq!(written, expected);
+
+            let read_fields: Vec<_> = buffer
+                .as_slice()
+                .read_protobuf_fields()
+                .collect::<::std::result::Result<Vec<_>, _>>()
+                .unwrap();
             assert_eq!(read_fields, original_fields);
         }
     }

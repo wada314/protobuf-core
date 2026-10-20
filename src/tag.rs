@@ -557,4 +557,54 @@ mod tests {
         let tag = reader.read_tag().unwrap();
         assert_eq!(tag, None);
     }
+
+    #[test]
+    fn test_tag_roundtrip_every_wire_type() {
+        let cases = [
+            (1u32, WireType::Varint, 0x08u64),
+            (1, WireType::Int64, 0x09),
+            (1, WireType::Len, 0x0A),
+            (1, WireType::SGroup, 0x0B),
+            (1, WireType::EGroup, 0x0C),
+            (1, WireType::Int32, 0x0D),
+            (16, WireType::Varint, 128),
+            (
+                FieldNumber::MAX.as_u32(),
+                WireType::Int32,
+                u64::from(FieldNumber::MAX.as_u32() << 3) | 5,
+            ),
+        ];
+
+        for (number, wire_type, encoded_value) in cases {
+            let tag = Tag {
+                field_number: FieldNumber::try_new(number).unwrap(),
+                wire_type,
+            };
+            let encoded = tag.to_encoded();
+            assert_eq!(encoded.to_uint64(), encoded_value, "field {number}");
+            assert_eq!(Tag::from_encoded(encoded).unwrap(), tag);
+            let via_from = Tag::try_from(Varint::from(tag)).unwrap();
+            assert_eq!(via_from, tag);
+        }
+    }
+
+    #[test]
+    fn test_read_ext_tag_partial_resume() {
+        use super::{Outcome, ReadExtTag};
+        use ::std::io::Cursor;
+
+        let mut reader = Cursor::new(vec![0x80u8]);
+        let state = match reader.read_tag_partial().unwrap() {
+            Outcome::Incomplete(state) => state,
+            other => panic!("expected Incomplete, got {other:?}"),
+        };
+        let mut reader = Cursor::new(vec![0x01u8]);
+        match reader.read_tag_resume(state).unwrap() {
+            Outcome::Complete(tag) => {
+                assert_eq!(tag.field_number.as_u32(), 16);
+                assert_eq!(tag.wire_type, WireType::Varint);
+            }
+            other => panic!("expected Complete, got {other:?}"),
+        }
+    }
 }
