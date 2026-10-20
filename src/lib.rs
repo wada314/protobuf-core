@@ -29,6 +29,7 @@
 //! This library provides multiple ways to read protobuf fields from different sources:
 //!
 //! ```rust
+//! # #[cfg(feature = "read")] {
 //! use protobuf_core::{Field, IteratorExtProtobuf, AsRefExtProtobuf};
 //!
 //! // From a byte iterator - returns Field<Vec<u8>> (Len values are Vec<u8>)
@@ -44,11 +45,13 @@
 //! let fields: Vec<Field<&[u8]>> = AsRefExtProtobuf::read_protobuf_fields(&slice)
 //!     .collect::<Result<Vec<Field<&[u8]>>, _>>()
 //!     .unwrap();
+//! # }
 //! ```
 //!
 //! ### Writing Fields
 //!
 //! ```rust
+//! # #[cfg(feature = "write")] {
 //! use protobuf_core::{WriteExtProtobuf, Field, FieldValue, FieldNumber};
 //!
 //! let mut buffer = Vec::new();
@@ -56,8 +59,8 @@
 //!     FieldNumber::try_new(1).unwrap(),
 //!     FieldValue::from_uint64(150)
 //! );
-//! buffer.write_protobuf_field(&field)?;
-//! # Ok::<(), protobuf_core::ProtobufError>(())
+//! buffer.write_protobuf_field(&field).unwrap();
+//! # }
 //! ```
 //!
 //! ## Core Types
@@ -81,8 +84,8 @@
 //! - [`Varint`]: Represents a deserialized varint value (8-byte internal
 //!   representation)
 //! - [`FieldNumber`]: A validated field number (range: 1 to 2^29 - 1)
-//! - [`WireType`]: Represents the protobuf wire type (Varint, Int32, Int64,
-//!   Len, StartGroup, EndGroup)
+//! - [`WireType`]: Represents the protobuf wire type (`Varint`, `Int64`, `Len`,
+//!   `SGroup`, `EGroup`, `Int32`)
 //!
 //! ### Error Handling
 //!
@@ -128,7 +131,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! protobuf-core = { version = "0.1.0", default-features = false, features = ["read"] }
+//! protobuf-core = { version = "0.3.0", default-features = false, features = ["read"] }
 //! ```
 //!
 //! ## Constants
@@ -187,7 +190,7 @@ pub enum ProtobufError {
         target_type: &'static str,
     },
 
-    #[error("Varint exceeds maximum length of 10 bytes")]
+    #[error("Varint exceeds the 64-bit range or the maximum length of 10 bytes")]
     VarintTooLong,
 
     #[error("Unexpected EOF while parsing field")]
