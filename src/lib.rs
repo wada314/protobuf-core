@@ -57,8 +57,8 @@
 //! ### Fields
 //!
 //! - [`Field<L>`]: Represents a raw protobuf field with a field number and value.
-//!   The `L` type parameter represents the type used for length-delimited values (e.g., `Vec<u8>`
-//!   for owned data, `&'a [u8]` for borrowed data).
+//!   The `L` type parameter represents the type used for length-delimited values
+//!   (`LenBuf`, such as `Vec<u8, A>`, or `&'a [u8]` for a slice read).
 //! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
 //!   - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64,
 //!     Bool, Enum)
@@ -86,15 +86,18 @@
 //! The library provides several traits for reading protobuf fields from different sources:
 //!
 //! - [`IteratorExtProtobuf`]: Read fields from `Iterator<Item = u8>`
-//!   - Output: [`Field<Vec<u8>>`] - Len values are owned `Vec<u8>`
+//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8, A>`)
 //! - [`TryIteratorExtProtobuf`]: Read fields from
 //!   `Iterator<Item = Result<u8, E>>`
-//!   - Output: [`Field<Vec<u8>>`] - Len values are owned `Vec<u8>`
+//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8, A>`)
 //! - [`AsRefExtProtobuf`]: Read fields from `AsRef<[u8]>` types
 //!   (slices, arrays, etc.)
 //!   - Output: [`Field<&[u8]>`] - Len values are borrowed `&[u8]` slices (zero-copy)
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types
-//!   - Output: [`Field<Vec<u8>>`] - Len values are owned `Vec<u8>`
+//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8, A>`)
+//!
+//! [`LenBuf`] is the buffer trait for those streaming readers. `Vec<u8>` is
+//! `Vec<u8, Global>`. Slice reads do not use it.
 //!
 //! ## Writing Traits
 //!
@@ -126,7 +129,7 @@ pub(crate) mod varint;
 pub(crate) mod wire_format;
 
 pub use self::field::{
-    AsRefExtProtobuf, Field, FieldValue, IteratorExtProtobuf, ProtobufFieldIterator,
+    AsRefExtProtobuf, Field, FieldValue, IteratorExtProtobuf, LenBuf, ProtobufFieldIterator,
     ProtobufFieldIteratorFromBytes, ProtobufFieldSliceIterator, ReadExtProtobuf,
     TryIteratorExtProtobuf, WriteExtProtobuf,
 };

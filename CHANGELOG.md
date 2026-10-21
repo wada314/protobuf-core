@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `LenBuf`, the buffer trait for length-delimited payloads read from `Read` and byte iterators. Implement `with_capacity`, `reserve`, and `append_slice`. The `from_read`, `from_iter`, and `from_try_iter` methods have defaults that append stack-sized chunks.
+- `impl<A: Allocator + Default> LenBuf for Vec<u8, A>`. `Vec<u8>` is the `Global` case. `from_read` fills the vector with `read_exact`. The iterator methods `push` each byte into that vector. This impl needs the allocator API that stabilizes in Rust 1.100. Rust 1.99 rejects it with `E0658` (`allocator_api`). `rust-version` in `Cargo.toml` is still 1.85.
+
+### Changed
+
+- `IteratorExtProtobuf::protobuf_fields`, `TryIteratorExtProtobuf::protobuf_fields`, and `ReadExtProtobuf::read_protobuf_fields` are generic over `L: LenBuf`. They no longer always return `Field<Vec<u8>>`.
+- `AsRefExtProtobuf` is unchanged and still returns `Field<&[u8]>`.
+
 ## [0.4.0]
 
 Breaking removal of the `read` and `write` Cargo features. Manifests that set `default-features = false` or selected those features must drop them. Callers that used the default features keep the same types.

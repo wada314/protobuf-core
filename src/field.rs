@@ -25,9 +25,11 @@ use crate::tag::Tag;
 use crate::varint::Varint;
 use crate::wire_format::WireType;
 
+mod len_buf;
 pub(crate) mod read;
 pub(crate) mod write;
 
+pub use self::len_buf::LenBuf;
 pub use self::read::{
     AsRefExtProtobuf, IteratorExtProtobuf, ProtobufFieldIterator, ProtobufFieldIteratorFromBytes,
     ProtobufFieldSliceIterator, ReadExtProtobuf, TryIteratorExtProtobuf,
@@ -41,8 +43,9 @@ pub use self::write::WriteExtProtobuf;
 /// based on the field's schema definition.
 ///
 /// `L` is the type for length-delimited values (Len variant).
-///  - For owned data (from `std::io::Read`): use `Vec<u8>`
-///  - For borrowed data (from slices): use `&'a [u8]`
+///  - Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf),
+///    including `Vec<u8, A>`.
+///  - Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
     /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`)
@@ -157,8 +160,8 @@ impl<L> FieldValue<L> {
 /// The caller must interpret the value based on the message schema.
 ///
 /// `L` is the type for length-delimited values (FieldValue::Len).
-/// For owned data (from `std::io::Read`): use `Vec<u8>`
-/// For borrowed data (from slices): use `&'a [u8]`
+/// Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf),
+/// including `Vec<u8, A>`. Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
     pub field_number: FieldNumber,
