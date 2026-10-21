@@ -23,13 +23,13 @@ const LEN_BUF_CHUNK: usize = 8192;
 ///
 /// `Vec<u8>` implements this trait on every build. `from_read` writes the payload
 /// with `read_exact`. The iterator methods push each byte into the reserved vector.
+/// That implementation does not require a Cargo feature.
 ///
 /// A custom allocator requires the `nightly` Cargo feature. That feature implements
 /// this trait for `Vec<u8, A>` where `A: Allocator + Default`, enables
 /// `allocator_api`, and builds only with a nightly compiler. On that compiler
-/// `Vec<u8>` is `Vec<u8, Global>`, so the generic impl replaces the plain `Vec<u8>`
-/// impl. docs.rs enables the feature, and the implementation is marked as
-/// requiring it.
+/// `Vec<u8>` is `Vec<u8, Global>`, so the generic impl also accepts `Vec<u8>`.
+/// docs.rs lists both implementations and marks the feature each one requires.
 ///
 /// # Examples
 ///
@@ -146,124 +146,159 @@ where
     }
 }
 
-#[cfg(not(feature = "nightly"))]
-impl LenBuf for Vec<u8> {
-    fn with_capacity(capacity: usize) -> Self {
-        Vec::with_capacity(capacity)
-    }
+macro_rules! impl_len_buf_for_vec_u8 {
+    ($(#[$meta:meta])*) => {
+        /// Length-delimited payload stored in `Vec<u8>`.
+        ///
+        /// This implementation does not require the `nightly` feature and does not
+        /// take a custom allocator. `from_read` fills the vector with `read_exact`.
+        /// The iterator methods push each byte.
+        $(#[$meta])*
+        impl LenBuf for Vec<u8> {
+            fn with_capacity(capacity: usize) -> Self {
+                Vec::with_capacity(capacity)
+            }
 
-    fn reserve(&mut self, additional: usize) {
-        Vec::reserve(self, additional);
-    }
+            fn reserve(&mut self, additional: usize) {
+                Vec::reserve(self, additional);
+            }
 
-    fn append_slice(&mut self, data: &[u8]) {
-        self.extend_from_slice(data);
-    }
+            fn append_slice(&mut self, data: &[u8]) {
+                self.extend_from_slice(data);
+            }
 
-    fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
-    where
-        R: Read,
-    {
-        let mut data = vec![0u8; len];
-        reader.read_exact(&mut data)?;
-        Ok(data)
-    }
+            fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
+            where
+                R: Read,
+            {
+                let mut data = vec![0u8; len];
+                reader.read_exact(&mut data)?;
+                Ok(data)
+            }
 
-    fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
-    where
-        I: Iterator<Item = u8>,
-    {
-        let mut data = Vec::with_capacity(len);
-        for _ in 0..len {
-            data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
+            fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
+            where
+                I: Iterator<Item = u8>,
+            {
+                let mut data = Vec::with_capacity(len);
+                for _ in 0..len {
+                    data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
+                }
+                Ok(data)
+            }
+
+            fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
+            where
+                I: Iterator<Item = ::std::result::Result<u8, E>>,
+                E: Into<ProtobufError>,
+            {
+                let mut data = Vec::with_capacity(len);
+                for _ in 0..len {
+                    data.push(
+                        iter.next()
+                            .ok_or(ProtobufError::UnexpectedEof)?
+                            .map_err(Into::into)?,
+                    );
+                }
+                Ok(data)
+            }
         }
-        Ok(data)
-    }
-
-    fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
-    where
-        I: Iterator<Item = ::std::result::Result<u8, E>>,
-        E: Into<ProtobufError>,
-    {
-        let mut data = Vec::with_capacity(len);
-        for _ in 0..len {
-            data.push(
-                iter.next()
-                    .ok_or(ProtobufError::UnexpectedEof)?
-                    .map_err(Into::into)?,
-            );
-        }
-        Ok(data)
-    }
+    };
 }
 
-/// Length-delimited payload stored in `Vec<u8, A>`.
-///
-/// Enable the `nightly` Cargo feature and build with a nightly compiler.
-/// Without that feature this implementation is not compiled, and a custom
-/// allocator cannot be used. `A` must implement `std::alloc::Allocator` + `Default`.
-/// [`with_capacity`](LenBuf::with_capacity) and the `from_*` methods construct
-/// the vector with `A::default()`.
-///
-/// `Vec<u8>` does not need the feature. On nightly, `Vec<u8>` is
-/// `Vec<u8, Global>`, so this implementation covers it too.
-#[cfg(feature = "nightly")]
-#[cfg_attr(feature = "nightly", doc(cfg(feature = "nightly")))]
-#[allow(clippy::incompatible_msrv)]
-impl<A> LenBuf for Vec<u8, A>
-where
-    A: Allocator + Default,
-{
-    fn with_capacity(capacity: usize) -> Self {
-        Vec::with_capacity_in(capacity, A::default())
-    }
+macro_rules! impl_len_buf_for_vec_alloc {
+    ($(#[$meta:meta])*) => {
+        /// Length-delimited payload stored in `Vec<u8, A>`.
+        ///
+        /// Requires the `nightly` Cargo feature and a nightly compiler. Without that
+        /// feature a custom allocator cannot be used. `A` must implement
+        /// `std::alloc::Allocator` + `Default`. [`with_capacity`](LenBuf::with_capacity)
+        /// and the `from_*` methods construct the vector with `A::default()`.
+        ///
+        /// `Vec<u8>` uses the implementation that does not require `nightly`. On a
+        /// nightly compiler `Vec<u8>` is `Vec<u8, Global>`, so this implementation
+        /// also accepts it when the feature is enabled.
+        $(#[$meta])*
+        #[allow(clippy::incompatible_msrv)]
+        impl<A> LenBuf for Vec<u8, A>
+        where
+            A: Allocator + Default,
+        {
+            fn with_capacity(capacity: usize) -> Self {
+                Vec::with_capacity_in(capacity, A::default())
+            }
 
-    fn reserve(&mut self, additional: usize) {
-        Vec::reserve(self, additional);
-    }
+            fn reserve(&mut self, additional: usize) {
+                Vec::reserve(self, additional);
+            }
 
-    fn append_slice(&mut self, data: &[u8]) {
-        self.extend_from_slice(data);
-    }
+            fn append_slice(&mut self, data: &[u8]) {
+                self.extend_from_slice(data);
+            }
 
-    fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
-    where
-        R: Read,
-    {
-        // `read_exact` needs an initialized buffer. `A` is the vector's allocator,
-        // so this cannot go through the `vec!` macro (that uses `Global`).
-        let mut data = Vec::with_capacity_in(len, A::default());
-        data.resize(len, 0);
-        reader.read_exact(&mut data)?;
-        Ok(data)
-    }
+            fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
+            where
+                R: Read,
+            {
+                // `read_exact` needs an initialized buffer. `A` is the vector's allocator,
+                // so this cannot go through the `vec!` macro (that uses `Global`).
+                let mut data = Vec::with_capacity_in(len, A::default());
+                data.resize(len, 0);
+                reader.read_exact(&mut data)?;
+                Ok(data)
+            }
 
-    fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
-    where
-        I: Iterator<Item = u8>,
-    {
-        let mut data = Vec::with_capacity_in(len, A::default());
-        for _ in 0..len {
-            data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
+            fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
+            where
+                I: Iterator<Item = u8>,
+            {
+                let mut data = Vec::with_capacity_in(len, A::default());
+                for _ in 0..len {
+                    data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
+                }
+                Ok(data)
+            }
+
+            fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
+            where
+                I: Iterator<Item = ::std::result::Result<u8, E>>,
+                E: Into<ProtobufError>,
+            {
+                let mut data = Vec::with_capacity_in(len, A::default());
+                for _ in 0..len {
+                    data.push(
+                        iter.next()
+                            .ok_or(ProtobufError::UnexpectedEof)?
+                            .map_err(Into::into)?,
+                    );
+                }
+                Ok(data)
+            }
         }
-        Ok(data)
-    }
+    };
+}
 
-    fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
-    where
-        I: Iterator<Item = ::std::result::Result<u8, E>>,
-        E: Into<ProtobufError>,
-    {
-        let mut data = Vec::with_capacity_in(len, A::default());
-        for _ in 0..len {
-            data.push(
-                iter.next()
-                    .ok_or(ProtobufError::UnexpectedEof)?
-                    .map_err(Into::into)?,
-            );
-        }
-        Ok(data)
-    }
+// Stable, and any build that does not enable `allocator_api`.
+impl_len_buf_for_vec_u8! {
+    #[cfg(not(feature = "nightly"))]
+}
+
+// docs.rs enables `_docsrs` (which also enables `nightly`). The included file
+// specializes the generic impl so this `Vec<u8>` impl can be documented beside it.
+// `Vec<u8>` is `Vec<u8, Global>` in that build, so a second ordinary impl would
+// be a duplicate. The `default` keyword stays in the included file: a cfg'd-out
+// copy in this file still warns on stable rustc.
+#[cfg(feature = "_docsrs")]
+include!("len_buf_docsrs.rs");
+
+impl_len_buf_for_vec_u8! {
+    #[cfg(feature = "_docsrs")]
+    #[doc(cfg(not(feature = "nightly")))]
+}
+
+impl_len_buf_for_vec_alloc! {
+    #[cfg(all(feature = "nightly", not(feature = "_docsrs")))]
+    #[doc(cfg(feature = "nightly"))]
 }
 
 #[cfg(test)]
