@@ -12,9 +12,10 @@
 //!
 //! Available when the `read` feature is enabled.
 //!
-//! The utilities read fields sequentially from input sources that implement `std::io::Read`,
-//! returning raw field values (varint bytes, fixed-width bytes, or length-delimited bytes)
-//! without interpretation of the semantic meaning.
+//! The utilities read fields sequentially from `std::io::Read`, `Iterator<Item = u8>`,
+//! `Iterator<Item = Result<u8, E>>`, and `AsRef<[u8]>`, returning raw field values
+//! (varint bytes, fixed-width bytes, or length-delimited bytes) without interpretation
+//! of the semantic meaning.
 //!
 //! ## Writing (Serialization)
 //!

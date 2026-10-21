@@ -23,10 +23,12 @@ This library provides common definitions, constants, enums, and basic logic for 
 
 ## Feature Flags
 
-- `read` (enabled by default): Enables field reading utilities
-- `write` (enabled by default): Enables field writing utilities
+Both are enabled by default. Set `default-features = false` and enable `read`, `write`, or both.
 
-Disable the defaults to use one side only: set `default-features = false` and enable `read`, `write`, or both.
+- `read`: Field-reading extension traits for `std::io::Read` (`ReadExtProtobuf`), `Iterator<Item = u8>` (`IteratorExtProtobuf`), `Iterator<Item = Result<u8, E>>` (`TryIteratorExtProtobuf`), and `AsRef<[u8]>` (`AsRefExtProtobuf`).
+- `write`: The field-writing extension trait for `std::io::Write` (`WriteExtProtobuf`).
+
+Tag and varint readers and writers stay available with these features off, including `ReadExtTag`, `ReadExtVarint`, and `WriteExtVarint`. `Field` and `FieldValue` are available when either feature is enabled.
 
 ## Quick Start
 
