@@ -35,7 +35,7 @@ let fields: Vec<Field<&[u8]>> = bytes
     .unwrap();
 ```
 
-`Read` and byte iterators take a [`LenBuf`](https://docs.rs/protobuf-core/latest/protobuf_core/trait.LenBuf.html) payload type. `Vec<u8, A>` is implemented for any allocator that is `Default`. A slice read stays borrowed and does not use that trait.
+`Read` and byte iterators take a [`LenBuf`](https://docs.rs/protobuf-core/latest/protobuf_core/trait.LenBuf.html) payload type. `Vec<u8>` implements it. The `nightly` feature also implements it for `Vec<u8, A>` and must be built with a nightly compiler. A slice read stays borrowed and does not use that trait.
 
 ### Writing Fields
 

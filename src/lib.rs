@@ -58,7 +58,7 @@
 //!
 //! - [`Field<L>`]: Represents a raw protobuf field with a field number and value.
 //!   The `L` type parameter represents the type used for length-delimited values
-//!   (`LenBuf`, such as `Vec<u8, A>`, or `&'a [u8]` for a slice read).
+//!   (`LenBuf`, such as `Vec<u8>`, or `&'a [u8]` for a slice read).
 //! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
 //!   - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64,
 //!     Bool, Enum)
@@ -86,18 +86,18 @@
 //! The library provides several traits for reading protobuf fields from different sources:
 //!
 //! - [`IteratorExtProtobuf`]: Read fields from `Iterator<Item = u8>`
-//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8, A>`)
+//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`)
 //! - [`TryIteratorExtProtobuf`]: Read fields from
 //!   `Iterator<Item = Result<u8, E>>`
-//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8, A>`)
+//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`)
 //! - [`AsRefExtProtobuf`]: Read fields from `AsRef<[u8]>` types
 //!   (slices, arrays, etc.)
 //!   - Output: [`Field<&[u8]>`] - Len values are borrowed `&[u8]` slices (zero-copy)
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types
-//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8, A>`)
+//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`)
 //!
-//! [`LenBuf`] is the buffer trait for those streaming readers. `Vec<u8>` is
-//! `Vec<u8, Global>`. Slice reads do not use it.
+//! [`LenBuf`] is the buffer trait for those streaming readers. `Vec<u8>` implements
+//! it. The `nightly` feature also implements it for `Vec<u8, A>`. Slice reads do not use it.
 //!
 //! ## Writing Traits
 //!
@@ -121,6 +121,15 @@
 //! - Field number limits: [`MIN_FIELD_NUMBER`], [`MAX_FIELD_NUMBER`]
 //! - Size limits: [`MAX_MESSAGE_SIZE`], [`MAX_STRING_SIZE`], [`MAX_VARINT_BYTES`]
 //! - Wire format constants: [`FIXED32_BYTES`], [`FIXED64_BYTES`], etc.
+//!
+//! ## Feature Flags
+//!
+//! - `nightly`: implement [`LenBuf`] for `Vec<u8, A>` (`A: Allocator + Default`).
+//!   This passes `#![feature(allocator_api)]` and must be built with a nightly compiler.
+//!   The default build implements [`LenBuf`] for `Vec<u8>` only.
+
+#![cfg_attr(feature = "nightly", feature(allocator_api))]
+#![cfg_attr(feature = "nightly", allow(stable_features))]
 
 pub(crate) mod field;
 pub(crate) mod field_number;

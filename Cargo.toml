@@ -15,6 +15,10 @@ exclude = [
     "/protobuf-core.code-workspace",
 ]
 
+[features]
+# `impl LenBuf for Vec<u8, A>`. Turns on `allocator_api`. Build with a nightly compiler.
+nightly = []
+
 [dependencies]
 thiserror = "1.0"
 

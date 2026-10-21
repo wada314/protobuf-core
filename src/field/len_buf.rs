@@ -5,8 +5,10 @@
 //! Slice readers borrow the input and do not use this trait.
 
 use crate::{ProtobufError, Result};
-use ::std::alloc::Allocator;
 use ::std::io::Read;
+
+#[cfg(feature = "nightly")]
+use ::std::alloc::Allocator;
 
 /// Bytes per `append_slice` call in the default streaming readers.
 const LEN_BUF_CHUNK: usize = 8192;
@@ -19,9 +21,13 @@ const LEN_BUF_CHUNK: usize = 8192;
 /// fixed-size chunks. Override `from_read`, `from_iter`, or `from_try_iter` when
 /// the buffer can take the bytes without that extra copy.
 ///
-/// [`Vec<u8, A>`] implements this trait for every `A: Allocator + Default`, which
-/// includes `Vec<u8>` (`Vec<u8, Global>`). Those methods write straight into the
-/// vector.
+/// `Vec<u8>` implements this trait. `from_read` writes the payload with `read_exact`.
+/// The iterator methods push each byte into the reserved vector.
+///
+/// The `nightly` feature also implements this trait for `Vec<u8, A>` where
+/// `A: Allocator + Default`. That feature enables `allocator_api` and builds with a
+/// nightly compiler. On that compiler `Vec<u8>` is `Vec<u8, Global>`, so the generic
+/// impl replaces the plain `Vec<u8>` impl.
 ///
 /// # Examples
 ///
@@ -138,6 +144,59 @@ where
     }
 }
 
+#[cfg(not(feature = "nightly"))]
+impl LenBuf for Vec<u8> {
+    fn with_capacity(capacity: usize) -> Self {
+        Vec::with_capacity(capacity)
+    }
+
+    fn reserve(&mut self, additional: usize) {
+        Vec::reserve(self, additional);
+    }
+
+    fn append_slice(&mut self, data: &[u8]) {
+        self.extend_from_slice(data);
+    }
+
+    fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
+    where
+        R: Read,
+    {
+        let mut data = vec![0u8; len];
+        reader.read_exact(&mut data)?;
+        Ok(data)
+    }
+
+    fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
+    where
+        I: Iterator<Item = u8>,
+    {
+        let mut data = Vec::with_capacity(len);
+        for _ in 0..len {
+            data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
+        }
+        Ok(data)
+    }
+
+    fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
+    where
+        I: Iterator<Item = ::std::result::Result<u8, E>>,
+        E: Into<ProtobufError>,
+    {
+        let mut data = Vec::with_capacity(len);
+        for _ in 0..len {
+            data.push(
+                iter.next()
+                    .ok_or(ProtobufError::UnexpectedEof)?
+                    .map_err(Into::into)?,
+            );
+        }
+        Ok(data)
+    }
+}
+
+#[cfg(feature = "nightly")]
+#[allow(clippy::incompatible_msrv)]
 impl<A> LenBuf for Vec<u8, A>
 where
     A: Allocator + Default,
@@ -200,10 +259,7 @@ mod tests {
     use crate::field::read::{IteratorExtProtobuf, ReadExtProtobuf, TryIteratorExtProtobuf};
     use crate::varint::Varint;
     use crate::{FieldValue, ProtobufError};
-    use ::std::alloc::{AllocError, Allocator, Global, Layout};
     use ::std::io::{Cursor, ErrorKind, Read};
-    use ::std::ptr::NonNull;
-    use ::std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Debug, PartialEq, Eq)]
     struct Chunks {
@@ -229,7 +285,7 @@ mod tests {
         }
     }
 
-    fn len_message(payload: &[u8]) -> Vec<u8> {
+    pub(super) fn len_message(payload: &[u8]) -> Vec<u8> {
         let mut out = vec![0x0A];
         let (encoded, count) = Varint::from_uint64(payload.len() as u64).encode();
         out.extend_from_slice(&encoded[..count]);
@@ -237,7 +293,7 @@ mod tests {
         out
     }
 
-    fn payload(len: usize) -> Vec<u8> {
+    pub(super) fn payload(len: usize) -> Vec<u8> {
         (0..len).map(|index| index as u8).collect()
     }
 
@@ -323,6 +379,57 @@ mod tests {
             .unwrap_err();
         assert!(matches!(error, ProtobufError::UnexpectedEof));
     }
+
+    #[test]
+    fn vec_reads_multichunk_payload_on_every_streaming_source() {
+        let big = payload(LEN_BUF_CHUNK + 3);
+        let message = len_message(&big);
+
+        let from_read = Cursor::new(message.clone())
+            .read_protobuf_fields::<Vec<u8>>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_read.value else {
+            panic!("expected len");
+        };
+        assert_eq!(data, big);
+
+        let from_iter = message
+            .clone()
+            .into_iter()
+            .protobuf_fields::<Vec<u8>>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_iter.value else {
+            panic!("expected len");
+        };
+        assert_eq!(data, big);
+
+        let from_try = Cursor::new(message)
+            .bytes()
+            .protobuf_fields::<Vec<u8>>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_try.value else {
+            panic!("expected len");
+        };
+        assert_eq!(data, big);
+    }
+}
+
+#[cfg(all(test, feature = "nightly"))]
+mod allocator_tests {
+    use super::LEN_BUF_CHUNK;
+    use super::tests::{len_message, payload};
+    use crate::FieldValue;
+    use crate::field::read::{IteratorExtProtobuf, ReadExtProtobuf, TryIteratorExtProtobuf};
+    use ::std::alloc::{AllocError, Allocator, Global, Layout};
+    use ::std::io::{Cursor, Read};
+    use ::std::ptr::NonNull;
+    use ::std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn vec_with_global_reads_multichunk_payload_on_every_streaming_source() {

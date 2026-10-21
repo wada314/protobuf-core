@@ -43,8 +43,8 @@ pub use self::write::WriteExtProtobuf;
 /// based on the field's schema definition.
 ///
 /// `L` is the type for length-delimited values (Len variant).
-///  - Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf),
-///    including `Vec<u8, A>`.
+///  - Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf).
+///    `Vec<u8>` is always implemented. `Vec<u8, A>` needs the `nightly` feature.
 ///  - Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
@@ -160,8 +160,9 @@ impl<L> FieldValue<L> {
 /// The caller must interpret the value based on the message schema.
 ///
 /// `L` is the type for length-delimited values (FieldValue::Len).
-/// Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf),
-/// including `Vec<u8, A>`. Slice readers borrow the input as `&'a [u8]`.
+/// Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf).
+/// `Vec<u8>` is always implemented. `Vec<u8, A>` needs the `nightly` feature.
+/// Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
     pub field_number: FieldNumber,
