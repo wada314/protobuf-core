@@ -157,7 +157,7 @@ where
 ///
 /// This trait provides convenient methods to read fields directly from
 /// any iterator that yields bytes. Length-delimited payloads are `L: LenBuf`
-/// (for example `Vec<u8>` or `Box<[u8]>`).
+/// (for example `Vec<u8>`).
 ///
 /// # Example
 /// ```
@@ -268,7 +268,7 @@ where
 /// This trait provides convenient methods to read fields directly from
 /// any iterator that yields `Result<u8, E>`, allowing proper error propagation
 /// from I/O operations. Length-delimited payloads are `L: LenBuf`
-/// (for example `Vec<u8>` or `Box<[u8]>`).
+/// (for example `Vec<u8>`).
 ///
 /// # Example
 /// ```
@@ -368,7 +368,7 @@ where
 /// Extension trait for reading raw Protocol Buffer fields from `Read` types
 ///
 /// This trait provides low-level utilities for reading field-by-field from a byte stream.
-/// Length-delimited payloads are `L: LenBuf` (for example `Vec<u8>` or `Box<[u8]>`).
+/// Length-delimited payloads are `L: LenBuf` (for example `Vec<u8>`).
 /// It does not provide semantic interpretation - that is the caller's responsibility.
 ///
 /// # Example
