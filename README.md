@@ -26,13 +26,12 @@ This library provides common definitions, constants, enums, and basic logic for 
 ### Reading Fields
 
 ```rust
-use protobuf_core::{Field, IteratorExtProtobuf};
+use protobuf_core::{AsRefExtProtobuf, Field};
 
-let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
-let fields: Vec<Field<Vec<u8>>> = bytes
-    .into_iter()
-    .protobuf_fields()
-    .collect::<Result<Vec<Field<Vec<u8>>>, _>>()
+let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1: 150
+let fields: Vec<Field<&[u8]>> = bytes
+    .read_protobuf_fields()
+    .collect::<Result<Vec<_>, _>>()
     .unwrap();
 ```
 
