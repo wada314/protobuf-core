@@ -142,137 +142,120 @@ where
     }
 }
 
-macro_rules! impl_len_buf_for_vec_u8 {
-    ($(#[$meta:meta])*) => {
-        /// Length-delimited payload stored in `Vec<u8>`.
-        ///
-        /// This implementation does not require the `nightly` feature and does not
-        /// take a custom allocator. `from_read` fills the vector with `read_exact`.
-        /// The iterator methods push each byte.
-        $(#[$meta])*
-        impl LenBuf for Vec<u8> {
-            fn with_capacity(capacity: usize) -> Self {
-                Vec::with_capacity(capacity)
-            }
+/// Length-delimited payload stored in `Vec<u8>`.
+///
+/// This implementation does not require the `nightly` feature and does not
+/// take a custom allocator. `from_read` fills the vector with `read_exact`.
+/// The iterator methods push each byte.
+#[cfg(not(feature = "nightly"))]
+impl LenBuf for Vec<u8> {
+    fn with_capacity(capacity: usize) -> Self {
+        Vec::with_capacity(capacity)
+    }
 
-            fn reserve(&mut self, additional: usize) {
-                Vec::reserve(self, additional);
-            }
+    fn reserve(&mut self, additional: usize) {
+        Vec::reserve(self, additional);
+    }
 
-            fn append_slice(&mut self, data: &[u8]) {
-                self.extend_from_slice(data);
-            }
+    fn append_slice(&mut self, data: &[u8]) {
+        self.extend_from_slice(data);
+    }
 
-            fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
-            where
-                R: Read,
-            {
-                let mut data = vec![0u8; len];
-                reader.read_exact(&mut data)?;
-                Ok(data)
-            }
+    fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
+    where
+        R: Read,
+    {
+        let mut data = vec![0u8; len];
+        reader.read_exact(&mut data)?;
+        Ok(data)
+    }
 
-            fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
-            where
-                I: Iterator<Item = u8>,
-            {
-                let mut data = Vec::with_capacity(len);
-                for _ in 0..len {
-                    data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
-                }
-                Ok(data)
-            }
-
-            fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
-            where
-                I: Iterator<Item = ::std::result::Result<u8, E>>,
-                E: Into<ProtobufError>,
-            {
-                let mut data = Vec::with_capacity(len);
-                for _ in 0..len {
-                    data.push(
-                        iter.next()
-                            .ok_or(ProtobufError::UnexpectedEof)?
-                            .map_err(Into::into)?,
-                    );
-                }
-                Ok(data)
-            }
+    fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
+    where
+        I: Iterator<Item = u8>,
+    {
+        let mut data = Vec::with_capacity(len);
+        for _ in 0..len {
+            data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
         }
-    };
-}
+        Ok(data)
+    }
 
-macro_rules! impl_len_buf_for_vec_alloc {
-    ($(#[$meta:meta])*) => {
-        /// `Vec<u8, A>`. Enable the `nightly` feature to use the allocator.
-        $(#[$meta])*
-        #[allow(clippy::incompatible_msrv)]
-        impl<A> LenBuf for Vec<u8, A>
-        where
-            A: Allocator + Default,
-        {
-            fn with_capacity(capacity: usize) -> Self {
-                Vec::with_capacity_in(capacity, A::default())
-            }
-
-            fn reserve(&mut self, additional: usize) {
-                Vec::reserve(self, additional);
-            }
-
-            fn append_slice(&mut self, data: &[u8]) {
-                self.extend_from_slice(data);
-            }
-
-            fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
-            where
-                R: Read,
-            {
-                // `read_exact` needs an initialized buffer. `A` is the vector's allocator,
-                // so this cannot go through the `vec!` macro (that uses `Global`).
-                let mut data = Vec::with_capacity_in(len, A::default());
-                data.resize(len, 0);
-                reader.read_exact(&mut data)?;
-                Ok(data)
-            }
-
-            fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
-            where
-                I: Iterator<Item = u8>,
-            {
-                let mut data = Vec::with_capacity_in(len, A::default());
-                for _ in 0..len {
-                    data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
-                }
-                Ok(data)
-            }
-
-            fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
-            where
-                I: Iterator<Item = ::std::result::Result<u8, E>>,
-                E: Into<ProtobufError>,
-            {
-                let mut data = Vec::with_capacity_in(len, A::default());
-                for _ in 0..len {
-                    data.push(
-                        iter.next()
-                            .ok_or(ProtobufError::UnexpectedEof)?
-                            .map_err(Into::into)?,
-                    );
-                }
-                Ok(data)
-            }
+    fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
+    where
+        I: Iterator<Item = ::std::result::Result<u8, E>>,
+        E: Into<ProtobufError>,
+    {
+        let mut data = Vec::with_capacity(len);
+        for _ in 0..len {
+            data.push(
+                iter.next()
+                    .ok_or(ProtobufError::UnexpectedEof)?
+                    .map_err(Into::into)?,
+            );
         }
-    };
+        Ok(data)
+    }
 }
 
-// Stable, and any build that does not enable `allocator_api`.
-impl_len_buf_for_vec_u8! {
-    #[cfg(not(feature = "nightly"))]
-}
+/// `Vec<u8, A>`. Enable the `nightly` feature to use the allocator.
+#[cfg(feature = "nightly")]
+#[doc(cfg(feature = "nightly"))]
+#[allow(clippy::incompatible_msrv)]
+impl<A> LenBuf for Vec<u8, A>
+where
+    A: Allocator + Default,
+{
+    fn with_capacity(capacity: usize) -> Self {
+        Vec::with_capacity_in(capacity, A::default())
+    }
 
-impl_len_buf_for_vec_alloc! {
-    #[cfg(feature = "nightly")]
-    #[doc(cfg(feature = "nightly"))]
+    fn reserve(&mut self, additional: usize) {
+        Vec::reserve(self, additional);
+    }
+
+    fn append_slice(&mut self, data: &[u8]) {
+        self.extend_from_slice(data);
+    }
+
+    fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
+    where
+        R: Read,
+    {
+        // `read_exact` needs an initialized buffer. `A` is the vector's allocator,
+        // so this cannot go through the `vec!` macro (that uses `Global`).
+        let mut data = Vec::with_capacity_in(len, A::default());
+        data.resize(len, 0);
+        reader.read_exact(&mut data)?;
+        Ok(data)
+    }
+
+    fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
+    where
+        I: Iterator<Item = u8>,
+    {
+        let mut data = Vec::with_capacity_in(len, A::default());
+        for _ in 0..len {
+            data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
+        }
+        Ok(data)
+    }
+
+    fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
+    where
+        I: Iterator<Item = ::std::result::Result<u8, E>>,
+        E: Into<ProtobufError>,
+    {
+        let mut data = Vec::with_capacity_in(len, A::default());
+        for _ in 0..len {
+            data.push(
+                iter.next()
+                    .ok_or(ProtobufError::UnexpectedEof)?
+                    .map_err(Into::into)?,
+            );
+        }
+        Ok(data)
+    }
 }
 
 #[cfg(test)]
