@@ -23,7 +23,7 @@ cargo clippy --all-targets
 - **No full message types.** Keep the surface to constants, `Varint`, `Tag`, `Field` / `FieldValue`, and extension traits.
 - **Do not confuse Rust types with protobuf types.** Name conversions after the protobuf type (`from_sint32`, `to_uint64`), not the Rust integer.
 - Minimize dependencies. `thiserror` is the expected exception.
-- **Streaming length-delimited payloads use `LenBuf`.** `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, and `ReadExtProtobuf` are generic over `L: LenBuf`. `AsRefExtProtobuf` still returns `Field<&[u8]>` and stays zero-copy. `Vec<u8>` always implements `LenBuf` and writes the payload into that vector. `Vec<u8, A>` (`A: Allocator + Default`) is the `nightly` feature only; that feature enables `allocator_api` and does not build on stable rustc. Do not stage the payload in a separate `Vec` first. Default `cargo test` stays off `nightly`.
+- **Streaming length-delimited payloads use `LenBuf`.** `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, and `ReadExtProtobuf` are generic over `L: LenBuf`. `AsRefExtProtobuf` still returns `Field<&[u8]>` and stays zero-copy. `Vec<u8>` always implements `LenBuf` and writes the payload into that vector. `Vec<u8, A>` (`A: Allocator + Default`) is the `nightly` feature only; that feature enables `allocator_api` and does not build on stable rustc. Document that impl with `doc(cfg(feature = "nightly"))`. `[package.metadata.docs.rs]` enables `nightly` so docs.rs shows it. Do not stage the payload in a separate `Vec` first. Default `cargo test` stays off `nightly`.
 - `FieldNumber::try_new(u32) -> Result<Self, u32>` returns the bad input (not `ProtobufError`) so it can stay `const fn`. Map to `ProtobufError::FieldNumberOutOfRange` at I/O boundaries.
 
 ## Code style

@@ -44,7 +44,8 @@ pub use self::write::WriteExtProtobuf;
 ///
 /// `L` is the type for length-delimited values (Len variant).
 ///  - Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf).
-///    `Vec<u8>` is always implemented. `Vec<u8, A>` needs the `nightly` feature.
+///    `Vec<u8>` is always implemented. A custom allocator (`Vec<u8, A>`) requires
+///    the `nightly` feature.
 ///  - Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
@@ -161,7 +162,8 @@ impl<L> FieldValue<L> {
 ///
 /// `L` is the type for length-delimited values (FieldValue::Len).
 /// Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf).
-/// `Vec<u8>` is always implemented. `Vec<u8, A>` needs the `nightly` feature.
+/// `Vec<u8>` is always implemented. A custom allocator (`Vec<u8, A>`) requires
+/// the `nightly` feature.
 /// Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {

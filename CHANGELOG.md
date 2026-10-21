@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `LenBuf`, the buffer trait for length-delimited payloads read from `Read` and byte iterators. Implement `with_capacity`, `reserve`, and `append_slice`. The `from_read`, `from_iter`, and `from_try_iter` methods have defaults that append stack-sized chunks.
 - `impl LenBuf for Vec<u8>`. `from_read` fills the vector with `read_exact`. The iterator methods `push` each byte into that vector.
-- Cargo feature `nightly`: `impl<A: Allocator + Default> LenBuf for Vec<u8, A>`, and `#![feature(allocator_api)]`. This feature does not build on the stable channel.
+- Cargo feature `nightly`: `impl<A: Allocator + Default> LenBuf for Vec<u8, A>`, and `#![feature(allocator_api)]`. This feature does not build on the stable channel. The implementation is documented as requiring `nightly`. docs.rs builds with that feature enabled.
 
 ### Changed
 

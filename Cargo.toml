@@ -19,6 +19,10 @@ exclude = [
 # `impl LenBuf for Vec<u8, A>`. Turns on `allocator_api`. Build with a nightly compiler.
 nightly = []
 
+[package.metadata.docs.rs]
+# docs.rs uses nightly rustc. Enable this feature so the allocator impl is documented.
+features = ["nightly"]
+
 [dependencies]
 thiserror = "1.0"
 

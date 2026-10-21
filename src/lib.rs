@@ -97,7 +97,8 @@
 //!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`)
 //!
 //! [`LenBuf`] is the buffer trait for those streaming readers. `Vec<u8>` implements
-//! it. The `nightly` feature also implements it for `Vec<u8, A>`. Slice reads do not use it.
+//! it with no extra feature. A custom allocator (`Vec<u8, A>`) requires the
+//! `nightly` feature. Slice reads do not use this trait.
 //!
 //! ## Writing Traits
 //!
@@ -124,11 +125,13 @@
 //!
 //! ## Feature Flags
 //!
-//! - `nightly`: implement [`LenBuf`] for `Vec<u8, A>` (`A: Allocator + Default`).
-//!   This passes `#![feature(allocator_api)]` and must be built with a nightly compiler.
-//!   The default build implements [`LenBuf`] for `Vec<u8>` only.
+//! - `nightly`: required for a custom allocator. Implements [`LenBuf`] for
+//!   `Vec<u8, A>` (`A: Allocator + Default`), passes `#![feature(allocator_api)]`,
+//!   and must be built with a nightly compiler. `Vec<u8>` implements [`LenBuf`]
+//!   without this feature. docs.rs builds the documentation with this feature
+//!   enabled, and marks that implementation as `nightly`-only.
 
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
+#![cfg_attr(feature = "nightly", feature(allocator_api, doc_cfg))]
 #![cfg_attr(feature = "nightly", allow(stable_features))]
 
 pub(crate) mod field;

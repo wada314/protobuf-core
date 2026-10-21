@@ -21,13 +21,15 @@ const LEN_BUF_CHUNK: usize = 8192;
 /// fixed-size chunks. Override `from_read`, `from_iter`, or `from_try_iter` when
 /// the buffer can take the bytes without that extra copy.
 ///
-/// `Vec<u8>` implements this trait. `from_read` writes the payload with `read_exact`.
-/// The iterator methods push each byte into the reserved vector.
+/// `Vec<u8>` implements this trait on every build. `from_read` writes the payload
+/// with `read_exact`. The iterator methods push each byte into the reserved vector.
 ///
-/// The `nightly` feature also implements this trait for `Vec<u8, A>` where
-/// `A: Allocator + Default`. That feature enables `allocator_api` and builds with a
-/// nightly compiler. On that compiler `Vec<u8>` is `Vec<u8, Global>`, so the generic
-/// impl replaces the plain `Vec<u8>` impl.
+/// A custom allocator requires the `nightly` Cargo feature. That feature implements
+/// this trait for `Vec<u8, A>` where `A: Allocator + Default`, enables
+/// `allocator_api`, and builds only with a nightly compiler. On that compiler
+/// `Vec<u8>` is `Vec<u8, Global>`, so the generic impl replaces the plain `Vec<u8>`
+/// impl. docs.rs enables the feature, and the implementation is marked as
+/// requiring it.
 ///
 /// # Examples
 ///
@@ -195,7 +197,18 @@ impl LenBuf for Vec<u8> {
     }
 }
 
+/// Length-delimited payload stored in `Vec<u8, A>`.
+///
+/// Enable the `nightly` Cargo feature and build with a nightly compiler.
+/// Without that feature this implementation is not compiled, and a custom
+/// allocator cannot be used. `A` must implement `std::alloc::Allocator` + `Default`.
+/// [`with_capacity`](LenBuf::with_capacity) and the `from_*` methods construct
+/// the vector with `A::default()`.
+///
+/// `Vec<u8>` does not need the feature. On nightly, `Vec<u8>` is
+/// `Vec<u8, Global>`, so this implementation covers it too.
 #[cfg(feature = "nightly")]
+#[cfg_attr(feature = "nightly", doc(cfg(feature = "nightly")))]
 #[allow(clippy::incompatible_msrv)]
 impl<A> LenBuf for Vec<u8, A>
 where
