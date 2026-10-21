@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `LenBuf`, the buffer trait for length-delimited payloads read from `Read` and byte iterators. Implement `with_capacity`, `reserve`, and `append_slice`. The `from_read`, `from_iter`, and `from_try_iter` methods have defaults that append stack-sized chunks.
+- `LenBuf`, the buffer trait for length-delimited payloads read from `Read` and byte iterators. Implement `with_capacity` and `append_slice`. The `from_read`, `from_iter`, and `from_try_iter` methods have defaults that append stack-sized chunks.
 - `impl LenBuf for Vec<u8>`. `from_read` fills the vector with `read_exact`. The iterator methods `push` each byte into that vector.
-- Cargo feature `nightly`: `impl<A: Allocator + Default> LenBuf for Vec<u8, A>`, and `#![feature(allocator_api)]`. This feature does not build on the stable channel. docs.rs shows that signature and marks it with the `nightly` feature. Enable the feature to use the allocator.
+- `impl LenBuf for Box<[u8]>`. `from_read`, `from_iter`, and `from_try_iter` allocate one box of exactly `len` bytes and fill it. `from_read` uses `read_exact`.
+- Cargo feature `nightly`: `impl<A: Allocator + Default> LenBuf for Vec<u8, A>`, `impl<A: Allocator + Default> LenBuf for Box<[u8], A>`, and `#![feature(allocator_api)]`. This feature does not build on the stable channel. docs.rs shows those signatures and marks them with the `nightly` feature. Enable the feature to use the allocator. The impl docs note that `Vec<u8>` and `Box<[u8]>` implement the trait without it.
 
 ### Changed
 
