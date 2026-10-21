@@ -26,23 +26,16 @@
 //!
 //! ### Reading Fields
 //!
-//! This library provides multiple ways to read protobuf fields from different sources:
+//! Read fields from any `AsRef<[u8]>` value, such as a slice or `Vec<u8>`.
+//! Length-delimited bytes stay borrowed (`Field<&[u8]>`).
 //!
 //! ```rust
-//! use protobuf_core::{Field, IteratorExtProtobuf, AsRefExtProtobuf};
+//! use protobuf_core::{AsRefExtProtobuf, Field};
 //!
-//! // From a byte iterator - returns Field<Vec<u8>> (Len values are Vec<u8>)
-//! let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
-//! let fields: Vec<Field<Vec<u8>>> = bytes
-//!     .into_iter()
-//!     .protobuf_fields()
-//!     .collect::<Result<Vec<Field<Vec<u8>>>, _>>()
-//!     .unwrap();
-//!
-//! // From a slice - returns Field<&[u8]> (Len values are &[u8], zero-copy)
-//! let slice: &[u8] = &[0x08, 0x96, 0x01];
-//! let fields: Vec<Field<&[u8]>> = AsRefExtProtobuf::read_protobuf_fields(&slice)
-//!     .collect::<Result<Vec<Field<&[u8]>>, _>>()
+//! let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1: 150
+//! let fields: Vec<Field<&[u8]>> = bytes
+//!     .read_protobuf_fields()
+//!     .collect::<Result<Vec<_>, _>>()
 //!     .unwrap();
 //! ```
 //!
