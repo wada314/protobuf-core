@@ -58,7 +58,7 @@
 //!
 //! - [`Field<L>`]: Represents a raw protobuf field with a field number and value.
 //!   The `L` type parameter represents the type used for length-delimited values
-//!   (`LenBuf`, such as `Vec<u8>`, or `&'a [u8]` for a slice read).
+//!   (`LenBuf`, such as `Vec<u8>` or `Box<[u8]>`, or `&'a [u8]` for a slice read).
 //! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
 //!   - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64,
 //!     Bool, Enum)
@@ -86,19 +86,21 @@
 //! The library provides several traits for reading protobuf fields from different sources:
 //!
 //! - [`IteratorExtProtobuf`]: Read fields from `Iterator<Item = u8>`
-//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`)
+//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`, `Box<[u8]>`)
 //! - [`TryIteratorExtProtobuf`]: Read fields from
 //!   `Iterator<Item = Result<u8, E>>`
-//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`)
+//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`, `Box<[u8]>`)
 //! - [`AsRefExtProtobuf`]: Read fields from `AsRef<[u8]>` types
 //!   (slices, arrays, etc.)
 //!   - Output: [`Field<&[u8]>`] - Len values are borrowed `&[u8]` slices (zero-copy)
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types
-//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`)
+//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`, `Box<[u8]>`)
 //!
-//! [`LenBuf`] is the buffer trait for those streaming readers. `Vec<u8>` implements
-//! it with no extra feature. A custom allocator (`Vec<u8, A>`) requires the
-//! `nightly` feature. Slice reads do not use this trait.
+//! [`LenBuf`] is the buffer trait for those streaming readers. The payload length
+//! is known before its bytes are read. `with_len` allocates that many bytes and
+//! `as_mut_slice` returns all of them. `Vec<u8>` and `Box<[u8]>` implement it with
+//! no extra feature. A custom allocator (`Vec<u8, A>` or `Box<[u8], A>`) requires
+//! the `nightly` feature. Slice reads do not use this trait.
 //!
 //! ## Writing Traits
 //!
@@ -125,7 +127,7 @@
 //!
 //! ## Feature Flags
 //!
-//! - `nightly`: [`LenBuf`] for `Vec<u8, A>`. Enable this feature to use the allocator.
+//! - `nightly`: [`LenBuf`] for `Vec<u8, A>` and `Box<[u8], A>`. Enable this feature to use the allocator.
 //!
 #![cfg_attr(feature = "nightly", feature(allocator_api, doc_cfg))]
 #![cfg_attr(feature = "nightly", allow(stable_features))]

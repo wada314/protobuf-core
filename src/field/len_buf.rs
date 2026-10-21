@@ -10,22 +10,21 @@ use ::std::io::Read;
 #[cfg(feature = "nightly")]
 use ::std::alloc::Allocator;
 
-/// Bytes per `append_slice` call in the default streaming readers.
-const LEN_BUF_CHUNK: usize = 8192;
-
-/// Buffer that can accept one length-delimited protobuf payload.
+/// Buffer that can hold one length-delimited protobuf payload.
 ///
-/// Implement [`with_capacity`](LenBuf::with_capacity) and
-/// [`append_slice`](LenBuf::append_slice). The `from_*` methods have defaults
-/// that create a buffer with [`with_capacity`](LenBuf::with_capacity) and append
-/// fixed-size chunks. Override `from_read`, `from_iter`, or `from_try_iter` when
-/// the buffer can take the bytes without that extra copy.
+/// The payload length is known before its bytes are read. Implement
+/// [`with_len`](LenBuf::with_len) and [`as_mut_slice`](LenBuf::as_mut_slice).
+/// `with_len` allocates exactly that many initialized bytes, and `as_mut_slice`
+/// returns all of them. The slice length is the payload length for the whole
+/// read. The `from_*` methods have defaults that allocate with `with_len` and
+/// write into that slice.
 ///
-/// `Vec<u8>` implements this trait. `from_read` writes the payload with
-/// `read_exact`. The iterator methods push each byte.
+/// `Vec<u8>` and `Box<[u8]>` implement this trait. Both allocate `len` bytes
+/// and `from_read` overwrites them with `read_exact`.
 ///
-/// `Vec<u8, A>` is that payload with an allocator. Enable the `nightly` feature
-/// to use the allocator. docs.rs shows that signature, with a badge for the feature.
+/// `Vec<u8, A>` and `Box<[u8], A>` are those payloads with an allocator. Enable
+/// the `nightly` feature to use the allocator. docs.rs shows those signatures,
+/// with a badge for the feature.
 ///
 /// # Examples
 ///
@@ -36,12 +35,12 @@ const LEN_BUF_CHUNK: usize = 8192;
 /// struct Bytes(Vec<u8>);
 ///
 /// impl LenBuf for Bytes {
-///     fn with_capacity(capacity: usize) -> Self {
-///         Self(Vec::with_capacity(capacity))
+///     fn with_len(len: usize) -> Self {
+///         Self(vec![0; len])
 ///     }
 ///
-///     fn append_slice(&mut self, data: &[u8]) {
-///         self.0.extend_from_slice(data);
+///     fn as_mut_slice(&mut self) -> &mut [u8] {
+///         &mut self.0
 ///     }
 /// }
 ///
@@ -57,29 +56,28 @@ const LEN_BUF_CHUNK: usize = 8192;
 /// assert_eq!(data, b"Hel");
 /// ```
 pub trait LenBuf: Sized {
-    /// Create a buffer that can accept at least `capacity` appended bytes.
-    fn with_capacity(capacity: usize) -> Self;
+    /// Allocate a buffer of exactly `len` initialized bytes.
+    ///
+    /// The bytes are overwritten by [`from_read`](LenBuf::from_read),
+    /// [`from_iter`](LenBuf::from_iter), and [`from_try_iter`](LenBuf::from_try_iter).
+    /// Zero is a valid initial value.
+    fn with_len(len: usize) -> Self;
 
-    /// Append `data` to the buffer, in order.
-    fn append_slice(&mut self, data: &[u8]);
+    /// The full payload buffer.
+    ///
+    /// The length of this slice is the `len` passed to [`with_len`](LenBuf::with_len).
+    fn as_mut_slice(&mut self) -> &mut [u8];
 
     /// Read exactly `len` payload bytes from `reader`.
     ///
-    /// The default reads into a stack chunk and [`append_slice`](LenBuf::append_slice)s
-    /// each chunk. It does not allocate a second heap buffer for the payload.
+    /// The default allocates with [`with_len`](LenBuf::with_len) and fills that
+    /// slice with `read_exact`.
     fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
     where
         R: Read,
     {
-        let mut buf = Self::with_capacity(len);
-        let mut remaining = len;
-        let mut chunk = [0u8; LEN_BUF_CHUNK];
-        while remaining > 0 {
-            let n = remaining.min(chunk.len());
-            reader.read_exact(&mut chunk[..n])?;
-            buf.append_slice(&chunk[..n]);
-            remaining -= n;
-        }
+        let mut buf = Self::with_len(len);
+        reader.read_exact(buf.as_mut_slice())?;
         Ok(buf)
     }
 
@@ -93,25 +91,19 @@ pub trait LenBuf: Sized {
 
     /// Read exactly `len` payload bytes from a fallible byte iterator.
     ///
-    /// The default stages bytes in a stack chunk, then appends that chunk.
+    /// The default allocates with [`with_len`](LenBuf::with_len) and writes
+    /// each byte into that slice.
     fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
     where
         I: Iterator<Item = ::std::result::Result<u8, E>>,
         E: Into<ProtobufError>,
     {
-        let mut buf = Self::with_capacity(len);
-        let mut remaining = len;
-        let mut chunk = [0u8; LEN_BUF_CHUNK];
-        while remaining > 0 {
-            let n = remaining.min(chunk.len());
-            for slot in &mut chunk[..n] {
-                *slot = iter
-                    .next()
-                    .ok_or(ProtobufError::UnexpectedEof)?
-                    .map_err(Into::into)?;
-            }
-            buf.append_slice(&chunk[..n]);
-            remaining -= n;
+        let mut buf = Self::with_len(len);
+        for slot in buf.as_mut_slice() {
+            *slot = iter
+                .next()
+                .ok_or(ProtobufError::UnexpectedEof)?
+                .map_err(Into::into)?;
         }
         Ok(buf)
     }
@@ -134,52 +126,32 @@ where
 /// Length-delimited payload stored in `Vec<u8>`.
 ///
 /// This implementation does not require the `nightly` feature and does not
-/// take a custom allocator. `from_read` fills the vector with `read_exact`.
-/// The iterator methods push each byte.
+/// take a custom allocator. `with_len` allocates `len` zero bytes. `from_read`
+/// overwrites them with `read_exact`.
 #[cfg(not(feature = "nightly"))]
 impl LenBuf for Vec<u8> {
-    fn with_capacity(capacity: usize) -> Self {
-        Vec::with_capacity(capacity)
+    fn with_len(len: usize) -> Self {
+        vec![0u8; len]
     }
 
-    fn append_slice(&mut self, data: &[u8]) {
-        self.extend_from_slice(data);
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        self
+    }
+}
+
+/// Length-delimited payload stored in `Box<[u8]>`.
+///
+/// This implementation does not require the `nightly` feature and does not
+/// take a custom allocator. `with_len` allocates one box of `len` zero bytes.
+/// `from_read` overwrites them with `read_exact`.
+#[cfg(not(feature = "nightly"))]
+impl LenBuf for Box<[u8]> {
+    fn with_len(len: usize) -> Self {
+        vec![0u8; len].into_boxed_slice()
     }
 
-    fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
-    where
-        R: Read,
-    {
-        let mut data = vec![0u8; len];
-        reader.read_exact(&mut data)?;
-        Ok(data)
-    }
-
-    fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
-    where
-        I: Iterator<Item = u8>,
-    {
-        let mut data = Vec::with_capacity(len);
-        for _ in 0..len {
-            data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
-        }
-        Ok(data)
-    }
-
-    fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
-    where
-        I: Iterator<Item = ::std::result::Result<u8, E>>,
-        E: Into<ProtobufError>,
-    {
-        let mut data = Vec::with_capacity(len);
-        for _ in 0..len {
-            data.push(
-                iter.next()
-                    .ok_or(ProtobufError::UnexpectedEof)?
-                    .map_err(Into::into)?,
-            );
-        }
-        Ok(data)
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        self
     }
 }
 
@@ -195,79 +167,66 @@ impl<A> LenBuf for Vec<u8, A>
 where
     A: Allocator + Default,
 {
-    fn with_capacity(capacity: usize) -> Self {
-        Vec::with_capacity_in(capacity, A::default())
-    }
-
-    fn append_slice(&mut self, data: &[u8]) {
-        self.extend_from_slice(data);
-    }
-
-    fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
-    where
-        R: Read,
-    {
+    fn with_len(len: usize) -> Self {
         // `read_exact` needs an initialized buffer. `A` is the vector's allocator,
         // so this cannot go through the `vec!` macro (that uses `Global`).
         let mut data = Vec::with_capacity_in(len, A::default());
         data.resize(len, 0);
-        reader.read_exact(&mut data)?;
-        Ok(data)
+        data
     }
 
-    fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
-    where
-        I: Iterator<Item = u8>,
-    {
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        self
+    }
+}
+
+/// `Box<[u8], A>`. Enable the `nightly` feature to use the allocator.
+///
+/// The feature is not required when you do not use an allocator. `Box<[u8]>`
+/// implements this trait without it. The badge above marks this signature,
+/// which is the one that takes an allocator.
+#[cfg(feature = "nightly")]
+#[doc(cfg(feature = "nightly"))]
+#[allow(clippy::incompatible_msrv)]
+impl<A> LenBuf for Box<[u8], A>
+where
+    A: Allocator + Default,
+{
+    fn with_len(len: usize) -> Self {
+        // `read_exact` needs an initialized buffer. `A` is the box's allocator,
+        // so this cannot go through the `vec!` macro (that uses `Global`).
+        // `into_boxed_slice` keeps this allocation when the length equals the capacity.
         let mut data = Vec::with_capacity_in(len, A::default());
-        for _ in 0..len {
-            data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
-        }
-        Ok(data)
+        data.resize(len, 0);
+        data.into_boxed_slice()
     }
 
-    fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
-    where
-        I: Iterator<Item = ::std::result::Result<u8, E>>,
-        E: Into<ProtobufError>,
-    {
-        let mut data = Vec::with_capacity_in(len, A::default());
-        for _ in 0..len {
-            data.push(
-                iter.next()
-                    .ok_or(ProtobufError::UnexpectedEof)?
-                    .map_err(Into::into)?,
-            );
-        }
-        Ok(data)
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        self
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{LEN_BUF_CHUNK, LenBuf};
+    use super::LenBuf;
     use crate::field::read::{IteratorExtProtobuf, ReadExtProtobuf, TryIteratorExtProtobuf};
     use crate::varint::Varint;
     use crate::{FieldValue, ProtobufError};
     use ::std::io::{Cursor, ErrorKind, Read};
 
-    #[derive(Debug, PartialEq, Eq)]
-    struct Chunks {
-        parts: Vec<usize>,
-        bytes: Vec<u8>,
-    }
+    pub(super) const LARGE_LEN: usize = 8200;
 
-    impl LenBuf for Chunks {
-        fn with_capacity(capacity: usize) -> Self {
-            Self {
-                parts: Vec::new(),
-                bytes: Vec::with_capacity(capacity),
-            }
+    /// Custom buffer that uses only the required `LenBuf` methods.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Bytes(Vec<u8>);
+
+    impl LenBuf for Bytes {
+        fn with_len(len: usize) -> Self {
+            Self(vec![0; len])
         }
 
-        fn append_slice(&mut self, data: &[u8]) {
-            self.parts.push(data.len());
-            self.bytes.extend_from_slice(data);
+        fn as_mut_slice(&mut self) -> &mut [u8] {
+            &mut self.0
         }
     }
 
@@ -283,56 +242,49 @@ mod tests {
         (0..len).map(|index| index as u8).collect()
     }
 
-    fn assert_chunks(field_bytes: &[u8], expected: &[u8]) {
+    fn assert_bytes(field_bytes: &[u8], expected: &[u8]) {
         let owned: Vec<u8> = field_bytes.to_vec();
 
         let from_read = Cursor::new(owned.clone())
-            .read_protobuf_fields::<Chunks>()
+            .read_protobuf_fields::<Bytes>()
             .next()
             .unwrap()
             .unwrap();
-        let FieldValue::Len(chunks) = from_read.value else {
+        let FieldValue::Len(Bytes(data)) = from_read.value else {
             panic!("expected len");
         };
-        assert_eq!(chunks.bytes, expected);
-        if expected.is_empty() {
-            assert!(chunks.parts.is_empty());
-        } else {
-            assert_eq!(chunks.parts.iter().sum::<usize>(), expected.len());
-            assert!(chunks.parts.iter().all(|part| *part <= LEN_BUF_CHUNK));
-            assert_eq!(chunks.parts.len(), expected.len().div_ceil(LEN_BUF_CHUNK));
-        }
+        assert_eq!(data, expected);
 
         let from_iter = owned
             .clone()
             .into_iter()
-            .protobuf_fields::<Chunks>()
+            .protobuf_fields::<Bytes>()
             .next()
             .unwrap()
             .unwrap();
-        let FieldValue::Len(chunks) = from_iter.value else {
+        let FieldValue::Len(Bytes(data)) = from_iter.value else {
             panic!("expected len");
         };
-        assert_eq!(chunks.bytes, expected);
+        assert_eq!(data, expected);
 
         let from_try = Cursor::new(owned)
             .bytes()
-            .protobuf_fields::<Chunks>()
+            .protobuf_fields::<Bytes>()
             .next()
             .unwrap()
             .unwrap();
-        let FieldValue::Len(chunks) = from_try.value else {
+        let FieldValue::Len(Bytes(data)) = from_try.value else {
             panic!("expected len");
         };
-        assert_eq!(chunks.bytes, expected);
+        assert_eq!(data, expected);
     }
 
     #[test]
-    fn default_appends_cover_empty_small_and_multichunk_payloads() {
-        assert_chunks(&len_message(b""), b"");
-        assert_chunks(&len_message(b"Hel"), b"Hel");
-        let big = payload(LEN_BUF_CHUNK + 3);
-        assert_chunks(&len_message(&big), &big);
+    fn default_fill_covers_empty_small_and_large_payloads() {
+        assert_bytes(&len_message(b""), b"");
+        assert_bytes(&len_message(b"Hel"), b"Hel");
+        let big = payload(LARGE_LEN);
+        assert_bytes(&len_message(&big), &big);
     }
 
     #[test]
@@ -340,7 +292,7 @@ mod tests {
         let input = [0x0A, 0x05, b'a', b'b'];
         // `Read::read_exact` reports a short buffer as an I/O error.
         let error = Cursor::new(input)
-            .read_protobuf_fields::<Chunks>()
+            .read_protobuf_fields::<Bytes>()
             .next()
             .unwrap()
             .unwrap_err();
@@ -351,7 +303,7 @@ mod tests {
 
         let error = input
             .into_iter()
-            .protobuf_fields::<Chunks>()
+            .protobuf_fields::<Bytes>()
             .next()
             .unwrap()
             .unwrap_err();
@@ -359,19 +311,15 @@ mod tests {
 
         let error = Cursor::new(input)
             .bytes()
-            .protobuf_fields::<Chunks>()
+            .protobuf_fields::<Bytes>()
             .next()
             .unwrap()
             .unwrap_err();
         assert!(matches!(error, ProtobufError::UnexpectedEof));
     }
 
-    #[test]
-    fn vec_reads_multichunk_payload_on_every_streaming_source() {
-        let big = payload(LEN_BUF_CHUNK + 3);
-        let message = len_message(&big);
-
-        let from_read = Cursor::new(message.clone())
+    fn assert_vec(message: &[u8], expected: &[u8]) {
+        let from_read = Cursor::new(message.to_vec())
             .read_protobuf_fields::<Vec<u8>>()
             .next()
             .unwrap()
@@ -379,11 +327,11 @@ mod tests {
         let FieldValue::Len(data) = from_read.value else {
             panic!("expected len");
         };
-        assert_eq!(data, big);
+        assert_eq!(data, expected);
 
         let from_iter = message
-            .clone()
-            .into_iter()
+            .iter()
+            .copied()
             .protobuf_fields::<Vec<u8>>()
             .next()
             .unwrap()
@@ -391,9 +339,9 @@ mod tests {
         let FieldValue::Len(data) = from_iter.value else {
             panic!("expected len");
         };
-        assert_eq!(data, big);
+        assert_eq!(data, expected);
 
-        let from_try = Cursor::new(message)
+        let from_try = Cursor::new(message.to_vec())
             .bytes()
             .protobuf_fields::<Vec<u8>>()
             .next()
@@ -402,10 +350,61 @@ mod tests {
         let FieldValue::Len(data) = from_try.value else {
             panic!("expected len");
         };
-        assert_eq!(data, big);
+        assert_eq!(data, expected);
     }
 
-    /// User buffer that takes the length-delimited payload in one shot.
+    #[test]
+    fn vec_reads_payload_on_every_streaming_source() {
+        assert_vec(&len_message(b""), b"");
+        assert_vec(&len_message(b"Hel"), b"Hel");
+        let big = payload(LARGE_LEN);
+        assert_vec(&len_message(&big), &big);
+    }
+
+    fn assert_box(message: &[u8], expected: &[u8]) {
+        let from_read = Cursor::new(message.to_vec())
+            .read_protobuf_fields::<Box<[u8]>>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_read.value else {
+            panic!("expected len");
+        };
+        assert_eq!(&data[..], expected);
+
+        let from_iter = message
+            .iter()
+            .copied()
+            .protobuf_fields::<Box<[u8]>>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_iter.value else {
+            panic!("expected len");
+        };
+        assert_eq!(&data[..], expected);
+
+        let from_try = Cursor::new(message.to_vec())
+            .bytes()
+            .protobuf_fields::<Box<[u8]>>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_try.value else {
+            panic!("expected len");
+        };
+        assert_eq!(&data[..], expected);
+    }
+
+    #[test]
+    fn box_reads_payload_on_every_streaming_source() {
+        assert_box(&len_message(b""), b"");
+        assert_box(&len_message(b"Hel"), b"Hel");
+        let big = payload(LARGE_LEN);
+        assert_box(&len_message(&big), &big);
+    }
+
+    /// User buffer that replaces the default fill and records that it ran.
     #[derive(Debug, PartialEq, Eq)]
     struct OwnedBytes {
         data: Vec<u8>,
@@ -413,15 +412,15 @@ mod tests {
     }
 
     impl LenBuf for OwnedBytes {
-        fn with_capacity(capacity: usize) -> Self {
+        fn with_len(len: usize) -> Self {
             Self {
-                data: Vec::with_capacity(capacity),
+                data: vec![0; len],
                 direct: false,
             }
         }
 
-        fn append_slice(&mut self, data: &[u8]) {
-            self.data.extend_from_slice(data);
+        fn as_mut_slice(&mut self) -> &mut [u8] {
+            &mut self.data
         }
 
         fn from_read<R>(reader: &mut R, len: usize) -> crate::Result<Self>
@@ -437,9 +436,9 @@ mod tests {
         where
             I: Iterator<Item = u8>,
         {
-            let mut data = Vec::with_capacity(len);
-            for _ in 0..len {
-                data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
+            let mut data = vec![0u8; len];
+            for slot in &mut data {
+                *slot = iter.next().ok_or(ProtobufError::UnexpectedEof)?;
             }
             Ok(Self { data, direct: true })
         }
@@ -449,13 +448,12 @@ mod tests {
             I: Iterator<Item = ::std::result::Result<u8, E>>,
             E: Into<ProtobufError>,
         {
-            let mut data = Vec::with_capacity(len);
-            for _ in 0..len {
-                data.push(
-                    iter.next()
-                        .ok_or(ProtobufError::UnexpectedEof)?
-                        .map_err(Into::into)?,
-                );
+            let mut data = vec![0u8; len];
+            for slot in &mut data {
+                *slot = iter
+                    .next()
+                    .ok_or(ProtobufError::UnexpectedEof)?
+                    .map_err(Into::into)?;
             }
             Ok(Self { data, direct: true })
         }
@@ -503,7 +501,7 @@ mod tests {
     fn custom_len_buf_reads_payload_on_every_streaming_source() {
         assert_owned(&len_message(b""), b"");
         assert_owned(&len_message(b"Hel"), b"Hel");
-        let big = payload(LEN_BUF_CHUNK + 3);
+        let big = payload(LARGE_LEN);
         assert_owned(&len_message(&big), &big);
 
         // A non-length field in the same stream stays a varint. Only the length
@@ -526,8 +524,7 @@ mod tests {
 
 #[cfg(all(test, feature = "nightly"))]
 mod allocator_tests {
-    use super::LEN_BUF_CHUNK;
-    use super::tests::{len_message, payload};
+    use super::tests::{LARGE_LEN, len_message, payload};
     use crate::FieldValue;
     use crate::field::read::{IteratorExtProtobuf, ReadExtProtobuf, TryIteratorExtProtobuf};
     use ::std::alloc::{AllocError, Allocator, Global, Layout};
@@ -536,8 +533,8 @@ mod allocator_tests {
     use ::std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn vec_with_global_reads_multichunk_payload_on_every_streaming_source() {
-        let big = payload(LEN_BUF_CHUNK + 3);
+    fn vec_with_global_reads_payload_on_every_streaming_source() {
+        let big = payload(LARGE_LEN);
         let message = len_message(&big);
 
         let from_read = Cursor::new(message.clone())
@@ -574,7 +571,47 @@ mod allocator_tests {
         assert_eq!(data, big);
     }
 
+    #[test]
+    fn box_with_global_reads_payload_on_every_streaming_source() {
+        let big = payload(LARGE_LEN);
+        let message = len_message(&big);
+
+        let from_read = Cursor::new(message.clone())
+            .read_protobuf_fields::<Box<[u8], Global>>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_read.value else {
+            panic!("expected len");
+        };
+        assert_eq!(&data[..], big.as_slice());
+
+        let from_iter = message
+            .clone()
+            .into_iter()
+            .protobuf_fields::<Box<[u8], Global>>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_iter.value else {
+            panic!("expected len");
+        };
+        assert_eq!(&data[..], big.as_slice());
+
+        let from_try = Cursor::new(message)
+            .bytes()
+            .protobuf_fields::<Box<[u8], Global>>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_try.value else {
+            panic!("expected len");
+        };
+        assert_eq!(&data[..], big.as_slice());
+    }
+
     static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+    static ALLOC_LOCK: ::std::sync::Mutex<()> = ::std::sync::Mutex::new(());
 
     struct Counting;
 
@@ -596,7 +633,8 @@ mod allocator_tests {
     }
 
     #[test]
-    fn vec_with_custom_allocator_is_filled_by_read_exact() {
+    fn vec_with_custom_allocator_is_one_allocation() {
+        let _guard = ALLOC_LOCK.lock().unwrap();
         ALLOCATIONS.store(0, Ordering::SeqCst);
         let message = len_message(b"Hel");
         let field = Cursor::new(message)
@@ -610,5 +648,23 @@ mod allocator_tests {
         assert_eq!(data.as_slice(), b"Hel");
         assert_eq!(ALLOCATIONS.load(Ordering::SeqCst), 1);
         let _allocator: &Counting = data.allocator();
+    }
+
+    #[test]
+    fn box_with_custom_allocator_is_one_allocation() {
+        let _guard = ALLOC_LOCK.lock().unwrap();
+        ALLOCATIONS.store(0, Ordering::SeqCst);
+        let message = len_message(b"Hel");
+        let field = Cursor::new(message)
+            .read_protobuf_fields::<Box<[u8], Counting>>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = field.value else {
+            panic!("expected len");
+        };
+        assert_eq!(&data[..], b"Hel");
+        assert_eq!(ALLOCATIONS.load(Ordering::SeqCst), 1);
+        let _allocator: &Counting = ::std::boxed::Box::allocator(&data);
     }
 }
