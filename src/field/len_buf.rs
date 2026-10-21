@@ -466,6 +466,128 @@ mod tests {
         };
         assert_eq!(data, big);
     }
+
+    /// User buffer that takes the length-delimited payload in one shot.
+    #[derive(Debug, PartialEq, Eq)]
+    struct OwnedBytes {
+        data: Vec<u8>,
+        direct: bool,
+    }
+
+    impl LenBuf for OwnedBytes {
+        fn with_capacity(capacity: usize) -> Self {
+            Self {
+                data: Vec::with_capacity(capacity),
+                direct: false,
+            }
+        }
+
+        fn reserve(&mut self, additional: usize) {
+            self.data.reserve(additional);
+        }
+
+        fn append_slice(&mut self, data: &[u8]) {
+            self.data.extend_from_slice(data);
+        }
+
+        fn from_read<R>(reader: &mut R, len: usize) -> crate::Result<Self>
+        where
+            R: Read,
+        {
+            let mut data = vec![0u8; len];
+            reader.read_exact(&mut data)?;
+            Ok(Self { data, direct: true })
+        }
+
+        fn from_iter<I>(iter: &mut I, len: usize) -> crate::Result<Self>
+        where
+            I: Iterator<Item = u8>,
+        {
+            let mut data = Vec::with_capacity(len);
+            for _ in 0..len {
+                data.push(iter.next().ok_or(ProtobufError::UnexpectedEof)?);
+            }
+            Ok(Self { data, direct: true })
+        }
+
+        fn from_try_iter<I, E>(iter: &mut I, len: usize) -> crate::Result<Self>
+        where
+            I: Iterator<Item = ::std::result::Result<u8, E>>,
+            E: Into<ProtobufError>,
+        {
+            let mut data = Vec::with_capacity(len);
+            for _ in 0..len {
+                data.push(
+                    iter.next()
+                        .ok_or(ProtobufError::UnexpectedEof)?
+                        .map_err(Into::into)?,
+                );
+            }
+            Ok(Self { data, direct: true })
+        }
+    }
+
+    fn assert_owned(message: &[u8], expected: &[u8]) {
+        let from_read = Cursor::new(message.to_vec())
+            .read_protobuf_fields::<OwnedBytes>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(owned) = from_read.value else {
+            panic!("expected len");
+        };
+        assert_eq!(owned.data, expected);
+        assert!(owned.direct);
+
+        let from_iter = message
+            .iter()
+            .copied()
+            .protobuf_fields::<OwnedBytes>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(owned) = from_iter.value else {
+            panic!("expected len");
+        };
+        assert_eq!(owned.data, expected);
+        assert!(owned.direct);
+
+        let from_try = Cursor::new(message.to_vec())
+            .bytes()
+            .protobuf_fields::<OwnedBytes>()
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(owned) = from_try.value else {
+            panic!("expected len");
+        };
+        assert_eq!(owned.data, expected);
+        assert!(owned.direct);
+    }
+
+    #[test]
+    fn custom_len_buf_reads_payload_on_every_streaming_source() {
+        assert_owned(&len_message(b""), b"");
+        assert_owned(&len_message(b"Hel"), b"Hel");
+        let big = payload(LEN_BUF_CHUNK + 3);
+        assert_owned(&len_message(&big), &big);
+
+        // A non-length field in the same stream stays a varint. Only the length
+        // field uses `OwnedBytes`.
+        let mixed = [0x08, 0x96, 0x01, 0x12, 0x03, b'H', b'e', b'l'];
+        let fields = Cursor::new(mixed)
+            .read_protobuf_fields::<OwnedBytes>()
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert!(matches!(fields[0].value, FieldValue::Varint(_)));
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        let FieldValue::Len(owned) = &fields[1].value else {
+            panic!("expected len");
+        };
+        assert_eq!(owned.data, b"Hel");
+        assert!(owned.direct);
+        assert_eq!(fields[1].field_number.as_u32(), 2);
+    }
 }
 
 #[cfg(all(test, feature = "nightly"))]
