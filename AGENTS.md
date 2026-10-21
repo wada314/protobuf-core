@@ -6,14 +6,12 @@ Instructions for coding agents working in this repository. This file is the [AGE
 
 `protobuf-core` is a **wire-format primitives** crate: tags, varints, field numbers, and raw field I/O. It is not a message library and does not implement `google.protobuf.*`.
 
-Edition 2024. Features `read` and `write` are on by default and can be used independently.
+Edition 2024. Field, tag, and varint I/O ship together. Do not reintroduce `read` / `write` Cargo features.
 
 ## Build, test, lint
 
 ```sh
 cargo test
-cargo test --no-default-features --features read
-cargo test --no-default-features --features write
 cargo fmt
 cargo clippy --all-targets
 ```

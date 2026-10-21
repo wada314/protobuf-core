@@ -29,7 +29,6 @@
 //! This library provides multiple ways to read protobuf fields from different sources:
 //!
 //! ```rust
-//! # #[cfg(feature = "read")] {
 //! use protobuf_core::{Field, IteratorExtProtobuf, AsRefExtProtobuf};
 //!
 //! // From a byte iterator - returns Field<Vec<u8>> (Len values are Vec<u8>)
@@ -45,13 +44,11 @@
 //! let fields: Vec<Field<&[u8]>> = AsRefExtProtobuf::read_protobuf_fields(&slice)
 //!     .collect::<Result<Vec<Field<&[u8]>>, _>>()
 //!     .unwrap();
-//! # }
 //! ```
 //!
 //! ### Writing Fields
 //!
 //! ```rust
-//! # #[cfg(feature = "write")] {
 //! use protobuf_core::{WriteExtProtobuf, Field, FieldValue, FieldNumber};
 //!
 //! let mut buffer = Vec::new();
@@ -60,7 +57,6 @@
 //!     FieldValue::from_uint64(150)
 //! );
 //! buffer.write_protobuf_field(&field).unwrap();
-//! # }
 //! ```
 //!
 //! ## Core Types
@@ -122,14 +118,6 @@
 //!   / [`ReadExtVarint`]: Read varints (sync, with partial/resume for chunked input)
 //! - [`WriteExtVarint`]: Write varints
 //!
-//! ## Feature Flags
-//!
-//! - `read` (enabled by default): Enables field reading utilities
-//! - `write` (enabled by default): Enables field writing utilities
-//!
-//! Disable the defaults to use one side only: set `default-features = false` and enable `read`,
-//! `write`, or both.
-//!
 //! ## Constants
 //!
 //! The library also provides various constants related to the protobuf wire format:
@@ -138,22 +126,17 @@
 //! - Size limits: [`MAX_MESSAGE_SIZE`], [`MAX_STRING_SIZE`], [`MAX_VARINT_BYTES`]
 //! - Wire format constants: [`FIXED32_BYTES`], [`FIXED64_BYTES`], etc.
 
-#[cfg(any(feature = "read", feature = "write"))]
 pub(crate) mod field;
 pub(crate) mod field_number;
 pub(crate) mod tag;
 pub(crate) mod varint;
 pub(crate) mod wire_format;
 
-#[cfg(feature = "write")]
-pub use self::field::WriteExtProtobuf;
-#[cfg(feature = "read")]
 pub use self::field::{
-    AsRefExtProtobuf, IteratorExtProtobuf, ProtobufFieldIterator, ProtobufFieldIteratorFromBytes,
-    ProtobufFieldSliceIterator, ReadExtProtobuf, TryIteratorExtProtobuf,
+    AsRefExtProtobuf, Field, FieldValue, IteratorExtProtobuf, ProtobufFieldIterator,
+    ProtobufFieldIteratorFromBytes, ProtobufFieldSliceIterator, ReadExtProtobuf,
+    TryIteratorExtProtobuf, WriteExtProtobuf,
 };
-#[cfg(any(feature = "read", feature = "write"))]
-pub use self::field::{Field, FieldValue};
 pub use self::field_number::FieldNumber;
 pub use self::tag::{IteratorExtTag, Outcome as TagOutcome, ReadExtTag, Tag, TryIteratorExtTag};
 pub use self::varint::{

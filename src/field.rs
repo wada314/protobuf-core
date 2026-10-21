@@ -6,19 +6,16 @@
 //!
 //! ## Core Types
 //!
-//! The `Field` and `FieldValue` types are always available when this module is enabled.
+//! `Field` and `FieldValue` are the raw field types shared by reading and writing.
 //!
 //! ## Reading (Deserialization)
 //!
-//! Available when the `read` feature is enabled.
-//!
-//! The utilities read fields sequentially from input sources that implement `std::io::Read`,
-//! returning raw field values (varint bytes, fixed-width bytes, or length-delimited bytes)
-//! without interpretation of the semantic meaning.
+//! The utilities read fields sequentially from `std::io::Read`, `Iterator<Item = u8>`,
+//! `Iterator<Item = Result<u8, E>>`, and `AsRef<[u8]>`, returning raw field values
+//! (varint bytes, fixed-width bytes, or length-delimited bytes) without interpretation
+//! of the semantic meaning.
 //!
 //! ## Writing (Serialization)
-//!
-//! Available when the `write` feature is enabled.
 //!
 //! The utilities write fields to output targets that implement `std::io::Write`,
 //! encoding field numbers, wire types, and values into the protobuf wire format.
@@ -28,21 +25,13 @@ use crate::tag::Tag;
 use crate::varint::Varint;
 use crate::wire_format::WireType;
 
-#[cfg(feature = "read")]
 pub(crate) mod read;
-
-#[cfg(feature = "write")]
 pub(crate) mod write;
 
-// Re-export read functionality
-#[cfg(feature = "read")]
 pub use self::read::{
     AsRefExtProtobuf, IteratorExtProtobuf, ProtobufFieldIterator, ProtobufFieldIteratorFromBytes,
     ProtobufFieldSliceIterator, ReadExtProtobuf, TryIteratorExtProtobuf,
 };
-
-// Re-export write functionality
-#[cfg(feature = "write")]
 pub use self::write::WriteExtProtobuf;
 
 /// A raw field value read from the wire
