@@ -199,6 +199,10 @@ impl LenBuf for Vec<u8> {
 }
 
 /// `Vec<u8, A>`. Enable the `nightly` feature to use the allocator.
+///
+/// The feature is not required when you do not use an allocator. `Vec<u8>`
+/// implements this trait without it. The badge above marks this signature,
+/// which is the one that takes an allocator.
 #[cfg(feature = "nightly")]
 #[doc(cfg(feature = "nightly"))]
 #[allow(clippy::incompatible_msrv)]
