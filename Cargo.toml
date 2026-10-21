@@ -18,13 +18,10 @@ exclude = [
 [features]
 # `impl LenBuf for Vec<u8, A>`. Turns on `allocator_api`. Build with a nightly compiler.
 nightly = []
-# docs.rs only. A leading underscore hides this feature from the docs.rs feature list.
-# It turns `nightly` on and, in that build only, uses `min_specialization` so rustdoc
-# can show both `impl LenBuf for Vec<u8>` and `impl<A> LenBuf for Vec<u8, A>`.
-_docsrs = ["nightly"]
 
 [package.metadata.docs.rs]
-features = ["_docsrs"]
+# docs.rs uses nightly rustc. Document `impl<A> LenBuf for Vec<u8, A>`.
+features = ["nightly"]
 
 [dependencies]
 thiserror = "1.0"

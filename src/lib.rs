@@ -125,16 +125,10 @@
 //!
 //! ## Feature Flags
 //!
-//! - `nightly`: required for a custom allocator. Implements [`LenBuf`] for
-//!   `Vec<u8, A>` (`A: Allocator + Default`), passes `#![feature(allocator_api)]`,
-//!   and must be built with a nightly compiler. `Vec<u8>` implements [`LenBuf`]
-//!   without this feature. docs.rs lists both implementations and marks the
-//!   feature each one requires.
-
+//! - `nightly`: [`LenBuf`] for `Vec<u8, A>`. Enable this feature to use the allocator.
+//!
 #![cfg_attr(feature = "nightly", feature(allocator_api, doc_cfg))]
 #![cfg_attr(feature = "nightly", allow(stable_features))]
-#![cfg_attr(feature = "_docsrs", feature(min_specialization))]
-#![cfg_attr(feature = "_docsrs", allow(incomplete_features))]
 
 pub(crate) mod field;
 pub(crate) mod field_number;

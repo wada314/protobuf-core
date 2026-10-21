@@ -21,15 +21,11 @@ const LEN_BUF_CHUNK: usize = 8192;
 /// fixed-size chunks. Override `from_read`, `from_iter`, or `from_try_iter` when
 /// the buffer can take the bytes without that extra copy.
 ///
-/// `Vec<u8>` implements this trait on every build. `from_read` writes the payload
-/// with `read_exact`. The iterator methods push each byte into the reserved vector.
-/// That implementation does not require a Cargo feature.
+/// `Vec<u8>` implements this trait. `from_read` writes the payload with
+/// `read_exact`. The iterator methods push each byte into the reserved vector.
 ///
-/// A custom allocator requires the `nightly` Cargo feature. That feature implements
-/// this trait for `Vec<u8, A>` where `A: Allocator + Default`, enables
-/// `allocator_api`, and builds only with a nightly compiler. On that compiler
-/// `Vec<u8>` is `Vec<u8, Global>`, so the generic impl also accepts `Vec<u8>`.
-/// docs.rs lists both implementations and marks the feature each one requires.
+/// `Vec<u8, A>` is that payload with an allocator. Enable the `nightly` feature
+/// to use the allocator. docs.rs shows that signature, with a badge for the feature.
 ///
 /// # Examples
 ///
@@ -208,16 +204,7 @@ macro_rules! impl_len_buf_for_vec_u8 {
 
 macro_rules! impl_len_buf_for_vec_alloc {
     ($(#[$meta:meta])*) => {
-        /// Length-delimited payload stored in `Vec<u8, A>`.
-        ///
-        /// Requires the `nightly` Cargo feature and a nightly compiler. Without that
-        /// feature a custom allocator cannot be used. `A` must implement
-        /// `std::alloc::Allocator` + `Default`. [`with_capacity`](LenBuf::with_capacity)
-        /// and the `from_*` methods construct the vector with `A::default()`.
-        ///
-        /// `Vec<u8>` uses the implementation that does not require `nightly`. On a
-        /// nightly compiler `Vec<u8>` is `Vec<u8, Global>`, so this implementation
-        /// also accepts it when the feature is enabled.
+        /// `Vec<u8, A>`. Enable the `nightly` feature to use the allocator.
         $(#[$meta])*
         #[allow(clippy::incompatible_msrv)]
         impl<A> LenBuf for Vec<u8, A>
@@ -283,21 +270,8 @@ impl_len_buf_for_vec_u8! {
     #[cfg(not(feature = "nightly"))]
 }
 
-// docs.rs enables `_docsrs` (which also enables `nightly`). The included file
-// specializes the generic impl so this `Vec<u8>` impl can be documented beside it.
-// `Vec<u8>` is `Vec<u8, Global>` in that build, so a second ordinary impl would
-// be a duplicate. The `default` keyword stays in the included file: a cfg'd-out
-// copy in this file still warns on stable rustc.
-#[cfg(feature = "_docsrs")]
-include!("len_buf_docsrs.rs");
-
-impl_len_buf_for_vec_u8! {
-    #[cfg(feature = "_docsrs")]
-    #[doc(cfg(not(feature = "nightly")))]
-}
-
 impl_len_buf_for_vec_alloc! {
-    #[cfg(all(feature = "nightly", not(feature = "_docsrs")))]
+    #[cfg(feature = "nightly")]
     #[doc(cfg(feature = "nightly"))]
 }
 
