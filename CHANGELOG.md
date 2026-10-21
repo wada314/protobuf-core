@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- Cargo features `read` and `write`. Field, tag, and varint I/O is always compiled. Selecting those features, or disabling defaults to turn one side off, no longer changes the build. Ship this as 0.4.0, not as a 0.3.x patch.
+
 ## [0.3.0]
 
 Breaking field-number and error-enum changes. Callers that matched `ProtobufError` exhaustively, or that used `FieldNumber::try_new` / `TryFrom` errors as `ProtobufError`, must update.

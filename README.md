@@ -21,13 +21,6 @@ This library provides common definitions, constants, enums, and basic logic for 
 - **Field I/O**: Low-level utilities for reading and writing raw protobuf fields
 - **Field Number Validation**: Type-safe field number handling with range validation
 
-## Feature Flags
-
-- `read` (enabled by default): Enables field reading utilities
-- `write` (enabled by default): Enables field writing utilities
-
-Disable the defaults to use one side only: set `default-features = false` and enable `read`, `write`, or both.
-
 ## Quick Start
 
 ### Reading Fields

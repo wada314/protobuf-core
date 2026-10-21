@@ -336,8 +336,6 @@ mod tests {
         assert_eq!(buffer[0], 0x08);
     }
 
-    // Roundtrip tests (require both read and write features)
-    #[cfg(feature = "read")]
     mod roundtrip_tests {
         use super::*;
         use crate::field::read::ReadExtProtobuf;
