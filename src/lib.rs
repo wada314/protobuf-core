@@ -4,7 +4,7 @@
 //!
 //! **This library is not an official Google product.** Google provides its own Protocol Buffers
 //! implementation for Rust (see [protocolbuffers/protobuf](https://github.com/protocolbuffers/protobuf)
-//! and official Rust support). This project is an **independent, community-maintained** library.
+//! and official Rust support). This project is an **independent** library.
 //!
 //! ---
 //!
@@ -127,12 +127,8 @@
 //! - `read` (enabled by default): Enables field reading utilities
 //! - `write` (enabled by default): Enables field writing utilities
 //!
-//! You can use features independently:
-//!
-//! ```toml
-//! [dependencies]
-//! protobuf-core = { version = "0.3.0", default-features = false, features = ["read"] }
-//! ```
+//! Disable the defaults to use one side only: set `default-features = false` and enable `read`,
+//! `write`, or both.
 //!
 //! ## Constants
 //!
