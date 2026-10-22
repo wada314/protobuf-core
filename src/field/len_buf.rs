@@ -4,9 +4,7 @@
 //! [`crate::TryIteratorExtProtobuf`]) build the `Len` payload with [`LenBuf`].
 //! Slice readers borrow the input and do not use this trait.
 
-use crate::{ProtobufError, Result};
 use ::std::convert::AsMut;
-use ::std::io::Read;
 
 #[cfg(feature = "nightly")]
 use ::std::alloc::Allocator;
@@ -17,11 +15,11 @@ use ::std::alloc::Allocator;
 /// [`with_len`](LenBuf::with_len) and [`AsMut<[u8]>`](::std::convert::AsMut).
 /// `with_len` allocates exactly that many initialized bytes, and
 /// [`as_mut`](::std::convert::AsMut::as_mut) returns all of them. The slice
-/// length is the payload length for the whole read. The `from_*` methods have
-/// defaults that allocate with `with_len` and write into that slice.
+/// length is the payload length for the whole read. The streaming readers
+/// allocate with `with_len` and write the payload bytes into that slice.
 ///
-/// `Vec<u8>` and `Box<[u8]>` implement this trait. Both allocate `len` bytes
-/// and `from_read` overwrites them with `read_exact`.
+/// `Vec<u8>` and `Box<[u8]>` implement this trait. Both allocate `len` bytes.
+/// A `Read` source overwrites them with `read_exact`.
 ///
 /// `Vec<u8, A>` and `Box<[u8], A>` are those payloads with an allocator. Enable
 /// the `nightly` feature to use the allocator. docs.rs shows those signatures,
@@ -62,71 +60,16 @@ pub trait LenBuf: Sized + AsMut<[u8]> {
     /// Allocate a buffer of exactly `len` initialized bytes.
     ///
     /// [`AsMut::as_mut`](::std::convert::AsMut::as_mut) returns a slice of this
-    /// length. The bytes are overwritten by [`from_read`](LenBuf::from_read),
-    /// [`from_iter`](LenBuf::from_iter), and [`from_try_iter`](LenBuf::from_try_iter).
-    /// Zero is a valid initial value.
+    /// length. The streaming readers overwrite those bytes. Zero is a valid
+    /// initial value.
     fn with_len(len: usize) -> Self;
-
-    /// Read exactly `len` payload bytes from `reader`.
-    ///
-    /// The default allocates with [`with_len`](LenBuf::with_len) and fills that
-    /// slice with `read_exact`.
-    fn from_read<R>(reader: &mut R, len: usize) -> Result<Self>
-    where
-        R: Read,
-    {
-        let mut buf = Self::with_len(len);
-        reader.read_exact(buf.as_mut())?;
-        Ok(buf)
-    }
-
-    /// Read exactly `len` payload bytes from a byte iterator.
-    fn from_iter<I>(iter: &mut I, len: usize) -> Result<Self>
-    where
-        I: Iterator<Item = u8>,
-    {
-        Self::from_try_iter(&mut InfallibleBytes(iter), len)
-    }
-
-    /// Read exactly `len` payload bytes from a fallible byte iterator.
-    ///
-    /// The default allocates with [`with_len`](LenBuf::with_len) and writes
-    /// each byte into that slice.
-    fn from_try_iter<I, E>(iter: &mut I, len: usize) -> Result<Self>
-    where
-        I: Iterator<Item = ::std::result::Result<u8, E>>,
-        E: Into<ProtobufError>,
-    {
-        let mut buf = Self::with_len(len);
-        for slot in buf.as_mut() {
-            *slot = iter
-                .next()
-                .ok_or(ProtobufError::UnexpectedEof)?
-                .map_err(Into::into)?;
-        }
-        Ok(buf)
-    }
-}
-
-/// Adapts `Iterator<Item = u8>` to `Iterator<Item = Result<u8, Infallible>>`.
-struct InfallibleBytes<'a, I>(&'a mut I);
-
-impl<'a, I> Iterator for InfallibleBytes<'a, I>
-where
-    I: Iterator<Item = u8>,
-{
-    type Item = ::std::result::Result<u8, ::std::convert::Infallible>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(Ok)
-    }
 }
 
 /// Length-delimited payload stored in `Vec<u8>`.
 ///
 /// This implementation does not require the `nightly` feature and does not
-/// take a custom allocator. `with_len` allocates `len` zero bytes. `from_read`
-/// overwrites them with `read_exact`.
+/// take a custom allocator. `with_len` allocates `len` zero bytes. A `Read`
+/// source overwrites them with `read_exact`.
 #[cfg(not(feature = "nightly"))]
 impl LenBuf for Vec<u8> {
     fn with_len(len: usize) -> Self {
@@ -138,7 +81,7 @@ impl LenBuf for Vec<u8> {
 ///
 /// This implementation does not require the `nightly` feature and does not
 /// take a custom allocator. `with_len` allocates one box of `len` zero bytes.
-/// `from_read` overwrites them with `read_exact`.
+/// A `Read` source overwrites them with `read_exact`.
 #[cfg(not(feature = "nightly"))]
 impl LenBuf for Box<[u8]> {
     fn with_len(len: usize) -> Self {
@@ -390,122 +333,19 @@ mod tests {
         assert_box(&len_message(&big), &big);
     }
 
-    /// User buffer that replaces the default fill and records that it ran.
-    #[derive(Debug, PartialEq, Eq)]
-    struct OwnedBytes {
-        data: Vec<u8>,
-        direct: bool,
-    }
-
-    impl AsMut<[u8]> for OwnedBytes {
-        fn as_mut(&mut self) -> &mut [u8] {
-            &mut self.data
-        }
-    }
-
-    impl LenBuf for OwnedBytes {
-        fn with_len(len: usize) -> Self {
-            Self {
-                data: vec![0; len],
-                direct: false,
-            }
-        }
-
-        fn from_read<R>(reader: &mut R, len: usize) -> crate::Result<Self>
-        where
-            R: Read,
-        {
-            let mut data = vec![0u8; len];
-            reader.read_exact(&mut data)?;
-            Ok(Self { data, direct: true })
-        }
-
-        fn from_iter<I>(iter: &mut I, len: usize) -> crate::Result<Self>
-        where
-            I: Iterator<Item = u8>,
-        {
-            let mut data = vec![0u8; len];
-            for slot in &mut data {
-                *slot = iter.next().ok_or(ProtobufError::UnexpectedEof)?;
-            }
-            Ok(Self { data, direct: true })
-        }
-
-        fn from_try_iter<I, E>(iter: &mut I, len: usize) -> crate::Result<Self>
-        where
-            I: Iterator<Item = ::std::result::Result<u8, E>>,
-            E: Into<ProtobufError>,
-        {
-            let mut data = vec![0u8; len];
-            for slot in &mut data {
-                *slot = iter
-                    .next()
-                    .ok_or(ProtobufError::UnexpectedEof)?
-                    .map_err(Into::into)?;
-            }
-            Ok(Self { data, direct: true })
-        }
-    }
-
-    fn assert_owned(message: &[u8], expected: &[u8]) {
-        let from_read = Cursor::new(message.to_vec())
-            .read_protobuf_fields::<OwnedBytes>()
-            .next()
-            .unwrap()
-            .unwrap();
-        let FieldValue::Len(owned) = from_read.value else {
-            panic!("expected len");
-        };
-        assert_eq!(owned.data, expected);
-        assert!(owned.direct);
-
-        let from_iter = message
-            .iter()
-            .copied()
-            .protobuf_fields::<OwnedBytes>()
-            .next()
-            .unwrap()
-            .unwrap();
-        let FieldValue::Len(owned) = from_iter.value else {
-            panic!("expected len");
-        };
-        assert_eq!(owned.data, expected);
-        assert!(owned.direct);
-
-        let from_try = Cursor::new(message.to_vec())
-            .bytes()
-            .protobuf_fields::<OwnedBytes>()
-            .next()
-            .unwrap()
-            .unwrap();
-        let FieldValue::Len(owned) = from_try.value else {
-            panic!("expected len");
-        };
-        assert_eq!(owned.data, expected);
-        assert!(owned.direct);
-    }
-
     #[test]
-    fn custom_len_buf_reads_payload_on_every_streaming_source() {
-        assert_owned(&len_message(b""), b"");
-        assert_owned(&len_message(b"Hel"), b"Hel");
-        let big = payload(LARGE_LEN);
-        assert_owned(&len_message(&big), &big);
-
-        // A non-length field in the same stream stays a varint. Only the length
-        // field uses `OwnedBytes`.
+    fn custom_len_buf_keeps_a_varint_beside_the_length_field() {
         let mixed = [0x08, 0x96, 0x01, 0x12, 0x03, b'H', b'e', b'l'];
         let fields = Cursor::new(mixed)
-            .read_protobuf_fields::<OwnedBytes>()
+            .read_protobuf_fields::<Bytes>()
             .collect::<crate::Result<Vec<_>>>()
             .unwrap();
         assert!(matches!(fields[0].value, FieldValue::Varint(_)));
         assert_eq!(fields[0].field_number.as_u32(), 1);
-        let FieldValue::Len(owned) = &fields[1].value else {
+        let FieldValue::Len(Bytes(data)) = &fields[1].value else {
             panic!("expected len");
         };
-        assert_eq!(owned.data, b"Hel");
-        assert!(owned.direct);
+        assert_eq!(data, b"Hel");
         assert_eq!(fields[1].field_number.as_u32(), 2);
     }
 }

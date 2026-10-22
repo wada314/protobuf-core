@@ -124,7 +124,11 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        L::from_iter(self.0, length)
+        let mut payload = L::with_len(length);
+        for byte in payload.as_mut() {
+            *byte = self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
+        }
+        Ok(payload)
     }
 }
 
@@ -233,7 +237,15 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        L::from_try_iter(self.0, length)
+        let mut payload = L::with_len(length);
+        for byte in payload.as_mut() {
+            *byte = self
+                .0
+                .next()
+                .ok_or(ProtobufError::UnexpectedEof)?
+                .map_err(Into::into)?;
+        }
+        Ok(payload)
     }
 }
 
@@ -336,7 +348,9 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        L::from_read(self.0, length)
+        let mut payload = L::with_len(length);
+        self.0.read_exact(payload.as_mut())?;
+        Ok(payload)
     }
 }
 
