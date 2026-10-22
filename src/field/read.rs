@@ -97,11 +97,9 @@ where
 // ============================================================================
 
 /// Helper struct implementing FieldValueReader for Iterator<Item = u8>
-struct IteratorReader<'a, I>(&'a mut I)
-where
-    I: Iterator<Item = u8>;
+struct IteratorReader<'a, I, A>(&'a mut I, &'a A);
 
-impl<'a, I, L> FieldValueReader<L> for IteratorReader<'a, I>
+impl<'a, I, L> FieldValueReader<L> for IteratorReader<'a, I, L::Alloc>
 where
     I: Iterator<Item = u8>,
     L: LenBuf,
@@ -124,7 +122,7 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        let mut payload = L::with_len(length);
+        let mut payload = L::with_len(length, self.1.clone());
         for byte in payload.as_mut() {
             *byte = self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
         }
@@ -135,9 +133,13 @@ where
 /// Iterator for reading raw protobuf fields sequentially from a byte iterator.
 ///
 /// `L` is the length-delimited payload ([`LenBuf`](crate::LenBuf)). It defaults to `Vec<u8>`.
-pub struct ProtobufFieldIteratorFromBytes<I, L = Vec<u8>> {
+/// `alloc` is cloned into each length-delimited field.
+pub struct ProtobufFieldIteratorFromBytes<I, L = Vec<u8>>
+where
+    L: LenBuf,
+{
     iter: I,
-    _payload: ::std::marker::PhantomData<fn() -> L>,
+    alloc: L::Alloc,
 }
 
 impl<I, L> Iterator for ProtobufFieldIteratorFromBytes<I, L>
@@ -148,7 +150,7 @@ where
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut reader = IteratorReader(&mut self.iter);
+        let mut reader = IteratorReader(&mut self.iter, &self.alloc);
         match parse_field(&mut reader) {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
@@ -177,7 +179,21 @@ pub trait IteratorExtProtobuf {
     ///
     /// Returns an iterator that yields `Result<Field<L>>`.
     /// `L` is the length-delimited payload. Each field is parsed sequentially.
+    /// Length-delimited fields are allocated with `L::Alloc::default()`.
+    /// Pass an allocator instance to [`protobuf_fields_in`](IteratorExtProtobuf::protobuf_fields_in).
     fn protobuf_fields<L>(self) -> ProtobufFieldIteratorFromBytes<Self, L>
+    where
+        Self: Sized,
+        L: LenBuf,
+        L::Alloc: Default,
+    {
+        self.protobuf_fields_in(L::Alloc::default())
+    }
+
+    /// Convert this iterator into an iterator of protobuf fields.
+    ///
+    /// `alloc` is cloned into each length-delimited field.
+    fn protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIteratorFromBytes<Self, L>
     where
         Self: Sized,
         L: LenBuf;
@@ -187,15 +203,12 @@ impl<I> IteratorExtProtobuf for I
 where
     I: Iterator<Item = u8>,
 {
-    fn protobuf_fields<L>(self) -> ProtobufFieldIteratorFromBytes<Self, L>
+    fn protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIteratorFromBytes<Self, L>
     where
         Self: Sized,
         L: LenBuf,
     {
-        ProtobufFieldIteratorFromBytes {
-            iter: self,
-            _payload: ::std::marker::PhantomData,
-        }
+        ProtobufFieldIteratorFromBytes { iter: self, alloc }
     }
 }
 
@@ -204,12 +217,9 @@ where
 // ============================================================================
 
 /// Helper struct implementing FieldValueReader for Iterator<Item = Result<u8, E>>
-struct TryIteratorReader<'a, I, E>(&'a mut I)
-where
-    I: Iterator<Item = ::std::result::Result<u8, E>>,
-    E: Into<ProtobufError>;
+struct TryIteratorReader<'a, I, A>(&'a mut I, &'a A);
 
-impl<'a, I, E, L> FieldValueReader<L> for TryIteratorReader<'a, I, E>
+impl<'a, I, E, L> FieldValueReader<L> for TryIteratorReader<'a, I, L::Alloc>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
@@ -237,7 +247,7 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        let mut payload = L::with_len(length);
+        let mut payload = L::with_len(length, self.1.clone());
         for byte in payload.as_mut() {
             *byte = self
                 .0
@@ -252,9 +262,13 @@ where
 /// Iterator for reading raw protobuf fields sequentially from a byte iterator that yields `Result<u8, E>`.
 ///
 /// `L` is the length-delimited payload ([`LenBuf`](crate::LenBuf)). It defaults to `Vec<u8>`.
-pub struct ProtobufFieldIteratorFromTryBytes<I, L = Vec<u8>> {
+/// `alloc` is cloned into each length-delimited field.
+pub struct ProtobufFieldIteratorFromTryBytes<I, L = Vec<u8>>
+where
+    L: LenBuf,
+{
     iter: I,
-    _payload: ::std::marker::PhantomData<fn() -> L>,
+    alloc: L::Alloc,
 }
 
 impl<I, E, L> Iterator for ProtobufFieldIteratorFromTryBytes<I, L>
@@ -266,7 +280,7 @@ where
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut reader = TryIteratorReader(&mut self.iter);
+        let mut reader = TryIteratorReader(&mut self.iter, &self.alloc);
         match parse_field(&mut reader) {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
@@ -299,7 +313,21 @@ pub trait TryIteratorExtProtobuf {
     /// Returns an iterator that yields `Result<Field<L>>`.
     /// `L` is the length-delimited payload.
     /// I/O errors from the underlying iterator are propagated.
+    /// Length-delimited fields are allocated with `L::Alloc::default()`.
+    /// Pass an allocator instance to [`protobuf_fields_in`](TryIteratorExtProtobuf::protobuf_fields_in).
     fn protobuf_fields<L>(self) -> ProtobufFieldIteratorFromTryBytes<Self, L>
+    where
+        Self: Sized,
+        L: LenBuf,
+        L::Alloc: Default,
+    {
+        self.protobuf_fields_in(L::Alloc::default())
+    }
+
+    /// Convert this iterator into an iterator of protobuf fields.
+    ///
+    /// `alloc` is cloned into each length-delimited field.
+    fn protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIteratorFromTryBytes<Self, L>
     where
         Self: Sized,
         L: LenBuf;
@@ -310,15 +338,12 @@ where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
-    fn protobuf_fields<L>(self) -> ProtobufFieldIteratorFromTryBytes<Self, L>
+    fn protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIteratorFromTryBytes<Self, L>
     where
         Self: Sized,
         L: LenBuf,
     {
-        ProtobufFieldIteratorFromTryBytes {
-            iter: self,
-            _payload: ::std::marker::PhantomData,
-        }
+        ProtobufFieldIteratorFromTryBytes { iter: self, alloc }
     }
 }
 
@@ -327,11 +352,9 @@ where
 // ============================================================================
 
 /// Helper struct implementing FieldValueReader for Read
-struct ReadReader<'a, R>(&'a mut R)
-where
-    R: Read;
+struct ReadReader<'a, R, A>(&'a mut R, &'a A);
 
-impl<'a, R, L> FieldValueReader<L> for ReadReader<'a, R>
+impl<'a, R, L> FieldValueReader<L> for ReadReader<'a, R, L::Alloc>
 where
     R: Read,
     L: LenBuf,
@@ -348,7 +371,7 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        let mut payload = L::with_len(length);
+        let mut payload = L::with_len(length, self.1.clone());
         self.0.read_exact(payload.as_mut())?;
         Ok(payload)
     }
@@ -357,9 +380,13 @@ where
 /// Iterator for reading raw protobuf fields sequentially from a reader.
 ///
 /// `L` is the length-delimited payload ([`LenBuf`](crate::LenBuf)). It defaults to `Vec<u8>`.
-pub struct ProtobufFieldIterator<R, L = Vec<u8>> {
+/// `alloc` is cloned into each length-delimited field.
+pub struct ProtobufFieldIterator<R, L = Vec<u8>>
+where
+    L: LenBuf,
+{
     reader: R,
-    _payload: ::std::marker::PhantomData<fn() -> L>,
+    alloc: L::Alloc,
 }
 
 impl<R, L> Iterator for ProtobufFieldIterator<R, L>
@@ -370,7 +397,7 @@ where
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut reader = ReadReader(&mut self.reader);
+        let mut reader = ReadReader(&mut self.reader, &self.alloc);
         match parse_field(&mut reader) {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
@@ -413,7 +440,21 @@ pub trait ReadExtProtobuf {
     /// This consumes the reader and returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
     /// `L` is the length-delimited payload.
+    /// Length-delimited fields are allocated with `L::Alloc::default()`.
+    /// Pass an allocator instance to [`read_protobuf_fields_in`](ReadExtProtobuf::read_protobuf_fields_in).
     fn read_protobuf_fields<L>(self) -> ProtobufFieldIterator<Self, L>
+    where
+        Self: Sized,
+        L: LenBuf,
+        L::Alloc: Default,
+    {
+        self.read_protobuf_fields_in(L::Alloc::default())
+    }
+
+    /// Read raw protobuf fields from the reader, returning an iterator.
+    ///
+    /// `alloc` is cloned into each length-delimited field.
+    fn read_protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIterator<Self, L>
     where
         Self: Sized,
         L: LenBuf;
@@ -423,14 +464,14 @@ impl<R> ReadExtProtobuf for R
 where
     R: Read,
 {
-    fn read_protobuf_fields<L>(self) -> ProtobufFieldIterator<Self, L>
+    fn read_protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIterator<Self, L>
     where
         Self: Sized,
         L: LenBuf,
     {
         ProtobufFieldIterator {
             reader: self,
-            _payload: ::std::marker::PhantomData,
+            alloc,
         }
     }
 }

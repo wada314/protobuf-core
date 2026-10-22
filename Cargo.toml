@@ -17,7 +17,8 @@ exclude = [
 
 [features]
 # `impl LenBuf for Vec<u8, A>` and `impl LenBuf for Box<[u8], A>`.
-# Turns on `allocator_api`. Build with a nightly compiler.
+# The caller passes `A` into `with_len`. Turns on `allocator_api`.
+# Build with a nightly compiler.
 nightly = []
 
 [package.metadata.docs.rs]

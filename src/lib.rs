@@ -97,10 +97,12 @@
 //!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`, `Box<[u8]>`)
 //!
 //! [`LenBuf`] is the buffer trait for those streaming readers. The payload length
-//! is known before its bytes are read. `with_len` allocates that many bytes and
-//! [`AsMut<[u8]>`](::std::convert::AsMut) exposes all of them. `Vec<u8>` and `Box<[u8]>` implement it with
-//! no extra feature. A custom allocator (`Vec<u8, A>` or `Box<[u8], A>`) requires
-//! the `nightly` feature. Slice reads do not use this trait.
+//! is known before its bytes are read. `with_len` allocates that many bytes with
+//! the allocator the caller passes, and [`AsMut<[u8]>`](::std::convert::AsMut)
+//! exposes all of them. `Vec<u8>` and `Box<[u8]>` implement it with `Alloc = ()`
+//! and need no extra feature. `read_protobuf_fields_in` and `protobuf_fields_in`
+//! take that allocator instance. A custom allocator (`Vec<u8, A>` or `Box<[u8], A>`)
+//! requires the `nightly` feature. Slice reads do not use this trait.
 //!
 //! ## Writing Traits
 //!
@@ -127,7 +129,8 @@
 //!
 //! ## Feature Flags
 //!
-//! - `nightly`: [`LenBuf`] for `Vec<u8, A>` and `Box<[u8], A>`. Enable this feature to use the allocator.
+//! - `nightly`: [`LenBuf`] for `Vec<u8, A>` and `Box<[u8], A>`. Enable this feature
+//!   to pass an allocator instance into `with_len`. `Vec<u8>` and `Box<[u8]>` do not need it.
 //!
 #![cfg_attr(feature = "nightly", feature(allocator_api, doc_cfg))]
 #![cfg_attr(feature = "nightly", allow(stable_features))]

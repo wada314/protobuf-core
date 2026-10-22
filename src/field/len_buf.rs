@@ -13,17 +13,21 @@ use ::std::alloc::Allocator;
 ///
 /// The payload length is known before its bytes are read. Implement
 /// [`with_len`](LenBuf::with_len) and [`AsMut<[u8]>`](::std::convert::AsMut).
-/// `with_len` allocates exactly that many initialized bytes, and
-/// [`as_mut`](::std::convert::AsMut::as_mut) returns all of them. The slice
-/// length is the payload length for the whole read. The streaming readers
-/// allocate with `with_len` and write the payload bytes into that slice.
+/// `with_len` allocates exactly that many initialized bytes with the allocator
+/// the caller passes, and [`as_mut`](::std::convert::AsMut::as_mut) returns all
+/// of them. The slice length is the payload length for the whole read. The
+/// streaming readers allocate with `with_len` and write the payload bytes into
+/// that slice.
 ///
-/// `Vec<u8>` and `Box<[u8]>` implement this trait. Both allocate `len` bytes.
-/// A `Read` source overwrites them with `read_exact`.
+/// `Vec<u8>` and `Box<[u8]>` implement this trait with [`Alloc`](LenBuf::Alloc)
+/// `= ()`. Both allocate `len` bytes. A `Read` source overwrites them with
+/// `read_exact`.
 ///
-/// `Vec<u8, A>` and `Box<[u8], A>` are those payloads with an allocator. Enable
-/// the `nightly` feature to use the allocator. docs.rs shows those signatures,
-/// with a badge for the feature.
+/// `Vec<u8, A>` and `Box<[u8], A>` use `Alloc = A` (`A: Allocator + Clone`).
+/// Enable the `nightly` feature to pass that allocator, and pass the instance
+/// to `with_len`. The impl does not build it with `A::default()`. docs.rs shows
+/// those signatures, with a badge for the feature. A value that is not `Clone`
+/// can still be used as `&A`, because `&A: Allocator` when `A: Allocator`.
 ///
 /// # Examples
 ///
@@ -40,7 +44,9 @@ use ::std::alloc::Allocator;
 /// }
 ///
 /// impl LenBuf for Bytes {
-///     fn with_len(len: usize) -> Self {
+///     type Alloc = ();
+///
+///     fn with_len(len: usize, _alloc: ()) -> Self {
 ///         Self(vec![0; len])
 ///     }
 /// }
@@ -57,54 +63,67 @@ use ::std::alloc::Allocator;
 /// assert_eq!(data, b"Hel");
 /// ```
 pub trait LenBuf: Sized + AsMut<[u8]> {
-    /// Allocate a buffer of exactly `len` initialized bytes.
+    /// Allocator value passed to [`with_len`](LenBuf::with_len).
+    ///
+    /// `Vec<u8>` and `Box<[u8]>` use `()`. `Vec<u8, A>` and `Box<[u8], A>` use `A`.
+    /// Each length-delimited field receives its own value, cloned from the one
+    /// held by the reader.
+    type Alloc: Clone;
+
+    /// Allocate a buffer of exactly `len` initialized bytes with `alloc`.
     ///
     /// [`AsMut::as_mut`](::std::convert::AsMut::as_mut) returns a slice of this
     /// length. The streaming readers overwrite those bytes. Zero is a valid
     /// initial value.
-    fn with_len(len: usize) -> Self;
+    fn with_len(len: usize, alloc: Self::Alloc) -> Self;
 }
 
 /// Length-delimited payload stored in `Vec<u8>`.
 ///
-/// This implementation does not require the `nightly` feature and does not
-/// take a custom allocator. `with_len` allocates `len` zero bytes. A `Read`
-/// source overwrites them with `read_exact`.
+/// This implementation does not require the `nightly` feature. [`Alloc`](LenBuf::Alloc)
+/// is `()`. `with_len` allocates `len` zero bytes. A `Read` source overwrites them
+/// with `read_exact`.
 #[cfg(not(feature = "nightly"))]
 impl LenBuf for Vec<u8> {
-    fn with_len(len: usize) -> Self {
+    type Alloc = ();
+
+    fn with_len(len: usize, _alloc: ()) -> Self {
         vec![0u8; len]
     }
 }
 
 /// Length-delimited payload stored in `Box<[u8]>`.
 ///
-/// This implementation does not require the `nightly` feature and does not
-/// take a custom allocator. `with_len` allocates one box of `len` zero bytes.
-/// A `Read` source overwrites them with `read_exact`.
+/// This implementation does not require the `nightly` feature. [`Alloc`](LenBuf::Alloc)
+/// is `()`. `with_len` allocates one box of `len` zero bytes. A `Read` source
+/// overwrites them with `read_exact`.
 #[cfg(not(feature = "nightly"))]
 impl LenBuf for Box<[u8]> {
-    fn with_len(len: usize) -> Self {
+    type Alloc = ();
+
+    fn with_len(len: usize, _alloc: ()) -> Self {
         vec![0u8; len].into_boxed_slice()
     }
 }
 
 /// `Vec<u8, A>`. Enable the `nightly` feature to use the allocator.
 ///
-/// The feature is not required when you do not use an allocator. `Vec<u8>`
-/// implements this trait without it. The badge above marks this signature,
-/// which is the one that takes an allocator.
+/// Pass `alloc` to [`with_len`](LenBuf::with_len). The feature is not required
+/// when you do not use an allocator. `Vec<u8>` implements this trait without it.
+/// The badge above marks this signature, which is the one that takes an allocator.
 #[cfg(feature = "nightly")]
 #[doc(cfg(feature = "nightly"))]
 #[allow(clippy::incompatible_msrv)]
 impl<A> LenBuf for Vec<u8, A>
 where
-    A: Allocator + Default,
+    A: Allocator + Clone,
 {
-    fn with_len(len: usize) -> Self {
+    type Alloc = A;
+
+    fn with_len(len: usize, alloc: A) -> Self {
         // `read_exact` needs an initialized buffer. `A` is the vector's allocator,
         // so this cannot go through the `vec!` macro (that uses `Global`).
-        let mut data = Vec::with_capacity_in(len, A::default());
+        let mut data = Vec::with_capacity_in(len, alloc);
         data.resize(len, 0);
         data
     }
@@ -112,21 +131,23 @@ where
 
 /// `Box<[u8], A>`. Enable the `nightly` feature to use the allocator.
 ///
-/// The feature is not required when you do not use an allocator. `Box<[u8]>`
-/// implements this trait without it. The badge above marks this signature,
-/// which is the one that takes an allocator.
+/// Pass `alloc` to [`with_len`](LenBuf::with_len). The feature is not required
+/// when you do not use an allocator. `Box<[u8]>` implements this trait without it.
+/// The badge above marks this signature, which is the one that takes an allocator.
 #[cfg(feature = "nightly")]
 #[doc(cfg(feature = "nightly"))]
 #[allow(clippy::incompatible_msrv)]
 impl<A> LenBuf for Box<[u8], A>
 where
-    A: Allocator + Default,
+    A: Allocator + Clone,
 {
-    fn with_len(len: usize) -> Self {
+    type Alloc = A;
+
+    fn with_len(len: usize, alloc: A) -> Self {
         // `read_exact` needs an initialized buffer. `A` is the box's allocator,
         // so this cannot go through the `vec!` macro (that uses `Global`).
         // `into_boxed_slice` keeps this allocation when the length equals the capacity.
-        let mut data = Vec::with_capacity_in(len, A::default());
+        let mut data = Vec::with_capacity_in(len, alloc);
         data.resize(len, 0);
         data.into_boxed_slice()
     }
@@ -154,7 +175,9 @@ mod tests {
     }
 
     impl LenBuf for Bytes {
-        fn with_len(len: usize) -> Self {
+        type Alloc = ();
+
+        fn with_len(len: usize, _alloc: ()) -> Self {
             Self(vec![0; len])
         }
     }
@@ -441,12 +464,9 @@ mod allocator_tests {
     static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
     static ALLOC_LOCK: ::std::sync::Mutex<()> = ::std::sync::Mutex::new(());
 
-    struct Counting;
-
-    impl Default for Counting {
-        fn default() -> Self {
-            Self
-        }
+    #[derive(Clone)]
+    struct Counting {
+        id: u64,
     }
 
     unsafe impl Allocator for Counting {
@@ -460,39 +480,99 @@ mod allocator_tests {
         }
     }
 
-    #[test]
-    fn vec_with_custom_allocator_is_one_allocation() {
-        let _guard = ALLOC_LOCK.lock().unwrap();
-        ALLOCATIONS.store(0, Ordering::SeqCst);
-        let message = len_message(b"Hel");
-        let field = Cursor::new(message)
-            .read_protobuf_fields::<Vec<u8, Counting>>()
-            .next()
-            .unwrap()
-            .unwrap();
-        let FieldValue::Len(data) = field.value else {
+    fn two_len_fields() -> Vec<u8> {
+        let mut message = len_message(b"Hel");
+        message.extend_from_slice(&len_message(b"lo!"));
+        message
+    }
+
+    fn assert_vec_keeps_instance(fields: &[crate::Field<Vec<u8, Counting>>], id: u64) {
+        assert_eq!(fields.len(), 2);
+        let FieldValue::Len(first) = &fields[0].value else {
             panic!("expected len");
         };
-        assert_eq!(data.as_slice(), b"Hel");
-        assert_eq!(ALLOCATIONS.load(Ordering::SeqCst), 1);
-        let _allocator: &Counting = data.allocator();
+        let FieldValue::Len(second) = &fields[1].value else {
+            panic!("expected len");
+        };
+        assert_eq!(first.as_slice(), b"Hel");
+        assert_eq!(second.as_slice(), b"lo!");
+        assert_eq!(first.allocator().id, id);
+        assert_eq!(second.allocator().id, id);
+        assert_eq!(ALLOCATIONS.load(Ordering::SeqCst), 2);
     }
 
     #[test]
-    fn box_with_custom_allocator_is_one_allocation() {
+    fn vec_with_custom_allocator_keeps_the_passed_instance() {
         let _guard = ALLOC_LOCK.lock().unwrap();
+        let message = two_len_fields();
+
         ALLOCATIONS.store(0, Ordering::SeqCst);
-        let message = len_message(b"Hel");
-        let field = Cursor::new(message)
-            .read_protobuf_fields::<Box<[u8], Counting>>()
-            .next()
-            .unwrap()
+        let from_read = Cursor::new(message.clone())
+            .read_protobuf_fields_in::<Vec<u8, Counting>>(Counting { id: 7 })
+            .collect::<crate::Result<Vec<_>>>()
             .unwrap();
-        let FieldValue::Len(data) = field.value else {
+        assert_vec_keeps_instance(&from_read, 7);
+
+        ALLOCATIONS.store(0, Ordering::SeqCst);
+        let from_iter = message
+            .clone()
+            .into_iter()
+            .protobuf_fields_in::<Vec<u8, Counting>>(Counting { id: 7 })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_vec_keeps_instance(&from_iter, 7);
+
+        ALLOCATIONS.store(0, Ordering::SeqCst);
+        let from_try = Cursor::new(message)
+            .bytes()
+            .protobuf_fields_in::<Vec<u8, Counting>>(Counting { id: 7 })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_vec_keeps_instance(&from_try, 7);
+    }
+
+    fn assert_box_keeps_instance(fields: &[crate::Field<Box<[u8], Counting>>], id: u64) {
+        assert_eq!(fields.len(), 2);
+        let FieldValue::Len(first) = &fields[0].value else {
             panic!("expected len");
         };
-        assert_eq!(&data[..], b"Hel");
-        assert_eq!(ALLOCATIONS.load(Ordering::SeqCst), 1);
-        let _allocator: &Counting = ::std::boxed::Box::allocator(&data);
+        let FieldValue::Len(second) = &fields[1].value else {
+            panic!("expected len");
+        };
+        assert_eq!(&first[..], b"Hel");
+        assert_eq!(&second[..], b"lo!");
+        assert_eq!(::std::boxed::Box::allocator(first).id, id);
+        assert_eq!(::std::boxed::Box::allocator(second).id, id);
+        assert_eq!(ALLOCATIONS.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn box_with_custom_allocator_keeps_the_passed_instance() {
+        let _guard = ALLOC_LOCK.lock().unwrap();
+        let message = two_len_fields();
+
+        ALLOCATIONS.store(0, Ordering::SeqCst);
+        let from_read = Cursor::new(message.clone())
+            .read_protobuf_fields_in::<Box<[u8], Counting>>(Counting { id: 11 })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_box_keeps_instance(&from_read, 11);
+
+        ALLOCATIONS.store(0, Ordering::SeqCst);
+        let from_iter = message
+            .clone()
+            .into_iter()
+            .protobuf_fields_in::<Box<[u8], Counting>>(Counting { id: 11 })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_box_keeps_instance(&from_iter, 11);
+
+        ALLOCATIONS.store(0, Ordering::SeqCst);
+        let from_try = Cursor::new(message)
+            .bytes()
+            .protobuf_fields_in::<Box<[u8], Counting>>(Counting { id: 11 })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_box_keeps_instance(&from_try, 11);
     }
 }

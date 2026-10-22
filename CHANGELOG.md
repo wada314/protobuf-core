@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `LenBuf`, the buffer trait for length-delimited payloads read from `Read` and byte iterators. The payload length is known before its bytes are read. Implement `with_len` and `AsMut<[u8]>`. `with_len` allocates exactly that many initialized bytes, and `as_mut` returns all of them. The readers write the payload into that slice.
-- `impl LenBuf for Vec<u8>` and `impl LenBuf for Box<[u8]>`. A `Read` source fills the buffer with `read_exact`.
-- Cargo feature `nightly`: `impl<A: Allocator + Default> LenBuf for Vec<u8, A>`, `impl<A: Allocator + Default> LenBuf for Box<[u8], A>`, and `#![feature(allocator_api)]`. This feature does not build on the stable channel. docs.rs shows those signatures and marks them with the `nightly` feature. Enable the feature to use the allocator. The impl docs note that `Vec<u8>` and `Box<[u8]>` implement the trait without it.
+- `LenBuf`, the buffer trait for length-delimited payloads read from `Read` and byte iterators. The payload length is known before its bytes are read. Implement `with_len` and `AsMut<[u8]>`. `with_len(len, alloc)` allocates exactly that many initialized bytes with the allocator the caller passes, and `as_mut` returns all of them. The readers write the payload into that slice. Each length-delimited field receives `alloc.clone()`.
+- `impl LenBuf for Vec<u8>` and `impl LenBuf for Box<[u8]>`, both with `Alloc = ()`. A `Read` source fills the buffer with `read_exact`.
+- `read_protobuf_fields_in` and `protobuf_fields_in`, which take the `LenBuf::Alloc` instance. `read_protobuf_fields` and `protobuf_fields` pass `L::Alloc::default()`.
+- Cargo feature `nightly`: `impl<A: Allocator + Clone> LenBuf for Vec<u8, A>`, `impl<A: Allocator + Clone> LenBuf for Box<[u8], A>`, and `#![feature(allocator_api)]`. `with_len` uses the `A` you pass. It does not call `A::default()`. This feature does not build on the stable channel. docs.rs shows those signatures and marks them with the `nightly` feature. Enable the feature to pass an allocator. The impl docs note that `Vec<u8>` and `Box<[u8]>` implement the trait without it.
 
 ### Changed
 

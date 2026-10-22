@@ -44,8 +44,9 @@ pub use self::write::WriteExtProtobuf;
 ///
 /// `L` is the type for length-delimited values (Len variant).
 ///  - Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf).
-///    `Vec<u8>` and `Box<[u8]>` are always implemented. A custom allocator
-///    (`Vec<u8, A>` or `Box<[u8], A>`) requires the `nightly` feature.
+///    `Vec<u8>` and `Box<[u8]>` are always implemented (`Alloc = ()`). A custom
+///    allocator (`Vec<u8, A>` or `Box<[u8], A>`) requires the `nightly` feature.
+///    Pass that allocator to `read_protobuf_fields_in` or `protobuf_fields_in`.
 ///  - Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
@@ -162,8 +163,9 @@ impl<L> FieldValue<L> {
 ///
 /// `L` is the type for length-delimited values (FieldValue::Len).
 /// Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf).
-/// `Vec<u8>` and `Box<[u8]>` are always implemented. A custom allocator
-/// (`Vec<u8, A>` or `Box<[u8], A>`) requires the `nightly` feature.
+/// `Vec<u8>` and `Box<[u8]>` are always implemented (`Alloc = ()`). A custom
+/// allocator (`Vec<u8, A>` or `Box<[u8], A>`) requires the `nightly` feature.
+/// Pass that allocator to `read_protobuf_fields_in` or `protobuf_fields_in`.
 /// Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
