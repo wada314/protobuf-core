@@ -1,17 +1,41 @@
 //! Field reading utilities for Protocol Buffers
 //!
 //! This module provides low-level utilities for reading raw protobuf fields from various sources.
-//! Streaming sources (`std::io::Read` and byte iterators) build length-delimited
-//! payloads with [`LenBuf`](crate::LenBuf). Slice sources borrow them as `&[u8]`.
+//! Streaming sources (`std::io::Read` and byte iterators) build each length-delimited
+//! payload with a closure `FnMut(usize) -> L`. Slice sources borrow them as `&[u8]`.
 
-use super::len_buf::LenBuf;
 use crate::field::{Field, FieldValue};
 use crate::tag::Tag;
 use crate::varint::{DecodeOutcome, Varint};
 use crate::wire_format::WireType;
 use crate::{ProtobufError, Result};
-use ::std::convert::AsRef;
+use ::std::convert::{AsMut, AsRef};
 use ::std::io::Read;
+
+/// `Vec<u8>` payload of `len` initialized bytes.
+///
+/// [`ReadExtProtobuf::read_protobuf_fields`] and [`protobuf_fields`](IteratorExtProtobuf::protobuf_fields)
+/// pass this function. Its type is `fn(usize) -> Vec<u8>`.
+fn vec_payload(len: usize) -> Vec<u8> {
+    vec![0u8; len]
+}
+
+/// Call `make` for one length-delimited payload.
+///
+/// `make` returns `length` initialized bytes. [`AsMut::as_mut`](AsMut::as_mut) is that whole slice.
+fn make_payload<L, F>(make: &mut F, length: usize) -> L
+where
+    F: FnMut(usize) -> L,
+    L: AsMut<[u8]>,
+{
+    let mut payload = make(length);
+    debug_assert_eq!(
+        payload.as_mut().len(),
+        length,
+        "length-delimited buffer must be exactly {length} bytes"
+    );
+    payload
+}
 
 // ============================================================================
 // Common parsing infrastructure
@@ -47,8 +71,8 @@ pub(crate) trait FieldValueReader<L> {
 /// Parse a complete field (tag + value) from a field value reader
 ///
 /// This is the common parsing logic for reading a complete field.
-/// `L` is the length-delimited payload. Streaming readers use [`LenBuf`](crate::LenBuf).
-/// The slice reader uses `&'a [u8]`.
+/// `L` is the length-delimited payload. Streaming readers build it with the
+/// caller's closure. The slice reader uses `&'a [u8]`.
 pub(crate) fn parse_field<L, R>(reader: &mut R) -> Result<Option<Field<L>>>
 where
     R: FieldValueReader<L>,
@@ -97,12 +121,13 @@ where
 // ============================================================================
 
 /// Helper struct implementing FieldValueReader for Iterator<Item = u8>
-struct IteratorReader<'a, I, A>(&'a mut I, &'a A);
+struct IteratorReader<'a, I, F>(&'a mut I, &'a mut F);
 
-impl<'a, I, L> FieldValueReader<L> for IteratorReader<'a, I, L::Alloc>
+impl<'a, I, F, L> FieldValueReader<L> for IteratorReader<'a, I, F>
 where
     I: Iterator<Item = u8>,
-    L: LenBuf,
+    F: FnMut(usize) -> L,
+    L: AsMut<[u8]>,
 {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::IteratorExtVarint;
@@ -122,7 +147,7 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        let mut payload = L::with_len(length, self.1.clone());
+        let mut payload = make_payload(self.1, length);
         for byte in payload.as_mut() {
             *byte = self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
         }
@@ -132,25 +157,23 @@ where
 
 /// Iterator for reading raw protobuf fields sequentially from a byte iterator.
 ///
-/// `L` is the length-delimited payload ([`LenBuf`](crate::LenBuf)). It defaults to `Vec<u8>`.
-/// `alloc` is cloned into each length-delimited field.
-pub struct ProtobufFieldIteratorFromBytes<I, L = Vec<u8>>
-where
-    L: LenBuf,
-{
+/// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Vec<u8>`.
+/// `F` is called once per length-delimited field.
+pub struct ProtobufFieldIteratorFromBytes<I, F = fn(usize) -> Vec<u8>> {
     iter: I,
-    alloc: L::Alloc,
+    make: F,
 }
 
-impl<I, L> Iterator for ProtobufFieldIteratorFromBytes<I, L>
+impl<I, F, L> Iterator for ProtobufFieldIteratorFromBytes<I, F>
 where
     I: Iterator<Item = u8>,
-    L: LenBuf,
+    F: FnMut(usize) -> L,
+    L: AsMut<[u8]>,
 {
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut reader = IteratorReader(&mut self.iter, &self.alloc);
+        let mut reader = IteratorReader(&mut self.iter, &mut self.make);
         match parse_field(&mut reader) {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
@@ -162,8 +185,8 @@ where
 /// Extension trait for reading raw Protocol Buffer fields from byte iterators.
 ///
 /// This trait provides convenient methods to read fields directly from
-/// any iterator that yields bytes. Length-delimited payloads are `L: LenBuf`
-/// (for example `Vec<u8>` or `Box<[u8]>`).
+/// any iterator that yields bytes. Length-delimited payloads default to `Vec<u8>`.
+/// [`protobuf_fields_with`](IteratorExtProtobuf::protobuf_fields_with) supplies a different buffer.
 ///
 /// # Example
 /// ```
@@ -171,44 +194,47 @@ where
 ///
 /// let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
 /// let iter = bytes.into_iter();
-/// let fields: Vec<_> = iter.protobuf_fields::<Vec<u8>>().collect::<::std::result::Result<Vec<_>, _>>().unwrap();
+/// let fields: Vec<_> = iter.protobuf_fields().collect::<::std::result::Result<Vec<_>, _>>().unwrap();
 /// assert_eq!(fields[0].field_number.as_u32(), 1);
 /// ```
 pub trait IteratorExtProtobuf {
     /// Convert this iterator into an iterator of protobuf fields.
     ///
-    /// Returns an iterator that yields `Result<Field<L>>`.
-    /// `L` is the length-delimited payload. Each field is parsed sequentially.
-    /// Length-delimited fields are allocated with `L::Alloc::default()`.
-    /// Pass an allocator instance to [`protobuf_fields_in`](IteratorExtProtobuf::protobuf_fields_in).
-    fn protobuf_fields<L>(self) -> ProtobufFieldIteratorFromBytes<Self, L>
+    /// Returns an iterator that yields `Result<Field<Vec<u8>>>`.
+    /// Each field is parsed sequentially. Length-delimited payloads are `Vec<u8>`.
+    fn protobuf_fields(self) -> ProtobufFieldIteratorFromBytes<Self>
     where
         Self: Sized,
-        L: LenBuf,
-        L::Alloc: Default,
     {
-        self.protobuf_fields_in(L::Alloc::default())
+        self.protobuf_fields_with(vec_payload)
     }
 
     /// Convert this iterator into an iterator of protobuf fields.
     ///
-    /// `alloc` is cloned into each length-delimited field.
-    fn protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIteratorFromBytes<Self, L>
+    /// `make` is called once for each length-delimited field. `len` is the payload
+    /// length from the wire. Return that many initialized bytes.
+    /// [`AsMut::as_mut`](AsMut::as_mut) must be a slice of that length; the reader
+    /// overwrites it. Varint and fixed-width fields do not call `make`.
+    ///
+    /// Capture an allocator in `make` when the buffer needs one.
+    fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromBytes<Self, F>
     where
         Self: Sized,
-        L: LenBuf;
+        F: FnMut(usize) -> L,
+        L: AsMut<[u8]>;
 }
 
 impl<I> IteratorExtProtobuf for I
 where
     I: Iterator<Item = u8>,
 {
-    fn protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIteratorFromBytes<Self, L>
+    fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromBytes<Self, F>
     where
         Self: Sized,
-        L: LenBuf,
+        F: FnMut(usize) -> L,
+        L: AsMut<[u8]>,
     {
-        ProtobufFieldIteratorFromBytes { iter: self, alloc }
+        ProtobufFieldIteratorFromBytes { iter: self, make }
     }
 }
 
@@ -217,13 +243,14 @@ where
 // ============================================================================
 
 /// Helper struct implementing FieldValueReader for Iterator<Item = Result<u8, E>>
-struct TryIteratorReader<'a, I, A>(&'a mut I, &'a A);
+struct TryIteratorReader<'a, I, F>(&'a mut I, &'a mut F);
 
-impl<'a, I, E, L> FieldValueReader<L> for TryIteratorReader<'a, I, L::Alloc>
+impl<'a, I, E, F, L> FieldValueReader<L> for TryIteratorReader<'a, I, F>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
-    L: LenBuf,
+    F: FnMut(usize) -> L,
+    L: AsMut<[u8]>,
 {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::TryIteratorExtVarint;
@@ -247,7 +274,7 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        let mut payload = L::with_len(length, self.1.clone());
+        let mut payload = make_payload(self.1, length);
         for byte in payload.as_mut() {
             *byte = self
                 .0
@@ -261,26 +288,24 @@ where
 
 /// Iterator for reading raw protobuf fields sequentially from a byte iterator that yields `Result<u8, E>`.
 ///
-/// `L` is the length-delimited payload ([`LenBuf`](crate::LenBuf)). It defaults to `Vec<u8>`.
-/// `alloc` is cloned into each length-delimited field.
-pub struct ProtobufFieldIteratorFromTryBytes<I, L = Vec<u8>>
-where
-    L: LenBuf,
-{
+/// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Vec<u8>`.
+/// `F` is called once per length-delimited field.
+pub struct ProtobufFieldIteratorFromTryBytes<I, F = fn(usize) -> Vec<u8>> {
     iter: I,
-    alloc: L::Alloc,
+    make: F,
 }
 
-impl<I, E, L> Iterator for ProtobufFieldIteratorFromTryBytes<I, L>
+impl<I, E, F, L> Iterator for ProtobufFieldIteratorFromTryBytes<I, F>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
-    L: LenBuf,
+    F: FnMut(usize) -> L,
+    L: AsMut<[u8]>,
 {
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut reader = TryIteratorReader(&mut self.iter, &self.alloc);
+        let mut reader = TryIteratorReader(&mut self.iter, &mut self.make);
         match parse_field(&mut reader) {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
@@ -293,8 +318,8 @@ where
 ///
 /// This trait provides convenient methods to read fields directly from
 /// any iterator that yields `Result<u8, E>`, allowing proper error propagation
-/// from I/O operations. Length-delimited payloads are `L: LenBuf`
-/// (for example `Vec<u8>` or `Box<[u8]>`).
+/// from I/O operations. Length-delimited payloads default to `Vec<u8>`.
+/// [`protobuf_fields_with`](TryIteratorExtProtobuf::protobuf_fields_with) supplies a different buffer.
 ///
 /// # Example
 /// ```
@@ -304,33 +329,35 @@ where
 /// let data = vec![0x08, 0x96, 0x01]; // field 1: 150
 /// let mut reader = Cursor::new(data);
 /// let iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
-/// let fields: Vec<_> = iter.protobuf_fields::<Vec<u8>>().collect::<Result<Vec<_>, _>>().unwrap();
+/// let fields: Vec<_> = iter.protobuf_fields().collect::<Result<Vec<_>, _>>().unwrap();
 /// assert_eq!(fields[0].field_number.as_u32(), 1);
 /// ```
 pub trait TryIteratorExtProtobuf {
     /// Convert this iterator into an iterator of protobuf fields.
     ///
-    /// Returns an iterator that yields `Result<Field<L>>`.
-    /// `L` is the length-delimited payload.
+    /// Returns an iterator that yields `Result<Field<Vec<u8>>>`.
+    /// Length-delimited payloads are `Vec<u8>`.
     /// I/O errors from the underlying iterator are propagated.
-    /// Length-delimited fields are allocated with `L::Alloc::default()`.
-    /// Pass an allocator instance to [`protobuf_fields_in`](TryIteratorExtProtobuf::protobuf_fields_in).
-    fn protobuf_fields<L>(self) -> ProtobufFieldIteratorFromTryBytes<Self, L>
+    fn protobuf_fields(self) -> ProtobufFieldIteratorFromTryBytes<Self>
     where
         Self: Sized,
-        L: LenBuf,
-        L::Alloc: Default,
     {
-        self.protobuf_fields_in(L::Alloc::default())
+        self.protobuf_fields_with(vec_payload)
     }
 
     /// Convert this iterator into an iterator of protobuf fields.
     ///
-    /// `alloc` is cloned into each length-delimited field.
-    fn protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIteratorFromTryBytes<Self, L>
+    /// `make` is called once for each length-delimited field. `len` is the payload
+    /// length from the wire. Return that many initialized bytes.
+    /// [`AsMut::as_mut`](AsMut::as_mut) must be a slice of that length; the reader
+    /// overwrites it. Varint and fixed-width fields do not call `make`.
+    ///
+    /// Capture an allocator in `make` when the buffer needs one.
+    fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromTryBytes<Self, F>
     where
         Self: Sized,
-        L: LenBuf;
+        F: FnMut(usize) -> L,
+        L: AsMut<[u8]>;
 }
 
 impl<I, E> TryIteratorExtProtobuf for I
@@ -338,12 +365,13 @@ where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
-    fn protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIteratorFromTryBytes<Self, L>
+    fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromTryBytes<Self, F>
     where
         Self: Sized,
-        L: LenBuf,
+        F: FnMut(usize) -> L,
+        L: AsMut<[u8]>,
     {
-        ProtobufFieldIteratorFromTryBytes { iter: self, alloc }
+        ProtobufFieldIteratorFromTryBytes { iter: self, make }
     }
 }
 
@@ -352,12 +380,13 @@ where
 // ============================================================================
 
 /// Helper struct implementing FieldValueReader for Read
-struct ReadReader<'a, R, A>(&'a mut R, &'a A);
+struct ReadReader<'a, R, F>(&'a mut R, &'a mut F);
 
-impl<'a, R, L> FieldValueReader<L> for ReadReader<'a, R, L::Alloc>
+impl<'a, R, F, L> FieldValueReader<L> for ReadReader<'a, R, F>
 where
     R: Read,
-    L: LenBuf,
+    F: FnMut(usize) -> L,
+    L: AsMut<[u8]>,
 {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::ReadExtVarint;
@@ -371,7 +400,7 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        let mut payload = L::with_len(length, self.1.clone());
+        let mut payload = make_payload(self.1, length);
         self.0.read_exact(payload.as_mut())?;
         Ok(payload)
     }
@@ -379,25 +408,23 @@ where
 
 /// Iterator for reading raw protobuf fields sequentially from a reader.
 ///
-/// `L` is the length-delimited payload ([`LenBuf`](crate::LenBuf)). It defaults to `Vec<u8>`.
-/// `alloc` is cloned into each length-delimited field.
-pub struct ProtobufFieldIterator<R, L = Vec<u8>>
-where
-    L: LenBuf,
-{
+/// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Vec<u8>`.
+/// `F` is called once per length-delimited field.
+pub struct ProtobufFieldIterator<R, F = fn(usize) -> Vec<u8>> {
     reader: R,
-    alloc: L::Alloc,
+    make: F,
 }
 
-impl<R, L> Iterator for ProtobufFieldIterator<R, L>
+impl<R, F, L> Iterator for ProtobufFieldIterator<R, F>
 where
     R: Read,
-    L: LenBuf,
+    F: FnMut(usize) -> L,
+    L: AsMut<[u8]>,
 {
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut reader = ReadReader(&mut self.reader, &self.alloc);
+        let mut reader = ReadReader(&mut self.reader, &mut self.make);
         match parse_field(&mut reader) {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
@@ -409,7 +436,8 @@ where
 /// Extension trait for reading raw Protocol Buffer fields from `Read` types
 ///
 /// This trait provides low-level utilities for reading field-by-field from a byte stream.
-/// Length-delimited payloads are `L: LenBuf` (for example `Vec<u8>` or `Box<[u8]>`).
+/// Length-delimited payloads default to `Vec<u8>`.
+/// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with) supplies a different buffer.
 /// It does not provide semantic interpretation - that is the caller's responsibility.
 ///
 /// # Example
@@ -419,7 +447,7 @@ where
 /// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
 ///     let reader = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
 ///
-///     for field in reader.read_protobuf_fields::<Vec<u8>>() {
+///     for field in reader.read_protobuf_fields() {
 ///         let field = field?;
 ///         match field.value {
 ///             FieldValue::Varint(varint) => {
@@ -439,40 +467,56 @@ pub trait ReadExtProtobuf {
     ///
     /// This consumes the reader and returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
-    /// `L` is the length-delimited payload.
-    /// Length-delimited fields are allocated with `L::Alloc::default()`.
-    /// Pass an allocator instance to [`read_protobuf_fields_in`](ReadExtProtobuf::read_protobuf_fields_in).
-    fn read_protobuf_fields<L>(self) -> ProtobufFieldIterator<Self, L>
+    /// Length-delimited payloads are `Vec<u8>`.
+    fn read_protobuf_fields(self) -> ProtobufFieldIterator<Self>
     where
         Self: Sized,
-        L: LenBuf,
-        L::Alloc: Default,
     {
-        self.read_protobuf_fields_in(L::Alloc::default())
+        self.read_protobuf_fields_with(vec_payload)
     }
 
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
-    /// `alloc` is cloned into each length-delimited field.
-    fn read_protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIterator<Self, L>
+    /// `make` is called once for each length-delimited field. `len` is the payload
+    /// length from the wire. Return that many initialized bytes.
+    /// [`AsMut::as_mut`](AsMut::as_mut) must be a slice of that length; the reader
+    /// overwrites it. Varint and fixed-width fields do not call `make`.
+    ///
+    /// Capture an allocator in `make` when the buffer needs one.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ::protobuf_core::{FieldValue, ReadExtProtobuf};
+    ///
+    /// let reader = &[0x0A, 0x03, b'H', b'e', b'l'][..];
+    /// let fields: Vec<_> = reader
+    ///     .read_protobuf_fields_with(|len| vec![0u8; len].into_boxed_slice())
+    ///     .collect::<Result<Vec<_>, _>>()
+    ///     .unwrap();
+    /// let FieldValue::Len(data) = &fields[0].value else {
+    ///     panic!("expected a length-delimited field");
+    /// };
+    /// assert_eq!(&data[..], b"Hel");
+    /// ```
+    fn read_protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIterator<Self, F>
     where
         Self: Sized,
-        L: LenBuf;
+        F: FnMut(usize) -> L,
+        L: AsMut<[u8]>;
 }
 
 impl<R> ReadExtProtobuf for R
 where
     R: Read,
 {
-    fn read_protobuf_fields_in<L>(self, alloc: L::Alloc) -> ProtobufFieldIterator<Self, L>
+    fn read_protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIterator<Self, F>
     where
         Self: Sized,
-        L: LenBuf,
+        F: FnMut(usize) -> L,
+        L: AsMut<[u8]>,
     {
-        ProtobufFieldIterator {
-            reader: self,
-            alloc,
-        }
+        ProtobufFieldIterator { reader: self, make }
     }
 }
 
@@ -743,7 +787,7 @@ mod tests {
         let data = vec![0x08, 0x96, 0x01]; // field 1: 150
         let reader = Cursor::new(data);
         let fields: Vec<_> = reader
-            .read_protobuf_fields::<Vec<u8>>()
+            .read_protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -767,7 +811,7 @@ mod tests {
         ];
         let reader = Cursor::new(data);
         let fields: Vec<_> = reader
-            .read_protobuf_fields::<Vec<u8>>()
+            .read_protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 2);
@@ -799,7 +843,7 @@ mod tests {
         let data = vec![0x15, 0x78, 0x56, 0x34, 0x12]; // field 2: 0x12345678 (Fixed32)
         let reader = Cursor::new(data);
         let fields: Vec<_> = reader
-            .read_protobuf_fields::<Vec<u8>>()
+            .read_protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -820,7 +864,7 @@ mod tests {
         let data = vec![0x12, 0x03, 0x48, 0x65, 0x6c]; // field 2: "Hel"
         let reader = Cursor::new(data);
         let fields: Vec<_> = reader
-            .read_protobuf_fields::<Vec<u8>>()
+            .read_protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -841,7 +885,7 @@ mod tests {
         let data = vec![0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]; // field 3: 0x1234567890ABCDEF (Fixed64)
         let reader = Cursor::new(data);
         let fields: Vec<_> = reader
-            .read_protobuf_fields::<Vec<u8>>()
+            .read_protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -862,7 +906,7 @@ mod tests {
         let data = vec![];
         let reader = Cursor::new(data);
         let fields: Vec<_> = reader
-            .read_protobuf_fields::<Vec<u8>>()
+            .read_protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 0);
@@ -879,7 +923,7 @@ mod tests {
         let bytes = vec![0x08, 0x96, 0x01]; // field 1: 150
         let iter = bytes.into_iter();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -902,7 +946,7 @@ mod tests {
         ];
         let iter = bytes.into_iter();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 2);
@@ -933,7 +977,7 @@ mod tests {
         let bytes = vec![0x12, 0x03, 0x48, 0x65, 0x6c]; // field 2: "Hel"
         let iter = bytes.into_iter();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -953,7 +997,7 @@ mod tests {
         let bytes = vec![0x15, 0x78, 0x56, 0x34, 0x12]; // field 2: 0x12345678 (Fixed32)
         let iter = bytes.into_iter();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -973,7 +1017,7 @@ mod tests {
         let bytes = vec![0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]; // field 3: 0x1234567890ABCDEF (Fixed64)
         let iter = bytes.into_iter();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -993,7 +1037,7 @@ mod tests {
         let bytes = vec![];
         let iter = bytes.into_iter();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 0);
@@ -1012,7 +1056,7 @@ mod tests {
         let reader = Cursor::new(data);
         let iter = reader.bytes();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -1037,7 +1081,7 @@ mod tests {
         let reader = Cursor::new(data);
         let iter = reader.bytes();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 2);
@@ -1070,7 +1114,7 @@ mod tests {
         let reader = Cursor::new(data);
         let iter = reader.bytes();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -1092,7 +1136,7 @@ mod tests {
         let reader = Cursor::new(data);
         let iter = reader.bytes();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -1114,7 +1158,7 @@ mod tests {
         let reader = Cursor::new(data);
         let iter = reader.bytes();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 1);
@@ -1136,7 +1180,7 @@ mod tests {
         let reader = Cursor::new(data);
         let iter = reader.bytes();
         let fields: Vec<_> = iter
-            .protobuf_fields::<Vec<u8>>()
+            .protobuf_fields()
             .collect::<::std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fields.len(), 0);
@@ -1207,5 +1251,249 @@ mod tests {
             };
             assert_eq!(value, wire);
         }
+    }
+}
+
+#[cfg(test)]
+mod len_payload {
+    use super::{IteratorExtProtobuf, ReadExtProtobuf, TryIteratorExtProtobuf};
+    use crate::varint::Varint;
+    use crate::{Field, FieldValue, ProtobufError};
+    use ::std::convert::AsMut;
+    use ::std::io::{Cursor, ErrorKind, Read};
+
+    const LARGE_LEN: usize = 8200;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Bytes(Vec<u8>);
+
+    impl AsMut<[u8]> for Bytes {
+        fn as_mut(&mut self) -> &mut [u8] {
+            &mut self.0
+        }
+    }
+
+    fn bytes_buf(len: usize) -> Bytes {
+        Bytes(vec![0; len])
+    }
+
+    fn len_message(payload: &[u8]) -> Vec<u8> {
+        let mut out = vec![0x0A];
+        let (encoded, count) = Varint::from_uint64(payload.len() as u64).encode();
+        out.extend_from_slice(&encoded[..count]);
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn payload(len: usize) -> Vec<u8> {
+        (0..len).map(|index| index as u8).collect()
+    }
+
+    fn assert_bytes(field_bytes: &[u8], expected: &[u8]) {
+        let owned: Vec<u8> = field_bytes.to_vec();
+
+        let from_read = Cursor::new(owned.clone())
+            .read_protobuf_fields_with(bytes_buf)
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(Bytes(data)) = from_read.value else {
+            panic!("expected len");
+        };
+        assert_eq!(data, expected);
+
+        let from_iter = owned
+            .clone()
+            .into_iter()
+            .protobuf_fields_with(bytes_buf)
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(Bytes(data)) = from_iter.value else {
+            panic!("expected len");
+        };
+        assert_eq!(data, expected);
+
+        let from_try = Cursor::new(owned)
+            .bytes()
+            .protobuf_fields_with(bytes_buf)
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(Bytes(data)) = from_try.value else {
+            panic!("expected len");
+        };
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn closure_fills_empty_small_and_large_payloads() {
+        assert_bytes(&len_message(b""), b"");
+        assert_bytes(&len_message(b"Hel"), b"Hel");
+        let big = payload(LARGE_LEN);
+        assert_bytes(&len_message(&big), &big);
+    }
+
+    #[test]
+    fn short_payload_is_an_error_on_every_streaming_source() {
+        let input = [0x0A, 0x05, b'a', b'b'];
+        // `Read::read_exact` reports a short buffer as an I/O error.
+        let error = Cursor::new(input)
+            .read_protobuf_fields_with(bytes_buf)
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ProtobufError::IoError(ref err) if err.kind() == ErrorKind::UnexpectedEof
+        ));
+
+        let error = input
+            .into_iter()
+            .protobuf_fields_with(bytes_buf)
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(error, ProtobufError::UnexpectedEof));
+
+        let error = Cursor::new(input)
+            .bytes()
+            .protobuf_fields_with(bytes_buf)
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(error, ProtobufError::UnexpectedEof));
+    }
+
+    fn assert_box(message: &[u8], expected: &[u8]) {
+        let from_read = Cursor::new(message.to_vec())
+            .read_protobuf_fields_with(|len| vec![0u8; len].into_boxed_slice())
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_read.value else {
+            panic!("expected len");
+        };
+        assert_eq!(&data[..], expected);
+
+        let from_iter = message
+            .iter()
+            .copied()
+            .protobuf_fields_with(|len| vec![0u8; len].into_boxed_slice())
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_iter.value else {
+            panic!("expected len");
+        };
+        assert_eq!(&data[..], expected);
+
+        let from_try = Cursor::new(message.to_vec())
+            .bytes()
+            .protobuf_fields_with(|len| vec![0u8; len].into_boxed_slice())
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_try.value else {
+            panic!("expected len");
+        };
+        assert_eq!(&data[..], expected);
+    }
+
+    #[test]
+    fn box_closure_reads_payload_on_every_streaming_source() {
+        assert_box(&len_message(b""), b"");
+        assert_box(&len_message(b"Hel"), b"Hel");
+        let big = payload(LARGE_LEN);
+        assert_box(&len_message(&big), &big);
+    }
+
+    #[derive(Debug)]
+    struct Tagged {
+        id: u64,
+        data: Vec<u8>,
+    }
+
+    impl AsMut<[u8]> for Tagged {
+        fn as_mut(&mut self) -> &mut [u8] {
+            &mut self.data
+        }
+    }
+
+    fn two_len_fields() -> Vec<u8> {
+        let mut message = len_message(b"Hel");
+        message.extend_from_slice(&len_message(b"lo!"));
+        message
+    }
+
+    fn assert_tagged(fields: &[Field<Tagged>], id: u64) {
+        assert_eq!(fields.len(), 2);
+        let FieldValue::Len(first) = &fields[0].value else {
+            panic!("expected len");
+        };
+        let FieldValue::Len(second) = &fields[1].value else {
+            panic!("expected len");
+        };
+        assert_eq!(first.data, b"Hel");
+        assert_eq!(second.data, b"lo!");
+        assert_eq!(first.id, id);
+        assert_eq!(second.id, id);
+    }
+
+    #[test]
+    fn closure_captures_state_for_each_length_field() {
+        let message = two_len_fields();
+        let id = 7u64;
+
+        let from_read = Cursor::new(message.clone())
+            .read_protobuf_fields_with(|len| Tagged {
+                id,
+                data: vec![0; len],
+            })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_tagged(&from_read, id);
+
+        let from_iter = message
+            .clone()
+            .into_iter()
+            .protobuf_fields_with(|len| Tagged {
+                id,
+                data: vec![0; len],
+            })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_tagged(&from_iter, id);
+
+        let from_try = Cursor::new(message)
+            .bytes()
+            .protobuf_fields_with(|len| Tagged {
+                id,
+                data: vec![0; len],
+            })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_tagged(&from_try, id);
+    }
+
+    #[test]
+    fn closure_runs_only_for_length_fields() {
+        let mixed = [0x08, 0x96, 0x01, 0x12, 0x03, b'H', b'e', b'l'];
+        let mut calls = 0usize;
+        let fields = Cursor::new(mixed)
+            .read_protobuf_fields_with(|len| {
+                calls += 1;
+                Bytes(vec![0; len])
+            })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(calls, 1);
+        assert!(matches!(fields[0].value, FieldValue::Varint(_)));
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        let FieldValue::Len(Bytes(data)) = &fields[1].value else {
+            panic!("expected len");
+        };
+        assert_eq!(data, b"Hel");
+        assert_eq!(fields[1].field_number.as_u32(), 2);
     }
 }

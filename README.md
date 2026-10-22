@@ -35,7 +35,7 @@ let fields: Vec<Field<&[u8]>> = bytes
     .unwrap();
 ```
 
-`Read` and byte iterators take a [`LenBuf`](https://docs.rs/protobuf-core/latest/protobuf_core/trait.LenBuf.html) payload type. The payload length is known before its bytes are read, so `with_len` allocates exactly that many bytes and `AsMut<[u8]>` exposes all of them. `Vec<u8>` and `Box<[u8]>` implement it with no allocator (`Alloc = ()`). `Vec<u8, A>` and `Box<[u8], A>` take the allocator instance you pass to `read_protobuf_fields_in` or `protobuf_fields_in`; enable the `nightly` feature for that. `read_protobuf_fields` and `protobuf_fields` still build `L::Alloc::default()`, which is `()` or `Global`. A slice read stays borrowed and does not use that trait.
+`read_protobuf_fields` and `protobuf_fields` build each length-delimited payload as `Vec<u8>`. `read_protobuf_fields_with` and `protobuf_fields_with` take a closure `FnMut(usize) -> L` where `L: AsMut<[u8]>`. The payload length is known before its bytes are read, so the closure returns that many bytes and `AsMut<[u8]>` exposes all of them. Capture an allocator in the closure when the buffer needs one. A slice read stays borrowed and does not use a closure.
 
 ### Writing Fields
 

@@ -58,7 +58,8 @@
 //!
 //! - [`Field<L>`]: Represents a raw protobuf field with a field number and value.
 //!   The `L` type parameter represents the type used for length-delimited values
-//!   (`LenBuf`, such as `Vec<u8>` or `Box<[u8]>`, or `&'a [u8]` for a slice read).
+//!   (`Vec<u8>` from the streaming readers, a buffer returned by the caller's
+//!   closure, or `&'a [u8]` for a slice read).
 //! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
 //!   - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64,
 //!     Bool, Enum)
@@ -86,23 +87,22 @@
 //! The library provides several traits for reading protobuf fields from different sources:
 //!
 //! - [`IteratorExtProtobuf`]: Read fields from `Iterator<Item = u8>`
-//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`, `Box<[u8]>`)
+//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] from `protobuf_fields_with`
 //! - [`TryIteratorExtProtobuf`]: Read fields from
 //!   `Iterator<Item = Result<u8, E>>`
-//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`, `Box<[u8]>`)
+//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] from `protobuf_fields_with`
 //! - [`AsRefExtProtobuf`]: Read fields from `AsRef<[u8]>` types
 //!   (slices, arrays, etc.)
 //!   - Output: [`Field<&[u8]>`] - Len values are borrowed `&[u8]` slices (zero-copy)
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types
-//!   - Output: [`Field<L>`] where `L: LenBuf` (provided: `Vec<u8>`, `Box<[u8]>`)
+//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] from `read_protobuf_fields_with`
 //!
-//! [`LenBuf`] is the buffer trait for those streaming readers. The payload length
-//! is known before its bytes are read. `with_len` allocates that many bytes with
-//! the allocator the caller passes, and [`AsMut<[u8]>`](::std::convert::AsMut)
-//! exposes all of them. `Vec<u8>` and `Box<[u8]>` implement it with `Alloc = ()`
-//! and need no extra feature. `read_protobuf_fields_in` and `protobuf_fields_in`
-//! take that allocator instance. A custom allocator (`Vec<u8, A>` or `Box<[u8], A>`)
-//! requires the `nightly` feature. Slice reads do not use this trait.
+//! `read_protobuf_fields_with` and `protobuf_fields_with` take `FnMut(usize) -> L`
+//! where `L: AsMut<[u8]>`. The payload length is known before its bytes are read.
+//! The closure returns that many initialized bytes, and
+//! [`AsMut<[u8]>`](::std::convert::AsMut) exposes all of them. Capture an allocator
+//! in the closure when the buffer needs one. `read_protobuf_fields` and
+//! `protobuf_fields` build `Vec<u8>` and take no closure. Slice reads do not use one.
 //!
 //! ## Writing Traits
 //!
@@ -126,14 +126,6 @@
 //! - Field number limits: [`MIN_FIELD_NUMBER`], [`MAX_FIELD_NUMBER`]
 //! - Size limits: [`MAX_MESSAGE_SIZE`], [`MAX_STRING_SIZE`], [`MAX_VARINT_BYTES`]
 //! - Wire format constants: [`FIXED32_BYTES`], [`FIXED64_BYTES`], etc.
-//!
-//! ## Feature Flags
-//!
-//! - `nightly`: [`LenBuf`] for `Vec<u8, A>` and `Box<[u8], A>`. Enable this feature
-//!   to pass an allocator instance into `with_len`. `Vec<u8>` and `Box<[u8]>` do not need it.
-//!
-#![cfg_attr(feature = "nightly", feature(allocator_api, doc_cfg))]
-#![cfg_attr(feature = "nightly", allow(stable_features))]
 
 pub(crate) mod field;
 pub(crate) mod field_number;
@@ -142,7 +134,7 @@ pub(crate) mod varint;
 pub(crate) mod wire_format;
 
 pub use self::field::{
-    AsRefExtProtobuf, Field, FieldValue, IteratorExtProtobuf, LenBuf, ProtobufFieldIterator,
+    AsRefExtProtobuf, Field, FieldValue, IteratorExtProtobuf, ProtobufFieldIterator,
     ProtobufFieldIteratorFromBytes, ProtobufFieldSliceIterator, ReadExtProtobuf,
     TryIteratorExtProtobuf, WriteExtProtobuf,
 };

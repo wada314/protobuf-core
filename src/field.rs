@@ -25,11 +25,9 @@ use crate::tag::Tag;
 use crate::varint::Varint;
 use crate::wire_format::WireType;
 
-mod len_buf;
 pub(crate) mod read;
 pub(crate) mod write;
 
-pub use self::len_buf::LenBuf;
 pub use self::read::{
     AsRefExtProtobuf, IteratorExtProtobuf, ProtobufFieldIterator, ProtobufFieldIteratorFromBytes,
     ProtobufFieldSliceIterator, ReadExtProtobuf, TryIteratorExtProtobuf,
@@ -43,10 +41,9 @@ pub use self::write::WriteExtProtobuf;
 /// based on the field's schema definition.
 ///
 /// `L` is the type for length-delimited values (Len variant).
-///  - Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf).
-///    `Vec<u8>` and `Box<[u8]>` are always implemented (`Alloc = ()`). A custom
-///    allocator (`Vec<u8, A>` or `Box<[u8], A>`) requires the `nightly` feature.
-///    Pass that allocator to `read_protobuf_fields_in` or `protobuf_fields_in`.
+///  - Streaming readers (`Read`, byte iterators) default to `Vec<u8>`.
+///    `read_protobuf_fields_with` and `protobuf_fields_with` take
+///    `FnMut(usize) -> L` with `L: AsMut<[u8]>` and call it once per payload.
 ///  - Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
@@ -162,10 +159,9 @@ impl<L> FieldValue<L> {
 /// The caller must interpret the value based on the message schema.
 ///
 /// `L` is the type for length-delimited values (FieldValue::Len).
-/// Streaming readers (`Read`, byte iterators) use any [`LenBuf`](crate::LenBuf).
-/// `Vec<u8>` and `Box<[u8]>` are always implemented (`Alloc = ()`). A custom
-/// allocator (`Vec<u8, A>` or `Box<[u8], A>`) requires the `nightly` feature.
-/// Pass that allocator to `read_protobuf_fields_in` or `protobuf_fields_in`.
+/// Streaming readers (`Read`, byte iterators) default to `Vec<u8>`.
+/// `read_protobuf_fields_with` and `protobuf_fields_with` take
+/// `FnMut(usize) -> L` with `L: AsMut<[u8]>` and call it once per payload.
 /// Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
