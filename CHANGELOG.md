@@ -9,12 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `ReadExtProtobuf::read_protobuf_fields_with`, `IteratorExtProtobuf::protobuf_fields_with`, and `TryIteratorExtProtobuf::protobuf_fields_with`. Each takes `FnMut(usize) -> L` where `L: AsMut<[u8]>`. The closure is called once per length-delimited field with the payload length, and returns that many initialized bytes. The readers write the payload through `AsMut::as_mut`. The closure is stored by value on the iterator. Capture an allocator in the closure when the buffer needs one.
-- The streaming iterator types take that closure as a second type parameter, defaulting to `fn(usize) -> Vec<u8>`. `read_protobuf_fields` and `protobuf_fields` still yield `Field<Vec<u8>>`.
-
-### Changed
-
-- `AsRefExtProtobuf` is unchanged and still returns `Field<&[u8]>`.
+- `ReadExtProtobuf::read_protobuf_fields_with`, `IteratorExtProtobuf::protobuf_fields_with`, and `TryIteratorExtProtobuf::protobuf_fields_with`. Each takes `FnMut(usize) -> Result<L, ProtobufError>` where `L: AsMut<[u8]>`. The closure is called once per length-delimited field with the payload length. It returns at least that many initialized bytes. The reader writes the first `len` bytes and leaves any suffix. A shorter buffer panics in every build. Spare capacity does not count. `Err` fails that field. The closure is stored by value on the iterator. Capture an allocator in the closure when the buffer needs one. If the payload bytes run out, that buffer is dropped before the reader returns `UnexpectedEof`.
+- The streaming iterator types take that closure as a second type parameter, defaulting to `fn(usize) -> Result<Vec<u8>, ProtobufError>`. `read_protobuf_fields` and `protobuf_fields` still yield `Field<Vec<u8>>`.
+- `AsRefExtProtobuf` still returns `Field<&[u8]>`.
 
 ## [0.4.0]
 

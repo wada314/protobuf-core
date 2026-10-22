@@ -43,7 +43,7 @@ pub use self::write::WriteExtProtobuf;
 /// `L` is the type for length-delimited values (Len variant).
 ///  - Streaming readers (`Read`, byte iterators) default to `Vec<u8>`.
 ///    `read_protobuf_fields_with` and `protobuf_fields_with` take
-///    `FnMut(usize) -> L` with `L: AsMut<[u8]>` and call it once per payload.
+///    `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>` and call it once per payload.
 ///  - Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
@@ -161,7 +161,7 @@ impl<L> FieldValue<L> {
 /// `L` is the type for length-delimited values (FieldValue::Len).
 /// Streaming readers (`Read`, byte iterators) default to `Vec<u8>`.
 /// `read_protobuf_fields_with` and `protobuf_fields_with` take
-/// `FnMut(usize) -> L` with `L: AsMut<[u8]>` and call it once per payload.
+/// `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>` and call it once per payload.
 /// Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {

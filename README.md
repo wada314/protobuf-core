@@ -35,7 +35,7 @@ let fields: Vec<Field<&[u8]>> = bytes
     .unwrap();
 ```
 
-`read_protobuf_fields` and `protobuf_fields` build each length-delimited payload as `Vec<u8>`. `read_protobuf_fields_with` and `protobuf_fields_with` take a closure `FnMut(usize) -> L` where `L: AsMut<[u8]>`. The payload length is known before its bytes are read, so the closure returns that many bytes and `AsMut<[u8]>` exposes all of them. Capture an allocator in the closure when the buffer needs one. A slice read stays borrowed and does not use a closure.
+The example above is `AsRefExtProtobuf`: `read_protobuf_fields` borrows `Field<&[u8]>`. `ReadExtProtobuf::read_protobuf_fields` and `IteratorExtProtobuf::protobuf_fields` (also `TryIteratorExtProtobuf::protobuf_fields`) build each length-delimited payload as `Vec<u8>`. Their `*_with` methods take `FnMut(usize) -> Result<L, ProtobufError>` where `L: AsMut<[u8]>`. The payload length is known before its bytes are read. The closure returns at least that many initialized bytes, and the reader overwrites the first `len` of them. A shorter buffer panics. `Vec::with_capacity(len)` is too short, because `AsMut<[u8]>` exposes the length, not the capacity. Capture an allocator in the closure when the buffer needs one. An error from another type converts with `map_err(Into::into)` inside the closure.
 
 ### Writing Fields
 

@@ -2,7 +2,7 @@
 //!
 //! This module provides low-level utilities for reading raw protobuf fields from various sources.
 //! Streaming sources (`std::io::Read` and byte iterators) build each length-delimited
-//! payload with a closure `FnMut(usize) -> L`. Slice sources borrow them as `&[u8]`.
+//! payload with a closure `FnMut(usize) -> Result<L>`. Slice sources borrow them as `&[u8]`.
 
 use crate::field::{Field, FieldValue};
 use crate::tag::Tag;
@@ -15,26 +15,29 @@ use ::std::io::Read;
 /// `Vec<u8>` payload of `len` initialized bytes.
 ///
 /// [`ReadExtProtobuf::read_protobuf_fields`] and [`protobuf_fields`](IteratorExtProtobuf::protobuf_fields)
-/// pass this function. Its type is `fn(usize) -> Vec<u8>`.
-fn vec_payload(len: usize) -> Vec<u8> {
-    vec![0u8; len]
+/// pass this function. Its type is `fn(usize) -> Result<Vec<u8>>`.
+fn vec_payload(len: usize) -> Result<Vec<u8>> {
+    Ok(vec![0u8; len])
 }
 
 /// Call `make` for one length-delimited payload.
 ///
-/// `make` returns `length` initialized bytes. [`AsMut::as_mut`](AsMut::as_mut) is that whole slice.
-fn make_payload<L, F>(make: &mut F, length: usize) -> L
+/// `make` returns at least `length` initialized bytes. The reader overwrites the
+/// first `length` bytes and leaves any suffix as the closure initialized it.
+/// A shorter buffer panics in every build. Spare capacity does not count:
+/// [`AsMut::as_mut`](AsMut::as_mut) exposes the slice length.
+fn make_payload<L, F>(make: &mut F, length: usize) -> Result<L>
 where
-    F: FnMut(usize) -> L,
+    F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
-    let mut payload = make(length);
-    debug_assert_eq!(
-        payload.as_mut().len(),
-        length,
-        "length-delimited buffer must be exactly {length} bytes"
+    let mut payload = make(length)?;
+    let got = payload.as_mut().len();
+    assert!(
+        got >= length,
+        "length-delimited buffer length {got} is shorter than payload length {length}",
     );
-    payload
+    Ok(payload)
 }
 
 // ============================================================================
@@ -126,7 +129,7 @@ struct IteratorReader<'a, I, F>(&'a mut I, &'a mut F);
 impl<'a, I, F, L> FieldValueReader<L> for IteratorReader<'a, I, F>
 where
     I: Iterator<Item = u8>,
-    F: FnMut(usize) -> L,
+    F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
@@ -147,8 +150,8 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        let mut payload = make_payload(self.1, length);
-        for byte in payload.as_mut() {
+        let mut payload = make_payload(self.1, length)?;
+        for byte in &mut payload.as_mut()[..length] {
             *byte = self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
         }
         Ok(payload)
@@ -157,9 +160,9 @@ where
 
 /// Iterator for reading raw protobuf fields sequentially from a byte iterator.
 ///
-/// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Vec<u8>`.
+/// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Result<Vec<u8>>`.
 /// `F` is called once per length-delimited field.
-pub struct ProtobufFieldIteratorFromBytes<I, F = fn(usize) -> Vec<u8>> {
+pub struct ProtobufFieldIteratorFromBytes<I, F = fn(usize) -> Result<Vec<u8>>> {
     iter: I,
     make: F,
 }
@@ -167,7 +170,7 @@ pub struct ProtobufFieldIteratorFromBytes<I, F = fn(usize) -> Vec<u8>> {
 impl<I, F, L> Iterator for ProtobufFieldIteratorFromBytes<I, F>
 where
     I: Iterator<Item = u8>,
-    F: FnMut(usize) -> L,
+    F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
     type Item = Result<Field<L>>;
@@ -212,15 +215,21 @@ pub trait IteratorExtProtobuf {
     /// Convert this iterator into an iterator of protobuf fields.
     ///
     /// `make` is called once for each length-delimited field. `len` is the payload
-    /// length from the wire. Return that many initialized bytes.
-    /// [`AsMut::as_mut`](AsMut::as_mut) must be a slice of that length; the reader
-    /// overwrites it. Varint and fixed-width fields do not call `make`.
+    /// length from the wire. Return [`Ok`](Result::Ok) with at least that many
+    /// initialized bytes. The reader overwrites the first `len` bytes and leaves
+    /// any suffix as `make` initialized it. [`AsMut::as_mut`](AsMut::as_mut)
+    /// exposes the buffer length, not its capacity, so `Vec::with_capacity(len)`
+    /// is too short and panics. A buffer shorter than `len` panics in every build.
+    /// Return [`Err`](Result::Err) to fail the field. Varint and fixed-width fields
+    /// do not call `make`.
     ///
-    /// Capture an allocator in `make` when the buffer needs one.
+    /// If the payload bytes run out, the buffer is dropped and the reader returns
+    /// [`UnexpectedEof`](ProtobufError::UnexpectedEof). Capture an allocator in
+    /// `make` when the buffer needs one.
     fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromBytes<Self, F>
     where
         Self: Sized,
-        F: FnMut(usize) -> L,
+        F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
 }
 
@@ -231,7 +240,7 @@ where
     fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromBytes<Self, F>
     where
         Self: Sized,
-        F: FnMut(usize) -> L,
+        F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>,
     {
         ProtobufFieldIteratorFromBytes { iter: self, make }
@@ -249,7 +258,7 @@ impl<'a, I, E, F, L> FieldValueReader<L> for TryIteratorReader<'a, I, F>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
-    F: FnMut(usize) -> L,
+    F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
@@ -274,8 +283,8 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        let mut payload = make_payload(self.1, length);
-        for byte in payload.as_mut() {
+        let mut payload = make_payload(self.1, length)?;
+        for byte in &mut payload.as_mut()[..length] {
             *byte = self
                 .0
                 .next()
@@ -288,9 +297,9 @@ where
 
 /// Iterator for reading raw protobuf fields sequentially from a byte iterator that yields `Result<u8, E>`.
 ///
-/// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Vec<u8>`.
+/// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Result<Vec<u8>>`.
 /// `F` is called once per length-delimited field.
-pub struct ProtobufFieldIteratorFromTryBytes<I, F = fn(usize) -> Vec<u8>> {
+pub struct ProtobufFieldIteratorFromTryBytes<I, F = fn(usize) -> Result<Vec<u8>>> {
     iter: I,
     make: F,
 }
@@ -299,7 +308,7 @@ impl<I, E, F, L> Iterator for ProtobufFieldIteratorFromTryBytes<I, F>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
-    F: FnMut(usize) -> L,
+    F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
     type Item = Result<Field<L>>;
@@ -348,15 +357,21 @@ pub trait TryIteratorExtProtobuf {
     /// Convert this iterator into an iterator of protobuf fields.
     ///
     /// `make` is called once for each length-delimited field. `len` is the payload
-    /// length from the wire. Return that many initialized bytes.
-    /// [`AsMut::as_mut`](AsMut::as_mut) must be a slice of that length; the reader
-    /// overwrites it. Varint and fixed-width fields do not call `make`.
+    /// length from the wire. Return [`Ok`](Result::Ok) with at least that many
+    /// initialized bytes. The reader overwrites the first `len` bytes and leaves
+    /// any suffix as `make` initialized it. [`AsMut::as_mut`](AsMut::as_mut)
+    /// exposes the buffer length, not its capacity, so `Vec::with_capacity(len)`
+    /// is too short and panics. A buffer shorter than `len` panics in every build.
+    /// Return [`Err`](Result::Err) to fail the field. Varint and fixed-width fields
+    /// do not call `make`.
     ///
-    /// Capture an allocator in `make` when the buffer needs one.
+    /// If the payload bytes run out, the buffer is dropped and the reader returns
+    /// [`UnexpectedEof`](ProtobufError::UnexpectedEof). Capture an allocator in
+    /// `make` when the buffer needs one.
     fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromTryBytes<Self, F>
     where
         Self: Sized,
-        F: FnMut(usize) -> L,
+        F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
 }
 
@@ -368,7 +383,7 @@ where
     fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromTryBytes<Self, F>
     where
         Self: Sized,
-        F: FnMut(usize) -> L,
+        F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>,
     {
         ProtobufFieldIteratorFromTryBytes { iter: self, make }
@@ -385,7 +400,7 @@ struct ReadReader<'a, R, F>(&'a mut R, &'a mut F);
 impl<'a, R, F, L> FieldValueReader<L> for ReadReader<'a, R, F>
 where
     R: Read,
-    F: FnMut(usize) -> L,
+    F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
@@ -400,17 +415,17 @@ where
     }
 
     fn read_length_delimited(&mut self, length: usize) -> Result<L> {
-        let mut payload = make_payload(self.1, length);
-        self.0.read_exact(payload.as_mut())?;
+        let mut payload = make_payload(self.1, length)?;
+        self.0.read_exact(&mut payload.as_mut()[..length])?;
         Ok(payload)
     }
 }
 
 /// Iterator for reading raw protobuf fields sequentially from a reader.
 ///
-/// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Vec<u8>`.
+/// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Result<Vec<u8>>`.
 /// `F` is called once per length-delimited field.
-pub struct ProtobufFieldIterator<R, F = fn(usize) -> Vec<u8>> {
+pub struct ProtobufFieldIterator<R, F = fn(usize) -> Result<Vec<u8>>> {
     reader: R,
     make: F,
 }
@@ -418,7 +433,7 @@ pub struct ProtobufFieldIterator<R, F = fn(usize) -> Vec<u8>> {
 impl<R, F, L> Iterator for ProtobufFieldIterator<R, F>
 where
     R: Read,
-    F: FnMut(usize) -> L,
+    F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
     type Item = Result<Field<L>>;
@@ -478,11 +493,17 @@ pub trait ReadExtProtobuf {
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
     /// `make` is called once for each length-delimited field. `len` is the payload
-    /// length from the wire. Return that many initialized bytes.
-    /// [`AsMut::as_mut`](AsMut::as_mut) must be a slice of that length; the reader
-    /// overwrites it. Varint and fixed-width fields do not call `make`.
+    /// length from the wire. Return [`Ok`](Result::Ok) with at least that many
+    /// initialized bytes. The reader overwrites the first `len` bytes and leaves
+    /// any suffix as `make` initialized it. [`AsMut::as_mut`](AsMut::as_mut)
+    /// exposes the buffer length, not its capacity, so `Vec::with_capacity(len)`
+    /// is too short and panics. A buffer shorter than `len` panics in every build.
+    /// Return [`Err`](Result::Err) to fail the field. Varint and fixed-width fields
+    /// do not call `make`.
     ///
-    /// Capture an allocator in `make` when the buffer needs one.
+    /// If the payload bytes run out, the buffer is dropped and the reader returns
+    /// [`UnexpectedEof`](ProtobufError::UnexpectedEof). Capture an allocator in
+    /// `make` when the buffer needs one.
     ///
     /// # Examples
     ///
@@ -491,7 +512,7 @@ pub trait ReadExtProtobuf {
     ///
     /// let reader = &[0x0A, 0x03, b'H', b'e', b'l'][..];
     /// let fields: Vec<_> = reader
-    ///     .read_protobuf_fields_with(|len| vec![0u8; len].into_boxed_slice())
+    ///     .read_protobuf_fields_with(|len| Ok(vec![0u8; len].into_boxed_slice()))
     ///     .collect::<Result<Vec<_>, _>>()
     ///     .unwrap();
     /// let FieldValue::Len(data) = &fields[0].value else {
@@ -502,7 +523,7 @@ pub trait ReadExtProtobuf {
     fn read_protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIterator<Self, F>
     where
         Self: Sized,
-        F: FnMut(usize) -> L,
+        F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
 }
 
@@ -513,7 +534,7 @@ where
     fn read_protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIterator<Self, F>
     where
         Self: Sized,
-        F: FnMut(usize) -> L,
+        F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>,
     {
         ProtobufFieldIterator { reader: self, make }
@@ -1273,8 +1294,8 @@ mod len_payload {
         }
     }
 
-    fn bytes_buf(len: usize) -> Bytes {
-        Bytes(vec![0; len])
+    fn bytes_buf(len: usize) -> crate::Result<Bytes> {
+        Ok(Bytes(vec![0; len]))
     }
 
     fn len_message(payload: &[u8]) -> Vec<u8> {
@@ -1367,7 +1388,7 @@ mod len_payload {
 
     fn assert_box(message: &[u8], expected: &[u8]) {
         let from_read = Cursor::new(message.to_vec())
-            .read_protobuf_fields_with(|len| vec![0u8; len].into_boxed_slice())
+            .read_protobuf_fields_with(|len| Ok(vec![0u8; len].into_boxed_slice()))
             .next()
             .unwrap()
             .unwrap();
@@ -1379,7 +1400,7 @@ mod len_payload {
         let from_iter = message
             .iter()
             .copied()
-            .protobuf_fields_with(|len| vec![0u8; len].into_boxed_slice())
+            .protobuf_fields_with(|len| Ok(vec![0u8; len].into_boxed_slice()))
             .next()
             .unwrap()
             .unwrap();
@@ -1390,7 +1411,7 @@ mod len_payload {
 
         let from_try = Cursor::new(message.to_vec())
             .bytes()
-            .protobuf_fields_with(|len| vec![0u8; len].into_boxed_slice())
+            .protobuf_fields_with(|len| Ok(vec![0u8; len].into_boxed_slice()))
             .next()
             .unwrap()
             .unwrap();
@@ -1446,9 +1467,11 @@ mod len_payload {
         let id = 7u64;
 
         let from_read = Cursor::new(message.clone())
-            .read_protobuf_fields_with(|len| Tagged {
-                id,
-                data: vec![0; len],
+            .read_protobuf_fields_with(|len| {
+                Ok(Tagged {
+                    id,
+                    data: vec![0; len],
+                })
             })
             .collect::<crate::Result<Vec<_>>>()
             .unwrap();
@@ -1457,9 +1480,11 @@ mod len_payload {
         let from_iter = message
             .clone()
             .into_iter()
-            .protobuf_fields_with(|len| Tagged {
-                id,
-                data: vec![0; len],
+            .protobuf_fields_with(|len| {
+                Ok(Tagged {
+                    id,
+                    data: vec![0; len],
+                })
             })
             .collect::<crate::Result<Vec<_>>>()
             .unwrap();
@@ -1467,9 +1492,11 @@ mod len_payload {
 
         let from_try = Cursor::new(message)
             .bytes()
-            .protobuf_fields_with(|len| Tagged {
-                id,
-                data: vec![0; len],
+            .protobuf_fields_with(|len| {
+                Ok(Tagged {
+                    id,
+                    data: vec![0; len],
+                })
             })
             .collect::<crate::Result<Vec<_>>>()
             .unwrap();
@@ -1483,7 +1510,7 @@ mod len_payload {
         let fields = Cursor::new(mixed)
             .read_protobuf_fields_with(|len| {
                 calls += 1;
-                Bytes(vec![0; len])
+                Ok(Bytes(vec![0; len]))
             })
             .collect::<crate::Result<Vec<_>>>()
             .unwrap();
@@ -1495,5 +1522,103 @@ mod len_payload {
         };
         assert_eq!(data, b"Hel");
         assert_eq!(fields[1].field_number.as_u32(), 2);
+    }
+
+    #[test]
+    fn closure_error_fails_the_field() {
+        let input = [0x0A, 0x03, b'H', b'e', b'l'];
+        let error = Cursor::new(input)
+            .read_protobuf_fields_with(|_len| -> crate::Result<Vec<u8>> {
+                Err(ProtobufError::UnexpectedEof)
+            })
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(error, ProtobufError::UnexpectedEof));
+    }
+
+    #[derive(Debug)]
+    struct Spare {
+        data: Vec<u8>,
+    }
+
+    impl AsMut<[u8]> for Spare {
+        fn as_mut(&mut self) -> &mut [u8] {
+            &mut self.data
+        }
+    }
+
+    fn spare(len: usize) -> crate::Result<Spare> {
+        Ok(Spare {
+            data: vec![0xAB; len + 4],
+        })
+    }
+
+    fn assert_spare(fields: &[Field<Spare>]) {
+        assert_eq!(fields.len(), 2);
+        let FieldValue::Len(buf) = &fields[0].value else {
+            panic!("expected len");
+        };
+        assert_eq!(&buf.data[..3], b"Hel");
+        assert_eq!(&buf.data[3..], &[0xAB; 4]);
+        let FieldValue::Varint(varint) = &fields[1].value else {
+            panic!("expected varint");
+        };
+        assert_eq!(varint.to_uint64(), 1);
+        assert_eq!(fields[1].field_number.as_u32(), 2);
+    }
+
+    #[test]
+    fn longer_buffer_keeps_the_next_field_and_the_suffix() {
+        let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
+
+        let from_read = Cursor::new(message)
+            .read_protobuf_fields_with(spare)
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_spare(&from_read);
+
+        let from_iter = message
+            .into_iter()
+            .protobuf_fields_with(spare)
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_spare(&from_iter);
+
+        let from_try = Cursor::new(message)
+            .bytes()
+            .protobuf_fields_with(spare)
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_spare(&from_try);
+    }
+
+    #[test]
+    #[should_panic(expected = "shorter than payload length")]
+    fn short_buffer_panics_on_read() {
+        let input = [0x0A, 0x03, b'H', b'e', b'l'];
+        let _ = Cursor::new(input)
+            .read_protobuf_fields_with(|len| Ok(Vec::<u8>::with_capacity(len)))
+            .next();
+    }
+
+    #[test]
+    #[should_panic(expected = "shorter than payload length")]
+    fn short_buffer_panics_on_byte_iterator() {
+        let input = [0x0A, 0x03, b'H', b'e', b'l'];
+        let _ = input
+            .into_iter()
+            .protobuf_fields_with(|len| Ok(Vec::<u8>::with_capacity(len)))
+            .next();
+    }
+
+    #[test]
+    #[should_panic(expected = "shorter than payload length")]
+    fn short_buffer_panics_on_try_iterator() {
+        let input = [0x0A, 0x03, b'H', b'e', b'l'];
+        let _ = Cursor::new(input)
+            .bytes()
+            .protobuf_fields_with(|len| Ok(Vec::<u8>::with_capacity(len)))
+            .next();
     }
 }
