@@ -5,6 +5,7 @@
 //! Slice readers borrow the input and do not use this trait.
 
 use crate::{ProtobufError, Result};
+use ::std::convert::AsMut;
 use ::std::io::Read;
 
 #[cfg(feature = "nightly")]
@@ -13,11 +14,11 @@ use ::std::alloc::Allocator;
 /// Buffer that can hold one length-delimited protobuf payload.
 ///
 /// The payload length is known before its bytes are read. Implement
-/// [`with_len`](LenBuf::with_len) and [`as_mut_slice`](LenBuf::as_mut_slice).
-/// `with_len` allocates exactly that many initialized bytes, and `as_mut_slice`
-/// returns all of them. The slice length is the payload length for the whole
-/// read. The `from_*` methods have defaults that allocate with `with_len` and
-/// write into that slice.
+/// [`with_len`](LenBuf::with_len) and [`AsMut<[u8]>`](::std::convert::AsMut).
+/// `with_len` allocates exactly that many initialized bytes, and
+/// [`as_mut`](::std::convert::AsMut::as_mut) returns all of them. The slice
+/// length is the payload length for the whole read. The `from_*` methods have
+/// defaults that allocate with `with_len` and write into that slice.
 ///
 /// `Vec<u8>` and `Box<[u8]>` implement this trait. Both allocate `len` bytes
 /// and `from_read` overwrites them with `read_exact`.
@@ -34,13 +35,15 @@ use ::std::alloc::Allocator;
 ///
 /// struct Bytes(Vec<u8>);
 ///
+/// impl ::std::convert::AsMut<[u8]> for Bytes {
+///     fn as_mut(&mut self) -> &mut [u8] {
+///         &mut self.0
+///     }
+/// }
+///
 /// impl LenBuf for Bytes {
 ///     fn with_len(len: usize) -> Self {
 ///         Self(vec![0; len])
-///     }
-///
-///     fn as_mut_slice(&mut self) -> &mut [u8] {
-///         &mut self.0
 ///     }
 /// }
 ///
@@ -55,18 +58,14 @@ use ::std::alloc::Allocator;
 /// };
 /// assert_eq!(data, b"Hel");
 /// ```
-pub trait LenBuf: Sized {
+pub trait LenBuf: Sized + AsMut<[u8]> {
     /// Allocate a buffer of exactly `len` initialized bytes.
     ///
-    /// The bytes are overwritten by [`from_read`](LenBuf::from_read),
+    /// [`AsMut::as_mut`](::std::convert::AsMut::as_mut) returns a slice of this
+    /// length. The bytes are overwritten by [`from_read`](LenBuf::from_read),
     /// [`from_iter`](LenBuf::from_iter), and [`from_try_iter`](LenBuf::from_try_iter).
     /// Zero is a valid initial value.
     fn with_len(len: usize) -> Self;
-
-    /// The full payload buffer.
-    ///
-    /// The length of this slice is the `len` passed to [`with_len`](LenBuf::with_len).
-    fn as_mut_slice(&mut self) -> &mut [u8];
 
     /// Read exactly `len` payload bytes from `reader`.
     ///
@@ -77,7 +76,7 @@ pub trait LenBuf: Sized {
         R: Read,
     {
         let mut buf = Self::with_len(len);
-        reader.read_exact(buf.as_mut_slice())?;
+        reader.read_exact(buf.as_mut())?;
         Ok(buf)
     }
 
@@ -99,7 +98,7 @@ pub trait LenBuf: Sized {
         E: Into<ProtobufError>,
     {
         let mut buf = Self::with_len(len);
-        for slot in buf.as_mut_slice() {
+        for slot in buf.as_mut() {
             *slot = iter
                 .next()
                 .ok_or(ProtobufError::UnexpectedEof)?
@@ -133,10 +132,6 @@ impl LenBuf for Vec<u8> {
     fn with_len(len: usize) -> Self {
         vec![0u8; len]
     }
-
-    fn as_mut_slice(&mut self) -> &mut [u8] {
-        self
-    }
 }
 
 /// Length-delimited payload stored in `Box<[u8]>`.
@@ -148,10 +143,6 @@ impl LenBuf for Vec<u8> {
 impl LenBuf for Box<[u8]> {
     fn with_len(len: usize) -> Self {
         vec![0u8; len].into_boxed_slice()
-    }
-
-    fn as_mut_slice(&mut self) -> &mut [u8] {
-        self
     }
 }
 
@@ -173,10 +164,6 @@ where
         let mut data = Vec::with_capacity_in(len, A::default());
         data.resize(len, 0);
         data
-    }
-
-    fn as_mut_slice(&mut self) -> &mut [u8] {
-        self
     }
 }
 
@@ -200,10 +187,6 @@ where
         data.resize(len, 0);
         data.into_boxed_slice()
     }
-
-    fn as_mut_slice(&mut self) -> &mut [u8] {
-        self
-    }
 }
 
 #[cfg(test)]
@@ -212,21 +195,24 @@ mod tests {
     use crate::field::read::{IteratorExtProtobuf, ReadExtProtobuf, TryIteratorExtProtobuf};
     use crate::varint::Varint;
     use crate::{FieldValue, ProtobufError};
+    use ::std::convert::AsMut;
     use ::std::io::{Cursor, ErrorKind, Read};
 
     pub(super) const LARGE_LEN: usize = 8200;
 
-    /// Custom buffer that uses only the required `LenBuf` methods.
+    /// Custom buffer that uses only `with_len` and [`AsMut<[u8]>`](::std::convert::AsMut).
     #[derive(Debug, PartialEq, Eq)]
     struct Bytes(Vec<u8>);
+
+    impl AsMut<[u8]> for Bytes {
+        fn as_mut(&mut self) -> &mut [u8] {
+            &mut self.0
+        }
+    }
 
     impl LenBuf for Bytes {
         fn with_len(len: usize) -> Self {
             Self(vec![0; len])
-        }
-
-        fn as_mut_slice(&mut self) -> &mut [u8] {
-            &mut self.0
         }
     }
 
@@ -411,16 +397,18 @@ mod tests {
         direct: bool,
     }
 
+    impl AsMut<[u8]> for OwnedBytes {
+        fn as_mut(&mut self) -> &mut [u8] {
+            &mut self.data
+        }
+    }
+
     impl LenBuf for OwnedBytes {
         fn with_len(len: usize) -> Self {
             Self {
                 data: vec![0; len],
                 direct: false,
             }
-        }
-
-        fn as_mut_slice(&mut self) -> &mut [u8] {
-            &mut self.data
         }
 
         fn from_read<R>(reader: &mut R, len: usize) -> crate::Result<Self>

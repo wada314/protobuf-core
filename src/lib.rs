@@ -98,7 +98,7 @@
 //!
 //! [`LenBuf`] is the buffer trait for those streaming readers. The payload length
 //! is known before its bytes are read. `with_len` allocates that many bytes and
-//! `as_mut_slice` returns all of them. `Vec<u8>` and `Box<[u8]>` implement it with
+//! [`AsMut<[u8]>`](::std::convert::AsMut) exposes all of them. `Vec<u8>` and `Box<[u8]>` implement it with
 //! no extra feature. A custom allocator (`Vec<u8, A>` or `Box<[u8], A>`) requires
 //! the `nightly` feature. Slice reads do not use this trait.
 //!
