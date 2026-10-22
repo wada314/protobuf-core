@@ -57,8 +57,9 @@
 //! ### Fields
 //!
 //! - [`Field<L>`]: Represents a raw protobuf field with a field number and value.
-//!   The `L` type parameter represents the type used for length-delimited values (e.g., `Vec<u8>`
-//!   for owned data, `&'a [u8]` for borrowed data).
+//!   The `L` type parameter represents the type used for length-delimited values
+//!   (`Vec<u8>` from the streaming readers, a buffer returned by the caller's
+//!   closure, or `&'a [u8]` for a slice read).
 //! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
 //!   - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64,
 //!     Bool, Enum)
@@ -86,15 +87,23 @@
 //! The library provides several traits for reading protobuf fields from different sources:
 //!
 //! - [`IteratorExtProtobuf`]: Read fields from `Iterator<Item = u8>`
-//!   - Output: [`Field<Vec<u8>>`] - Len values are owned `Vec<u8>`
+//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] from `protobuf_fields_with`
 //! - [`TryIteratorExtProtobuf`]: Read fields from
 //!   `Iterator<Item = Result<u8, E>>`
-//!   - Output: [`Field<Vec<u8>>`] - Len values are owned `Vec<u8>`
+//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] from `protobuf_fields_with`
 //! - [`AsRefExtProtobuf`]: Read fields from `AsRef<[u8]>` types
 //!   (slices, arrays, etc.)
 //!   - Output: [`Field<&[u8]>`] - Len values are borrowed `&[u8]` slices (zero-copy)
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types
-//!   - Output: [`Field<Vec<u8>>`] - Len values are owned `Vec<u8>`
+//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] from `read_protobuf_fields_with`
+//!
+//! `read_protobuf_fields_with` and `protobuf_fields_with` take
+//! `FnMut(usize) -> Result<L>` where `L: AsMut<[u8]>`. The payload length is known
+//! before its bytes are read. The closure returns at least that many initialized
+//! bytes. The reader overwrites the first `len` of them and leaves any suffix.
+//! A shorter buffer panics. Capture an allocator in the closure when the buffer
+//! needs one. `read_protobuf_fields` and `protobuf_fields` build `Vec<u8>` and
+//! take no closure. Slice reads do not use one.
 //!
 //! ## Writing Traits
 //!

@@ -41,8 +41,10 @@ pub use self::write::WriteExtProtobuf;
 /// based on the field's schema definition.
 ///
 /// `L` is the type for length-delimited values (Len variant).
-///  - For owned data (from `std::io::Read`): use `Vec<u8>`
-///  - For borrowed data (from slices): use `&'a [u8]`
+///  - Streaming readers (`Read`, byte iterators) default to `Vec<u8>`.
+///    `read_protobuf_fields_with` and `protobuf_fields_with` take
+///    `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>` and call it once per payload.
+///  - Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
     /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`)
@@ -157,8 +159,10 @@ impl<L> FieldValue<L> {
 /// The caller must interpret the value based on the message schema.
 ///
 /// `L` is the type for length-delimited values (FieldValue::Len).
-/// For owned data (from `std::io::Read`): use `Vec<u8>`
-/// For borrowed data (from slices): use `&'a [u8]`
+/// Streaming readers (`Read`, byte iterators) default to `Vec<u8>`.
+/// `read_protobuf_fields_with` and `protobuf_fields_with` take
+/// `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>` and call it once per payload.
+/// Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
     pub field_number: FieldNumber,
