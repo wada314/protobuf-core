@@ -101,10 +101,9 @@
 //! `FnMut(usize) -> Result<L>` where `L: AsMut<[u8]>`. The payload length is known
 //! before its bytes are read. The closure returns at least that many initialized
 //! bytes. The reader overwrites the first `len` of them and leaves any suffix.
-//! A shorter buffer panics. [`AsMut<[u8]>`](::std::convert::AsMut) exposes the
-//! buffer length, not its capacity. Capture an allocator in the closure when the
-//! buffer needs one. `read_protobuf_fields` and `protobuf_fields` build `Vec<u8>`
-//! and take no closure. Slice reads do not use one.
+//! A shorter buffer panics. Capture an allocator in the closure when the buffer
+//! needs one. `read_protobuf_fields` and `protobuf_fields` build `Vec<u8>` and
+//! take no closure. Slice reads do not use one.
 //!
 //! ## Writing Traits
 //!
