@@ -105,9 +105,9 @@ where
             let data = reader.read_length_delimited(length)?;
             FieldValue::Len(data)
         }
-        _ => {
-            return Err(ProtobufError::InvalidWireType {
-                value: tag.wire_type as u8,
+        WireType::SGroup | WireType::EGroup => {
+            return Err(ProtobufError::UnsupportedGroup {
+                wire_type: tag.wire_type,
             });
         }
     };
@@ -1256,14 +1256,16 @@ mod tests {
             })
         ));
 
-        // Wire types 3 and 4 are groups. The reader rejects them.
-        for (byte, wire) in [(0x0Bu8, 3u8), (0x0C, 4)] {
+        // Wire types 3 and 4 are known group types; field readers reject them
+        // as UnsupportedGroup (not InvalidWireType).
+        use crate::wire_format::WireType;
+        for (byte, wire_type) in [(0x0Bu8, WireType::SGroup), (0x0C, WireType::EGroup)] {
             let bytes = [byte];
-            let value = match (&bytes[..]).read_protobuf_fields().next().unwrap() {
-                Err(ProtobufError::InvalidWireType { value }) => value,
-                other => panic!("expected InvalidWireType, got {other:?}"),
+            let got = match bytes[..].read_protobuf_fields().next().unwrap() {
+                Err(ProtobufError::UnsupportedGroup { wire_type }) => wire_type,
+                other => panic!("expected UnsupportedGroup, got {other:?}"),
             };
-            assert_eq!(value, wire);
+            assert_eq!(got, wire_type);
         }
     }
 }
