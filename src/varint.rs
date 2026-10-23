@@ -15,7 +15,7 @@ mod read;
 #[allow(unused_imports)]
 pub use read::{
     DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint,
-    VarintIteratorFromBytes, VarintIteratorFromTryBytes,
+    VarintIterFromBytes, VarintIterFromTryBytes,
 };
 /// A deserialized varint value.
 ///

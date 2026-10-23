@@ -95,21 +95,21 @@ impl DecodeState {
 /// Yields [`Result<Varint>`] for each varint. Stops when the input is empty or an
 /// error occurs. [`ReadExtVarint::read_varints`] returns this type around
 /// [`std::io::Bytes`].
-pub struct VarintIteratorFromTryBytes<I> {
+pub struct VarintIterFromTryBytes<I> {
     bytes: I,
 }
 
 /// Iterator that reads varints from `Iterator<Item = u8>`.
 ///
 /// Standalone return type of [`IteratorExtVarint::read_varints`]. Internally adapts
-/// each byte to `Ok` and delegates to [`VarintIteratorFromTryBytes`].
-pub struct VarintIteratorFromBytes<I> {
-    inner: VarintIteratorFromTryBytes<ToResultIterator<I>>,
+/// each byte to `Ok` and delegates to [`VarintIterFromTryBytes`].
+pub struct VarintIterFromBytes<I> {
+    inner: VarintIterFromTryBytes<ToResultIterator<I>>,
 }
 
 /// Adapts `Iterator<Item = u8>` to `Iterator<Item = Result<u8, Infallible>>`.
 ///
-/// Implementation detail of [`VarintIteratorFromBytes`]; not part of the public API.
+/// Implementation detail of [`VarintIterFromBytes`]; not part of the public API.
 pub(crate) struct ToResultIterator<I> {
     inner: I,
 }
@@ -125,7 +125,7 @@ where
     }
 }
 
-impl<I, E> VarintIteratorFromTryBytes<I>
+impl<I, E> VarintIterFromTryBytes<I>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
@@ -135,18 +135,18 @@ where
     }
 }
 
-impl<I> VarintIteratorFromBytes<I>
+impl<I> VarintIterFromBytes<I>
 where
     I: Iterator<Item = u8>,
 {
     fn new(bytes: I) -> Self {
         Self {
-            inner: VarintIteratorFromTryBytes::new(ToResultIterator { inner: bytes }),
+            inner: VarintIterFromTryBytes::new(ToResultIterator { inner: bytes }),
         }
     }
 }
 
-impl<I> Iterator for VarintIteratorFromBytes<I>
+impl<I> Iterator for VarintIterFromBytes<I>
 where
     I: Iterator<Item = u8>,
 {
@@ -157,7 +157,7 @@ where
     }
 }
 
-impl<I, E> Iterator for VarintIteratorFromTryBytes<I>
+impl<I, E> Iterator for VarintIterFromTryBytes<I>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
@@ -227,7 +227,7 @@ pub trait IteratorExtVarint {
     /// assert_eq!(varints[0].to_uint64(), 150);
     /// assert_eq!(varints[1].to_uint64(), 127);
     /// ```
-    fn read_varints(self) -> VarintIteratorFromBytes<Self>
+    fn read_varints(self) -> VarintIterFromBytes<Self>
     where
         Self: Sized + Iterator<Item = u8>;
 }
@@ -253,11 +253,11 @@ where
         state.feed(self.map(Ok::<u8, ::std::convert::Infallible>))
     }
 
-    fn read_varints(self) -> VarintIteratorFromBytes<Self>
+    fn read_varints(self) -> VarintIterFromBytes<Self>
     where
         Self: Sized,
     {
-        VarintIteratorFromBytes::new(self)
+        VarintIterFromBytes::new(self)
     }
 }
 
@@ -317,7 +317,7 @@ pub trait TryIteratorExtVarint {
     /// assert_eq!(varints[0].to_uint64(), 150);
     /// assert_eq!(varints[1].to_uint64(), 127);
     /// ```
-    fn read_varints(self) -> VarintIteratorFromTryBytes<Self>
+    fn read_varints(self) -> VarintIterFromTryBytes<Self>
     where
         Self: Sized + Iterator;
 }
@@ -344,11 +344,11 @@ where
         state.feed(self)
     }
 
-    fn read_varints(self) -> VarintIteratorFromTryBytes<Self>
+    fn read_varints(self) -> VarintIterFromTryBytes<Self>
     where
         Self: Sized,
     {
-        VarintIteratorFromTryBytes::new(self)
+        VarintIterFromTryBytes::new(self)
     }
 }
 
@@ -431,7 +431,7 @@ pub trait ReadExtVarint {
     /// assert_eq!(varints[0].to_uint64(), 150);
     /// assert_eq!(varints[1].to_uint64(), 127);
     /// ```
-    fn read_varints(&mut self) -> VarintIteratorFromTryBytes<::std::io::Bytes<&mut Self>>
+    fn read_varints(&mut self) -> VarintIterFromTryBytes<::std::io::Bytes<&mut Self>>
     where
         Self: ::std::io::Read;
 }
@@ -451,8 +451,8 @@ where
     }
 
     #[allow(clippy::unbuffered_bytes)] // Varint parsing requires byte-by-byte reading; caller should use BufReader for efficiency
-    fn read_varints(&mut self) -> VarintIteratorFromTryBytes<::std::io::Bytes<&mut Self>> {
-        VarintIteratorFromTryBytes::new(self.bytes())
+    fn read_varints(&mut self) -> VarintIterFromTryBytes<::std::io::Bytes<&mut Self>> {
+        VarintIterFromTryBytes::new(self.bytes())
     }
 }
 
