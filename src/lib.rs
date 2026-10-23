@@ -87,23 +87,15 @@
 //! The library provides several traits for reading protobuf fields from different sources:
 //!
 //! - [`IteratorExtProtobuf`]: Read fields from `Iterator<Item = u8>`
-//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] from `protobuf_fields_with`
+//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] where `L: AsMut<[u8]>`
 //! - [`TryIteratorExtProtobuf`]: Read fields from
 //!   `Iterator<Item = Result<u8, E>>`
-//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] from `protobuf_fields_with`
+//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] where `L: AsMut<[u8]>`
 //! - [`AsRefExtProtobuf`]: Read fields from `AsRef<[u8]>` types
 //!   (slices, arrays, etc.)
-//!   - Output: [`Field<&[u8]>`] - Len values are borrowed `&[u8]` slices (zero-copy)
+//!   - Output: [`Field<&[u8]>`] — Len values are borrowed `&[u8]` slices (zero-copy)
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types
-//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] from `read_protobuf_fields_with`
-//!
-//! `read_protobuf_fields_with` and `protobuf_fields_with` take
-//! `FnMut(usize) -> Result<L>` where `L: AsMut<[u8]>`. The payload length is known
-//! before its bytes are read. The closure returns at least that many initialized
-//! bytes. The reader overwrites the first `len` of them and leaves any suffix.
-//! A shorter buffer panics. Capture an allocator in the closure when the buffer
-//! needs one. `read_protobuf_fields` and `protobuf_fields` build `Vec<u8>` and
-//! take no closure. Slice reads do not use one.
+//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] where `L: AsMut<[u8]>`
 //!
 //! ## Writing Traits
 //!
@@ -115,9 +107,9 @@
 //! varints:
 //!
 //! - [`IteratorExtTag`] / [`TryIteratorExtTag`]
-//!   / [`ReadExtTag`]: Read tags (sync, with partial/resume for chunked input)
+//!   / [`ReadExtTag`]: Read tags (with partial/resume for chunked input)
 //! - [`IteratorExtVarint`] / [`TryIteratorExtVarint`]
-//!   / [`ReadExtVarint`]: Read varints (sync, with partial/resume for chunked input)
+//!   / [`ReadExtVarint`]: Read varints (with partial/resume for chunked input)
 //! - [`WriteExtVarint`]: Write varints
 //!
 //! ## Constants
