@@ -7,27 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Breaking iterator return-type renames so every source has a short `From{Source}` name (and the redundant `Protobuf` prefix on field iterators is dropped). Callers that named the 0.4.0 iterator types must update.
+Breaking iterator return-type renames so every source has a short `From{Source}` name (`…IterFrom…`, and the redundant `Protobuf` prefix on field iterators is dropped). Callers that named the 0.4.0 iterator types must update.
 
 ### Added
 
 - `ReadExtProtobuf::read_protobuf_fields_with`, `IteratorExtProtobuf::protobuf_fields_with`, and `TryIteratorExtProtobuf::protobuf_fields_with`. Each takes `FnMut(usize) -> Result<L, ProtobufError>` where `L: AsMut<[u8]>`. The closure is called once per length-delimited field with the payload length. It returns at least that many initialized bytes. The reader writes the first `len` bytes and leaves any suffix. A shorter buffer panics. `Err` fails that field. The closure is stored by value on the iterator. Capture an allocator in the closure when the buffer needs one. If the payload bytes run out, that buffer is dropped before the reader returns `UnexpectedEof`.
 - The streaming iterator types take that closure as a second type parameter, defaulting to `fn(usize) -> Result<Vec<u8>, ProtobufError>`. `read_protobuf_fields` and `protobuf_fields` still yield `Field<Vec<u8>>`.
 - `AsRefExtProtobuf` still returns `Field<&[u8]>`.
-- `VarintIteratorFromBytes` — standalone return type of `IteratorExtVarint::read_varints` (`Item = u8`).
-- Crate-root re-export of `FieldIteratorFromTryBytes` (formerly `ProtobufFieldIteratorFromTryBytes`, previously not re-exported).
+- `VarintIterFromBytes` — standalone return type of `IteratorExtVarint::read_varints` (`Item = u8`).
+- Crate-root re-export of `FieldIterFromTryBytes` (formerly `ProtobufFieldIteratorFromTryBytes`, previously not re-exported).
 
 ### Changed
 
-- `VarintIterator` → `VarintIteratorFromTryBytes` (return type of `TryIteratorExtVarint::read_varints` and of `ReadExtVarint::read_varints` as `VarintIteratorFromTryBytes<std::io::Bytes<&mut R>>`).
-- `ProtobufFieldIterator` → `FieldIteratorFromRead`.
-- `ProtobufFieldSliceIterator` → `FieldIteratorFromSlice`.
-- `ProtobufFieldIteratorFromBytes` → `FieldIteratorFromBytes`.
-- `ProtobufFieldIteratorFromTryBytes` → `FieldIteratorFromTryBytes`.
+- `VarintIterator` → `VarintIterFromTryBytes` (return type of `TryIteratorExtVarint::read_varints` and of `ReadExtVarint::read_varints` as `VarintIterFromTryBytes<std::io::Bytes<&mut R>>`).
+- `ProtobufFieldIterator` → `FieldIterFromRead`.
+- `ProtobufFieldSliceIterator` → `FieldIterFromSlice`.
+- `ProtobufFieldIteratorFromBytes` → `FieldIterFromBytes`.
+- `ProtobufFieldIteratorFromTryBytes` → `FieldIterFromTryBytes`.
 
 ### Removed
 
-- Public `ToResultIterator`. It remains a private adapter inside `VarintIteratorFromBytes`.
+- Public `ToResultIterator`. It remains a private adapter inside `VarintIterFromBytes`.
 
 ## [0.4.0]
 
