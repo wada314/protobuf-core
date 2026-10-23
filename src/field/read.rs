@@ -24,7 +24,7 @@ fn vec_payload(len: usize) -> Result<Vec<u8>> {
 ///
 /// `make` returns at least `length` initialized bytes. The reader overwrites the
 /// first `length` bytes and leaves any suffix as the closure initialized it.
-/// A shorter buffer panics in every build.
+/// A shorter buffer panics.
 fn make_payload<L, F>(make: &mut F, length: usize) -> Result<L>
 where
     F: FnMut(usize) -> Result<L>,
@@ -161,12 +161,12 @@ where
 ///
 /// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Result<Vec<u8>>`.
 /// `F` is called once per length-delimited field.
-pub struct ProtobufFieldIteratorFromBytes<I, F = fn(usize) -> Result<Vec<u8>>> {
+pub struct FieldIterFromBytes<I, F = fn(usize) -> Result<Vec<u8>>> {
     iter: I,
     make: F,
 }
 
-impl<I, F, L> Iterator for ProtobufFieldIteratorFromBytes<I, F>
+impl<I, F, L> Iterator for FieldIterFromBytes<I, F>
 where
     I: Iterator<Item = u8>,
     F: FnMut(usize) -> Result<L>,
@@ -204,7 +204,7 @@ pub trait IteratorExtProtobuf {
     ///
     /// Returns an iterator that yields `Result<Field<Vec<u8>>>`.
     /// Each field is parsed sequentially. Length-delimited payloads are `Vec<u8>`.
-    fn protobuf_fields(self) -> ProtobufFieldIteratorFromBytes<Self>
+    fn protobuf_fields(self) -> FieldIterFromBytes<Self>
     where
         Self: Sized,
     {
@@ -216,14 +216,14 @@ pub trait IteratorExtProtobuf {
     /// `make` is called once for each length-delimited field. `len` is the payload
     /// length from the wire. Return [`Ok`](Result::Ok) with at least that many
     /// initialized bytes. The reader overwrites the first `len` bytes and leaves
-    /// any suffix as `make` initialized it. A buffer shorter than `len` panics in
-    /// every build. Return [`Err`](Result::Err) to fail the field. Varint and
-    /// fixed-width fields do not call `make`.
+    /// any suffix as `make` initialized it. A buffer shorter than `len` panics.
+    /// Return [`Err`](Result::Err) to fail the field. Varint and fixed-width
+    /// fields do not call `make`.
     ///
     /// If the payload bytes run out, the buffer is dropped and the reader returns
     /// [`UnexpectedEof`](ProtobufError::UnexpectedEof). Capture an allocator in
     /// `make` when the buffer needs one.
-    fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromBytes<Self, F>
+    fn protobuf_fields_with<L, F>(self, make: F) -> FieldIterFromBytes<Self, F>
     where
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
@@ -234,13 +234,13 @@ impl<I> IteratorExtProtobuf for I
 where
     I: Iterator<Item = u8>,
 {
-    fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromBytes<Self, F>
+    fn protobuf_fields_with<L, F>(self, make: F) -> FieldIterFromBytes<Self, F>
     where
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>,
     {
-        ProtobufFieldIteratorFromBytes { iter: self, make }
+        FieldIterFromBytes { iter: self, make }
     }
 }
 
@@ -296,12 +296,12 @@ where
 ///
 /// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Result<Vec<u8>>`.
 /// `F` is called once per length-delimited field.
-pub struct ProtobufFieldIteratorFromTryBytes<I, F = fn(usize) -> Result<Vec<u8>>> {
+pub struct FieldIterFromTryBytes<I, F = fn(usize) -> Result<Vec<u8>>> {
     iter: I,
     make: F,
 }
 
-impl<I, E, F, L> Iterator for ProtobufFieldIteratorFromTryBytes<I, F>
+impl<I, E, F, L> Iterator for FieldIterFromTryBytes<I, F>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
@@ -344,7 +344,7 @@ pub trait TryIteratorExtProtobuf {
     /// Returns an iterator that yields `Result<Field<Vec<u8>>>`.
     /// Length-delimited payloads are `Vec<u8>`.
     /// I/O errors from the underlying iterator are propagated.
-    fn protobuf_fields(self) -> ProtobufFieldIteratorFromTryBytes<Self>
+    fn protobuf_fields(self) -> FieldIterFromTryBytes<Self>
     where
         Self: Sized,
     {
@@ -356,14 +356,14 @@ pub trait TryIteratorExtProtobuf {
     /// `make` is called once for each length-delimited field. `len` is the payload
     /// length from the wire. Return [`Ok`](Result::Ok) with at least that many
     /// initialized bytes. The reader overwrites the first `len` bytes and leaves
-    /// any suffix as `make` initialized it. A buffer shorter than `len` panics in
-    /// every build. Return [`Err`](Result::Err) to fail the field. Varint and
-    /// fixed-width fields do not call `make`.
+    /// any suffix as `make` initialized it. A buffer shorter than `len` panics.
+    /// Return [`Err`](Result::Err) to fail the field. Varint and fixed-width
+    /// fields do not call `make`.
     ///
     /// If the payload bytes run out, the buffer is dropped and the reader returns
     /// [`UnexpectedEof`](ProtobufError::UnexpectedEof). Capture an allocator in
     /// `make` when the buffer needs one.
-    fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromTryBytes<Self, F>
+    fn protobuf_fields_with<L, F>(self, make: F) -> FieldIterFromTryBytes<Self, F>
     where
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
@@ -375,13 +375,13 @@ where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
-    fn protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromTryBytes<Self, F>
+    fn protobuf_fields_with<L, F>(self, make: F) -> FieldIterFromTryBytes<Self, F>
     where
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>,
     {
-        ProtobufFieldIteratorFromTryBytes { iter: self, make }
+        FieldIterFromTryBytes { iter: self, make }
     }
 }
 
@@ -420,12 +420,12 @@ where
 ///
 /// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Result<Vec<u8>>`.
 /// `F` is called once per length-delimited field.
-pub struct ProtobufFieldIterator<R, F = fn(usize) -> Result<Vec<u8>>> {
+pub struct FieldIterFromRead<R, F = fn(usize) -> Result<Vec<u8>>> {
     reader: R,
     make: F,
 }
 
-impl<R, F, L> Iterator for ProtobufFieldIterator<R, F>
+impl<R, F, L> Iterator for FieldIterFromRead<R, F>
 where
     R: Read,
     F: FnMut(usize) -> Result<L>,
@@ -478,7 +478,7 @@ pub trait ReadExtProtobuf {
     /// This consumes the reader and returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
     /// Length-delimited payloads are `Vec<u8>`.
-    fn read_protobuf_fields(self) -> ProtobufFieldIterator<Self>
+    fn read_protobuf_fields(self) -> FieldIterFromRead<Self>
     where
         Self: Sized,
     {
@@ -490,9 +490,9 @@ pub trait ReadExtProtobuf {
     /// `make` is called once for each length-delimited field. `len` is the payload
     /// length from the wire. Return [`Ok`](Result::Ok) with at least that many
     /// initialized bytes. The reader overwrites the first `len` bytes and leaves
-    /// any suffix as `make` initialized it. A buffer shorter than `len` panics in
-    /// every build. Return [`Err`](Result::Err) to fail the field. Varint and
-    /// fixed-width fields do not call `make`.
+    /// any suffix as `make` initialized it. A buffer shorter than `len` panics.
+    /// Return [`Err`](Result::Err) to fail the field. Varint and fixed-width
+    /// fields do not call `make`.
     ///
     /// If the payload bytes run out, the buffer is dropped and the reader returns
     /// [`UnexpectedEof`](ProtobufError::UnexpectedEof). Capture an allocator in
@@ -513,7 +513,7 @@ pub trait ReadExtProtobuf {
     /// };
     /// assert_eq!(&data[..], b"Hel");
     /// ```
-    fn read_protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIterator<Self, F>
+    fn read_protobuf_fields_with<L, F>(self, make: F) -> FieldIterFromRead<Self, F>
     where
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
@@ -524,13 +524,13 @@ impl<R> ReadExtProtobuf for R
 where
     R: Read,
 {
-    fn read_protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIterator<Self, F>
+    fn read_protobuf_fields_with<L, F>(self, make: F) -> FieldIterFromRead<Self, F>
     where
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>,
     {
-        ProtobufFieldIterator { reader: self, make }
+        FieldIterFromRead { reader: self, make }
     }
 }
 
@@ -568,12 +568,12 @@ impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
     }
 }
 
-/// Iterator for reading raw protobuf fields sequentially from a slice
-pub struct ProtobufFieldSliceIterator<'a> {
+/// Iterator for reading raw protobuf fields sequentially from a byte slice.
+pub struct FieldIterFromSlice<'a> {
     slice: &'a [u8],
 }
 
-impl<'a> Iterator for ProtobufFieldSliceIterator<'a> {
+impl<'a> Iterator for FieldIterFromSlice<'a> {
     type Item = Result<Field<&'a [u8]>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -610,8 +610,8 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
     /// Returns borrowed references (`Field<&'a [u8]>`).
     ///
     /// This method is available for all types implementing `AsRef<[u8]>`.
-    fn read_protobuf_fields(&self) -> ProtobufFieldSliceIterator<'_> {
-        ProtobufFieldSliceIterator {
+    fn read_protobuf_fields(&self) -> FieldIterFromSlice<'_> {
+        FieldIterFromSlice {
             slice: self.as_ref(),
         }
     }
