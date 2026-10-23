@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0]
+
+Breaking error-enum change. Callers that matched `ProtobufError` exhaustively must handle the new variant. Callers that treated group tags (wire types 3 and 4) as `InvalidWireType` must match `UnsupportedGroup` instead.
+
+### Added
+
+- `ProtobufError::UnsupportedGroup { wire_type }` — field readers report this when they see a start-group or end-group tag. `wire_type` is `WireType::SGroup` or `WireType::EGroup`. Groups are still not read or skipped; this only names the rejection correctly.
+
+### Changed
+
+- `InvalidWireType` is only for tag low-bits outside 0–5 (for example from `WireType::try_from`). Its rustdoc notes that group types are known and use `UnsupportedGroup` on the field-read path.
+
 ## [0.5.0]
 
 Breaking iterator return-type renames, plus caller-built length-delimited payloads. Callers that named the 0.4.0 iterator types must update. Callers that only used the default `read_protobuf_fields` / `protobuf_fields` paths keep the same call sites.

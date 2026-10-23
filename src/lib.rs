@@ -154,8 +154,20 @@ pub enum ProtobufError {
     #[error("Field number {value} is out of valid range [1, 536_870_911]")]
     FieldNumberOutOfRange { value: i64 },
 
+    /// The tag's low 3 bits were not a known wire type (must be 0–5).
+    ///
+    /// Deprecated group types [`WireType::SGroup`] (3) and [`WireType::EGroup`]
+    /// (4) are known wire types; field readers report
+    /// [`UnsupportedGroup`](Self::UnsupportedGroup) for those instead.
     #[error("Invalid wire type: {value} (must be 0-5)")]
     InvalidWireType { value: u8 },
+
+    /// A start-group or end-group tag was seen, but this crate does not read or
+    /// skip groups yet.
+    ///
+    /// `wire_type` is always [`WireType::SGroup`] or [`WireType::EGroup`].
+    #[error("Deprecated group wire type {wire_type:?} is not supported")]
+    UnsupportedGroup { wire_type: WireType },
 
     #[error("Varint value {value} is out of range for target type: {target_type}")]
     VarintDowncastOutOfRange {
