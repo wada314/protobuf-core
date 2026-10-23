@@ -420,12 +420,12 @@ where
 ///
 /// `F` builds each length-delimited payload. It defaults to `fn(usize) -> Result<Vec<u8>>`.
 /// `F` is called once per length-delimited field.
-pub struct ProtobufFieldIterator<R, F = fn(usize) -> Result<Vec<u8>>> {
+pub struct ProtobufFieldIteratorFromRead<R, F = fn(usize) -> Result<Vec<u8>>> {
     reader: R,
     make: F,
 }
 
-impl<R, F, L> Iterator for ProtobufFieldIterator<R, F>
+impl<R, F, L> Iterator for ProtobufFieldIteratorFromRead<R, F>
 where
     R: Read,
     F: FnMut(usize) -> Result<L>,
@@ -478,7 +478,7 @@ pub trait ReadExtProtobuf {
     /// This consumes the reader and returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
     /// Length-delimited payloads are `Vec<u8>`.
-    fn read_protobuf_fields(self) -> ProtobufFieldIterator<Self>
+    fn read_protobuf_fields(self) -> ProtobufFieldIteratorFromRead<Self>
     where
         Self: Sized,
     {
@@ -513,7 +513,7 @@ pub trait ReadExtProtobuf {
     /// };
     /// assert_eq!(&data[..], b"Hel");
     /// ```
-    fn read_protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIterator<Self, F>
+    fn read_protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromRead<Self, F>
     where
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
@@ -524,13 +524,13 @@ impl<R> ReadExtProtobuf for R
 where
     R: Read,
 {
-    fn read_protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIterator<Self, F>
+    fn read_protobuf_fields_with<L, F>(self, make: F) -> ProtobufFieldIteratorFromRead<Self, F>
     where
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>,
     {
-        ProtobufFieldIterator { reader: self, make }
+        ProtobufFieldIteratorFromRead { reader: self, make }
     }
 }
 
@@ -568,12 +568,12 @@ impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
     }
 }
 
-/// Iterator for reading raw protobuf fields sequentially from a slice
-pub struct ProtobufFieldSliceIterator<'a> {
+/// Iterator for reading raw protobuf fields sequentially from a byte slice.
+pub struct ProtobufFieldIteratorFromSlice<'a> {
     slice: &'a [u8],
 }
 
-impl<'a> Iterator for ProtobufFieldSliceIterator<'a> {
+impl<'a> Iterator for ProtobufFieldIteratorFromSlice<'a> {
     type Item = Result<Field<&'a [u8]>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -610,8 +610,8 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
     /// Returns borrowed references (`Field<&'a [u8]>`).
     ///
     /// This method is available for all types implementing `AsRef<[u8]>`.
-    fn read_protobuf_fields(&self) -> ProtobufFieldSliceIterator<'_> {
-        ProtobufFieldSliceIterator {
+    fn read_protobuf_fields(&self) -> ProtobufFieldIteratorFromSlice<'_> {
+        ProtobufFieldIteratorFromSlice {
             slice: self.as_ref(),
         }
     }

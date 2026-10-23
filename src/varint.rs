@@ -14,8 +14,8 @@ mod read;
 // Iterator return types for `read_varints` (re-exported at the crate root).
 #[allow(unused_imports)]
 pub use read::{
-    DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, ToResultIterator,
-    TryIteratorExtVarint, VarintIterator,
+    DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint,
+    VarintIteratorFromBytes, VarintIteratorFromTryBytes,
 };
 /// A deserialized varint value.
 ///
