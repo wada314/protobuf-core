@@ -5,9 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0]
 
-Breaking iterator return-type renames so every source has a short `From{Source}` name (`…IterFrom…`, and the redundant `Protobuf` prefix on field iterators is dropped). Callers that named the 0.4.0 iterator types must update.
+Breaking iterator return-type renames, plus caller-built length-delimited payloads. Callers that named the 0.4.0 iterator types must update. Callers that only used the default `read_protobuf_fields` / `protobuf_fields` paths keep the same call sites.
 
 ### Added
 

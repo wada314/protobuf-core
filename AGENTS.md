@@ -39,7 +39,7 @@ cargo clippy --all-targets
 
 ## Known follow-ups
 
-Left out of 0.3.0 on purpose. Do not treat them as conformant behavior, and do not sneak a fix into a patch release if it changes public types or error variants.
+Deferred on purpose. Do not treat them as conformant behavior, and do not sneak a fix into a patch release if it changes public types or error variants.
 
 - **Groups.** `WireType::SGroup` (3) and `WireType::EGroup` (4) are real wire types. `parse_field` still returns `ProtobufError::InvalidWireType` for both, and that variant's message says the value must be 0-5. There is no group reader, writer, or skip helper. A later change needs an explicit group scan or a distinct error. Do not relabel the current rejection as spec-compliant skipping.
 - **`IteratorExtVarint` takes `self` by value.** `read_varint`, `read_varint_partial`, and `read_varint_resume` consume the iterator. Tag methods take `&mut self`. `(&mut iter).read_varint()` keeps the unread tail, because `&mut I: Iterator`. Calling the method on an owned iterator drops the tail. Changing this signature is a breaking change.
