@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ReadExtProtobuf::read_protobuf_fields_with`, `IteratorExtProtobuf::protobuf_fields_with`, and `TryIteratorExtProtobuf::protobuf_fields_with`. Each takes `FnMut(usize) -> Result<L, ProtobufError>` where `L: AsMut<[u8]>`. The closure is called once per length-delimited field with the payload length. It returns at least that many initialized bytes. The reader writes the first `len` bytes and leaves any suffix. A shorter buffer panics in every build. `Err` fails that field. The closure is stored by value on the iterator. Capture an allocator in the closure when the buffer needs one. If the payload bytes run out, that buffer is dropped before the reader returns `UnexpectedEof`.
 - The streaming iterator types take that closure as a second type parameter, defaulting to `fn(usize) -> Result<Vec<u8>, ProtobufError>`. `read_protobuf_fields` and `protobuf_fields` still yield `Field<Vec<u8>>`.
 - `AsRefExtProtobuf` still returns `Field<&[u8]>`.
+- Re-export `ProtobufFieldIteratorFromTryBytes`, `VarintIterator`, and `ToResultIterator` from the crate root so callers (and docs) can name the return types of `TryIteratorExtProtobuf::protobuf_fields` / `protobuf_fields_with` and `*_varints`. The other field iterators were already public.
 
 ## [0.4.0]
 

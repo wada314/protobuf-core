@@ -30,7 +30,8 @@ pub(crate) mod write;
 
 pub use self::read::{
     AsRefExtProtobuf, IteratorExtProtobuf, ProtobufFieldIterator, ProtobufFieldIteratorFromBytes,
-    ProtobufFieldSliceIterator, ReadExtProtobuf, TryIteratorExtProtobuf,
+    ProtobufFieldIteratorFromTryBytes, ProtobufFieldSliceIterator, ReadExtProtobuf,
+    TryIteratorExtProtobuf,
 };
 pub use self::write::WriteExtProtobuf;
 

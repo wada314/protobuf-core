@@ -136,14 +136,14 @@ pub(crate) mod wire_format;
 
 pub use self::field::{
     AsRefExtProtobuf, Field, FieldValue, IteratorExtProtobuf, ProtobufFieldIterator,
-    ProtobufFieldIteratorFromBytes, ProtobufFieldSliceIterator, ReadExtProtobuf,
-    TryIteratorExtProtobuf, WriteExtProtobuf,
+    ProtobufFieldIteratorFromBytes, ProtobufFieldIteratorFromTryBytes, ProtobufFieldSliceIterator,
+    ReadExtProtobuf, TryIteratorExtProtobuf, WriteExtProtobuf,
 };
 pub use self::field_number::FieldNumber;
 pub use self::tag::{IteratorExtTag, Outcome as TagOutcome, ReadExtTag, Tag, TryIteratorExtTag};
 pub use self::varint::{
-    DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint,
-    WriteExtVarint,
+    DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, ToResultIterator,
+    TryIteratorExtVarint, Varint, VarintIterator, WriteExtVarint,
 };
 pub use self::wire_format::{
     FIELD_NUMBER_SHIFT, FIXED32_BYTES, FIXED64_BYTES, MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT,

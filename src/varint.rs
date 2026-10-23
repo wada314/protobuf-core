@@ -11,11 +11,11 @@ use ::std::io::Write;
 
 mod read;
 
-// VarintIterator is re-exported for the public API (return type of read_varints()).
+// Iterator return types for `read_varints` (re-exported at the crate root).
 #[allow(unused_imports)]
 pub use read::{
-    DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint,
-    VarintIterator,
+    DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, ToResultIterator,
+    TryIteratorExtVarint, VarintIterator,
 };
 /// A deserialized varint value.
 ///
