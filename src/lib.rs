@@ -107,9 +107,9 @@
 //! varints:
 //!
 //! - [`IteratorExtTag`] / [`TryIteratorExtTag`]
-//!   / [`ReadExtTag`]: Read tags (sync, with partial/resume for chunked input)
+//!   / [`ReadExtTag`]: Read tags (with partial/resume for chunked input)
 //! - [`IteratorExtVarint`] / [`TryIteratorExtVarint`]
-//!   / [`ReadExtVarint`]: Read varints (sync, with partial/resume for chunked input)
+//!   / [`ReadExtVarint`]: Read varints (with partial/resume for chunked input)
 //! - [`WriteExtVarint`]: Write varints
 //!
 //! ## Constants
