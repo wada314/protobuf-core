@@ -24,7 +24,7 @@ fn vec_payload(len: usize) -> Result<Vec<u8>> {
 ///
 /// `make` returns at least `length` initialized bytes. The reader overwrites the
 /// first `length` bytes and leaves any suffix as the closure initialized it.
-/// A shorter buffer panics in every build.
+/// A shorter buffer panics.
 fn make_payload<L, F>(make: &mut F, length: usize) -> Result<L>
 where
     F: FnMut(usize) -> Result<L>,
@@ -216,9 +216,9 @@ pub trait IteratorExtProtobuf {
     /// `make` is called once for each length-delimited field. `len` is the payload
     /// length from the wire. Return [`Ok`](Result::Ok) with at least that many
     /// initialized bytes. The reader overwrites the first `len` bytes and leaves
-    /// any suffix as `make` initialized it. A buffer shorter than `len` panics in
-    /// every build. Return [`Err`](Result::Err) to fail the field. Varint and
-    /// fixed-width fields do not call `make`.
+    /// any suffix as `make` initialized it. A buffer shorter than `len` panics.
+    /// Return [`Err`](Result::Err) to fail the field. Varint and fixed-width
+    /// fields do not call `make`.
     ///
     /// If the payload bytes run out, the buffer is dropped and the reader returns
     /// [`UnexpectedEof`](ProtobufError::UnexpectedEof). Capture an allocator in
@@ -356,9 +356,9 @@ pub trait TryIteratorExtProtobuf {
     /// `make` is called once for each length-delimited field. `len` is the payload
     /// length from the wire. Return [`Ok`](Result::Ok) with at least that many
     /// initialized bytes. The reader overwrites the first `len` bytes and leaves
-    /// any suffix as `make` initialized it. A buffer shorter than `len` panics in
-    /// every build. Return [`Err`](Result::Err) to fail the field. Varint and
-    /// fixed-width fields do not call `make`.
+    /// any suffix as `make` initialized it. A buffer shorter than `len` panics.
+    /// Return [`Err`](Result::Err) to fail the field. Varint and fixed-width
+    /// fields do not call `make`.
     ///
     /// If the payload bytes run out, the buffer is dropped and the reader returns
     /// [`UnexpectedEof`](ProtobufError::UnexpectedEof). Capture an allocator in
@@ -490,9 +490,9 @@ pub trait ReadExtProtobuf {
     /// `make` is called once for each length-delimited field. `len` is the payload
     /// length from the wire. Return [`Ok`](Result::Ok) with at least that many
     /// initialized bytes. The reader overwrites the first `len` bytes and leaves
-    /// any suffix as `make` initialized it. A buffer shorter than `len` panics in
-    /// every build. Return [`Err`](Result::Err) to fail the field. Varint and
-    /// fixed-width fields do not call `make`.
+    /// any suffix as `make` initialized it. A buffer shorter than `len` panics.
+    /// Return [`Err`](Result::Err) to fail the field. Varint and fixed-width
+    /// fields do not call `make`.
     ///
     /// If the payload bytes run out, the buffer is dropped and the reader returns
     /// [`UnexpectedEof`](ProtobufError::UnexpectedEof). Capture an allocator in
