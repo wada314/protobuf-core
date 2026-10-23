@@ -135,9 +135,9 @@ pub(crate) mod varint;
 pub(crate) mod wire_format;
 
 pub use self::field::{
-    AsRefExtProtobuf, Field, FieldValue, IteratorExtProtobuf, ProtobufFieldIteratorFromBytes,
-    ProtobufFieldIteratorFromRead, ProtobufFieldIteratorFromSlice,
-    ProtobufFieldIteratorFromTryBytes, ReadExtProtobuf, TryIteratorExtProtobuf, WriteExtProtobuf,
+    AsRefExtProtobuf, Field, FieldIteratorFromBytes, FieldIteratorFromRead, FieldIteratorFromSlice,
+    FieldIteratorFromTryBytes, FieldValue, IteratorExtProtobuf, ReadExtProtobuf,
+    TryIteratorExtProtobuf, WriteExtProtobuf,
 };
 pub use self::field_number::FieldNumber;
 pub use self::tag::{IteratorExtTag, Outcome as TagOutcome, ReadExtTag, Tag, TryIteratorExtTag};

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Breaking iterator return-type renames so every source has a `From{Source}` name. Callers that named `VarintIterator`, `ProtobufFieldIterator`, or `ProtobufFieldSliceIterator` must update.
+Breaking iterator return-type renames so every source has a short `From{Source}` name (and the redundant `Protobuf` prefix on field iterators is dropped). Callers that named the 0.4.0 iterator types must update.
 
 ### Added
 
@@ -15,13 +15,15 @@ Breaking iterator return-type renames so every source has a `From{Source}` name.
 - The streaming iterator types take that closure as a second type parameter, defaulting to `fn(usize) -> Result<Vec<u8>, ProtobufError>`. `read_protobuf_fields` and `protobuf_fields` still yield `Field<Vec<u8>>`.
 - `AsRefExtProtobuf` still returns `Field<&[u8]>`.
 - `VarintIteratorFromBytes` — standalone return type of `IteratorExtVarint::read_varints` (`Item = u8`).
-- Crate-root re-export of `ProtobufFieldIteratorFromTryBytes` (was already constructed publicly; now nameable like the other field iterators).
+- Crate-root re-export of `FieldIteratorFromTryBytes` (formerly `ProtobufFieldIteratorFromTryBytes`, previously not re-exported).
 
 ### Changed
 
 - `VarintIterator` → `VarintIteratorFromTryBytes` (return type of `TryIteratorExtVarint::read_varints` and of `ReadExtVarint::read_varints` as `VarintIteratorFromTryBytes<std::io::Bytes<&mut R>>`).
-- `ProtobufFieldIterator` → `ProtobufFieldIteratorFromRead`.
-- `ProtobufFieldSliceIterator` → `ProtobufFieldIteratorFromSlice`.
+- `ProtobufFieldIterator` → `FieldIteratorFromRead`.
+- `ProtobufFieldSliceIterator` → `FieldIteratorFromSlice`.
+- `ProtobufFieldIteratorFromBytes` → `FieldIteratorFromBytes`.
+- `ProtobufFieldIteratorFromTryBytes` → `FieldIteratorFromTryBytes`.
 
 ### Removed
 
