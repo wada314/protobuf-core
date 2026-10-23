@@ -162,12 +162,35 @@ pub enum ProtobufError {
     #[error("Invalid wire type: {value} (must be 0-5)")]
     InvalidWireType { value: u8 },
 
-    /// A start-group or end-group tag was seen, but this crate does not read or
-    /// skip groups yet.
+    /// A start-group or end-group tag was seen by a field reader.
+    ///
+    /// Field iterators do not return group payloads. After
+    /// [`WireType::SGroup`], call [`skip_protobuf_group`] on the same reader or
+    /// field iterator to discard the group body through the matching end tag.
+    /// [`WireType::EGroup`] with no open group is a wire error; do not skip.
     ///
     /// `wire_type` is always [`WireType::SGroup`] or [`WireType::EGroup`].
-    #[error("Deprecated group wire type {wire_type:?} is not supported")]
-    UnsupportedGroup { wire_type: WireType },
+    ///
+    /// [`skip_protobuf_group`]: ReadExtProtobuf::skip_protobuf_group
+    #[error(
+        "Deprecated group wire type {wire_type:?} for field {} is not returned as a field value",
+        field_number.as_u32()
+    )]
+    UnsupportedGroup {
+        field_number: FieldNumber,
+        wire_type: WireType,
+    },
+
+    /// An end-group tag's field number did not match the open start-group.
+    #[error(
+        "End-group field number {} does not match open start-group {}",
+        got.as_u32(),
+        expected.as_u32()
+    )]
+    MismatchedEndGroup {
+        expected: FieldNumber,
+        got: FieldNumber,
+    },
 
     #[error("Varint value {value} is out of range for target type: {target_type}")]
     VarintDowncastOutOfRange {

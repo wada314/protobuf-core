@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0]
+
+Breaking error-enum change relative to 0.6.0. Callers that matched `UnsupportedGroup { wire_type }` must also bind `field_number`. Exhaustive matches must handle `MismatchedEndGroup`.
+
+### Added
+
+- `skip_protobuf_group(field_number)` on `ReadExtProtobuf`, `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, and on `FieldIterFromBytes` / `FieldIterFromTryBytes` / `FieldIterFromRead` / `FieldIterFromSlice`. After a start-group tag has been consumed, skips nested fields until the matching end-group. Does not allocate length-delimited payloads while skipping.
+- `ProtobufError::MismatchedEndGroup { expected, got }` when an end-group field number does not match the open start-group.
+
+### Changed
+
+- `ProtobufError::UnsupportedGroup` now includes `field_number` so callers can pass it to `skip_protobuf_group` after a field reader rejects a start-group tag.
+
 ## [0.6.0]
 
 Breaking error-enum change. Callers that matched `ProtobufError` exhaustively must handle the new variant. Callers that treated group tags (wire types 3 and 4) as `InvalidWireType` must match `UnsupportedGroup` instead.

@@ -5,6 +5,7 @@
 //! payload with a closure `FnMut(usize) -> Result<L>`. Slice sources borrow them as `&[u8]`.
 
 use crate::field::{Field, FieldValue};
+use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::{DecodeOutcome, Varint};
 use crate::wire_format::WireType;
@@ -107,6 +108,7 @@ where
         }
         WireType::SGroup | WireType::EGroup => {
             return Err(ProtobufError::UnsupportedGroup {
+                field_number: tag.field_number,
                 wire_type: tag.wire_type,
             });
         }
@@ -116,6 +118,211 @@ where
         field_number: tag.field_number,
         value,
     }))
+}
+
+// ============================================================================
+// Group skip
+// ============================================================================
+
+/// Discard bytes without building a length-delimited payload.
+pub(crate) trait FieldSkipReader {
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
+        match self.read_varint()? {
+            Some(varint) => Tag::from_encoded(varint).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    fn read_varint(&mut self) -> Result<Option<Varint>>;
+
+    fn skip_fixed<const N: usize>(&mut self) -> Result<()>;
+
+    fn skip_bytes(&mut self, length: usize) -> Result<()>;
+}
+
+/// Skip one field payload after its tag has already been consumed.
+fn skip_field_payload<R>(reader: &mut R, wire_type: WireType) -> Result<()>
+where
+    R: FieldSkipReader,
+{
+    match wire_type {
+        WireType::Varint => {
+            reader.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+            Ok(())
+        }
+        WireType::Int32 => reader.skip_fixed::<4>(),
+        WireType::Int64 => reader.skip_fixed::<8>(),
+        WireType::Len => {
+            let length_varint = reader.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+            let length = length_varint.try_to_uint32()? as usize;
+            reader.skip_bytes(length)
+        }
+        WireType::SGroup | WireType::EGroup => {
+            // Handled by the group scanner; not used as a lone payload skip.
+            unreachable!("group wire types are handled by skip_group_body")
+        }
+    }
+}
+
+/// Skip a group body after the start-group tag has already been consumed.
+///
+/// Reads tags until the matching end-group for `field_number`. Nested start-group
+/// tags push another frame; their end tags must match in LIFO order.
+pub(crate) fn skip_group_body<R>(reader: &mut R, field_number: FieldNumber) -> Result<()>
+where
+    R: FieldSkipReader,
+{
+    // Open frames: the outermost group whose start tag was already consumed,
+    // then any nested groups entered while scanning.
+    let mut open: Vec<FieldNumber> = vec![field_number];
+
+    while let Some(&expected) = open.last() {
+        let tag = reader.read_tag()?.ok_or(ProtobufError::UnexpectedEof)?;
+        match tag.wire_type {
+            WireType::SGroup => {
+                open.push(tag.field_number);
+            }
+            WireType::EGroup => {
+                if tag.field_number != expected {
+                    return Err(ProtobufError::MismatchedEndGroup {
+                        expected,
+                        got: tag.field_number,
+                    });
+                }
+                open.pop();
+            }
+            wire_type => {
+                skip_field_payload(reader, wire_type)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn skip_bytes_from_iterator<I>(iter: &mut I, length: usize) -> Result<()>
+where
+    I: Iterator<Item = u8>,
+{
+    for _ in 0..length {
+        iter.next().ok_or(ProtobufError::UnexpectedEof)?;
+    }
+    Ok(())
+}
+
+fn skip_bytes_from_try_iterator<I, E>(iter: &mut I, length: usize) -> Result<()>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    for _ in 0..length {
+        iter.next()
+            .ok_or(ProtobufError::UnexpectedEof)?
+            .map_err(Into::into)?;
+    }
+    Ok(())
+}
+
+fn skip_bytes_from_read<R>(reader: &mut R, mut length: usize) -> Result<()>
+where
+    R: Read,
+{
+    let mut buf = [0u8; 256];
+    while length > 0 {
+        let n = length.min(buf.len());
+        reader.read_exact(&mut buf[..n])?;
+        length -= n;
+    }
+    Ok(())
+}
+
+struct IteratorSkip<'a, I>(&'a mut I);
+
+impl<I> FieldSkipReader for IteratorSkip<'_, I>
+where
+    I: Iterator<Item = u8>,
+{
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        use crate::varint::IteratorExtVarint;
+        match self.0.read_varint_partial()? {
+            DecodeOutcome::Complete(v) => Ok(Some(v)),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
+        }
+    }
+
+    fn skip_fixed<const N: usize>(&mut self) -> Result<()> {
+        skip_bytes_from_iterator(self.0, N)
+    }
+
+    fn skip_bytes(&mut self, length: usize) -> Result<()> {
+        skip_bytes_from_iterator(self.0, length)
+    }
+}
+
+struct TryIteratorSkip<'a, I>(&'a mut I);
+
+impl<I, E> FieldSkipReader for TryIteratorSkip<'_, I>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        use crate::varint::TryIteratorExtVarint;
+        match self.0.read_varint_partial()? {
+            DecodeOutcome::Complete(v) => Ok(Some(v)),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
+        }
+    }
+
+    fn skip_fixed<const N: usize>(&mut self) -> Result<()> {
+        skip_bytes_from_try_iterator(self.0, N)
+    }
+
+    fn skip_bytes(&mut self, length: usize) -> Result<()> {
+        skip_bytes_from_try_iterator(self.0, length)
+    }
+}
+
+struct ReadSkip<'a, R>(&'a mut R);
+
+impl<R> FieldSkipReader for ReadSkip<'_, R>
+where
+    R: Read,
+{
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        use crate::varint::ReadExtVarint;
+        self.0.read_varint()
+    }
+
+    fn skip_fixed<const N: usize>(&mut self) -> Result<()> {
+        skip_bytes_from_read(self.0, N)
+    }
+
+    fn skip_bytes(&mut self, length: usize) -> Result<()> {
+        skip_bytes_from_read(self.0, length)
+    }
+}
+
+impl FieldSkipReader for SliceReader<'_, '_> {
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        use crate::varint::ReadExtVarint;
+        self.slice.read_varint()
+    }
+
+    fn skip_fixed<const N: usize>(&mut self) -> Result<()> {
+        self.skip_bytes(N)
+    }
+
+    fn skip_bytes(&mut self, length: usize) -> Result<()> {
+        let (_, remaining) = self
+            .slice
+            .split_at_checked(length)
+            .ok_or(ProtobufError::UnexpectedEof)?;
+        *self.slice = remaining;
+        Ok(())
+    }
 }
 
 // ============================================================================
@@ -164,6 +371,20 @@ where
 pub struct FieldIterFromBytes<I, F = fn(usize) -> Result<Vec<u8>>> {
     iter: I,
     make: F,
+}
+
+impl<I, F> FieldIterFromBytes<I, F> {
+    /// Skip a group body after its start-group tag was already consumed.
+    ///
+    /// After [`protobuf_fields`](IteratorExtProtobuf::protobuf_fields) yields
+    /// [`ProtobufError::UnsupportedGroup`] with [`WireType::SGroup`], call this
+    /// with that field number before continuing to iterate.
+    pub fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()>
+    where
+        I: Iterator<Item = u8>,
+    {
+        skip_group_body(&mut IteratorSkip(&mut self.iter), field_number)
+    }
 }
 
 impl<I, F, L> Iterator for FieldIterFromBytes<I, F>
@@ -228,6 +449,11 @@ pub trait IteratorExtProtobuf {
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
+
+    /// Skip a group body after its start-group tag was already consumed.
+    ///
+    /// Nested groups are skipped until the matching end-group for `field_number`.
+    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()>;
 }
 
 impl<I> IteratorExtProtobuf for I
@@ -241,6 +467,10 @@ where
         L: AsMut<[u8]>,
     {
         FieldIterFromBytes { iter: self, make }
+    }
+
+    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
+        skip_group_body(&mut IteratorSkip(self), field_number)
     }
 }
 
@@ -299,6 +529,19 @@ where
 pub struct FieldIterFromTryBytes<I, F = fn(usize) -> Result<Vec<u8>>> {
     iter: I,
     make: F,
+}
+
+impl<I, E, F> FieldIterFromTryBytes<I, F>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    /// Skip a group body after its start-group tag was already consumed.
+    ///
+    /// See [`FieldIterFromBytes::skip_protobuf_group`].
+    pub fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
+        skip_group_body(&mut TryIteratorSkip(&mut self.iter), field_number)
+    }
 }
 
 impl<I, E, F, L> Iterator for FieldIterFromTryBytes<I, F>
@@ -368,6 +611,11 @@ pub trait TryIteratorExtProtobuf {
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
+
+    /// Skip a group body after its start-group tag was already consumed.
+    ///
+    /// Nested groups are skipped until the matching end-group for `field_number`.
+    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()>;
 }
 
 impl<I, E> TryIteratorExtProtobuf for I
@@ -382,6 +630,10 @@ where
         L: AsMut<[u8]>,
     {
         FieldIterFromTryBytes { iter: self, make }
+    }
+
+    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
+        skip_group_body(&mut TryIteratorSkip(self), field_number)
     }
 }
 
@@ -423,6 +675,18 @@ where
 pub struct FieldIterFromRead<R, F = fn(usize) -> Result<Vec<u8>>> {
     reader: R,
     make: F,
+}
+
+impl<R, F> FieldIterFromRead<R, F> {
+    /// Skip a group body after its start-group tag was already consumed.
+    ///
+    /// See [`FieldIterFromBytes::skip_protobuf_group`].
+    pub fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()>
+    where
+        R: Read,
+    {
+        skip_group_body(&mut ReadSkip(&mut self.reader), field_number)
+    }
 }
 
 impl<R, F, L> Iterator for FieldIterFromRead<R, F>
@@ -518,6 +782,12 @@ pub trait ReadExtProtobuf {
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
+
+    /// Skip a group body after its start-group tag was already consumed.
+    ///
+    /// Nested groups are skipped until the matching end-group for `field_number`.
+    /// Works for any `Read`, including a mutable slice cursor (`&mut &[u8]`).
+    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()>;
 }
 
 impl<R> ReadExtProtobuf for R
@@ -531,6 +801,10 @@ where
         L: AsMut<[u8]>,
     {
         FieldIterFromRead { reader: self, make }
+    }
+
+    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
+        skip_group_body(&mut ReadSkip(self), field_number)
     }
 }
 
@@ -571,6 +845,18 @@ impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
 /// Iterator for reading raw protobuf fields sequentially from a byte slice.
 pub struct FieldIterFromSlice<'a> {
     slice: &'a [u8],
+}
+
+impl<'a> FieldIterFromSlice<'a> {
+    /// Skip a group body after its start-group tag was already consumed.
+    ///
+    /// See [`FieldIterFromBytes::skip_protobuf_group`].
+    pub fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
+        let mut reader = SliceReader {
+            slice: &mut self.slice,
+        };
+        skip_group_body(&mut reader, field_number)
+    }
 }
 
 impl<'a> Iterator for FieldIterFromSlice<'a> {
@@ -1261,12 +1547,206 @@ mod tests {
         use crate::wire_format::WireType;
         for (byte, wire_type) in [(0x0Bu8, WireType::SGroup), (0x0C, WireType::EGroup)] {
             let bytes = [byte];
-            let got = match bytes[..].read_protobuf_fields().next().unwrap() {
-                Err(ProtobufError::UnsupportedGroup { wire_type }) => wire_type,
+            let (got_number, got_wire) = match bytes[..].read_protobuf_fields().next().unwrap() {
+                Err(ProtobufError::UnsupportedGroup {
+                    field_number,
+                    wire_type,
+                }) => (field_number.as_u32(), wire_type),
                 other => panic!("expected UnsupportedGroup, got {other:?}"),
             };
-            assert_eq!(got, wire_type);
+            assert_eq!(got_number, 1);
+            assert_eq!(got_wire, wire_type);
         }
+    }
+}
+
+#[cfg(test)]
+mod group_skip {
+    use super::{AsRefExtProtobuf, IteratorExtProtobuf, ReadExtProtobuf};
+    use crate::field_number::FieldNumber;
+    use crate::wire_format::WireType;
+    use crate::{FieldValue, ProtobufError};
+
+    fn field(n: u32) -> FieldNumber {
+        FieldNumber::try_new(n).unwrap()
+    }
+
+    fn slice_fields(bytes: &[u8]) -> super::FieldIterFromSlice<'_> {
+        AsRefExtProtobuf::read_protobuf_fields(bytes)
+    }
+
+    /// field 1 start-group, nested field 2 varint 150, field 1 end-group, then
+    /// field 3 varint 7.
+    fn message_with_group_then_varint() -> Vec<u8> {
+        vec![
+            0x0B, // field 1 SGroup
+            0x10, 0x96, 0x01, // field 2 varint 150
+            0x0C, // field 1 EGroup
+            0x18, 0x07, // field 3 varint 7
+        ]
+    }
+
+    #[test]
+    fn skip_empty_group_then_read_next_field() {
+        let bytes = [0x0B, 0x0C, 0x08, 0x01]; // empty group 1, then field 1 = 1
+        let mut fields = slice_fields(&bytes);
+        let err = fields.next().unwrap().unwrap_err();
+        let ProtobufError::UnsupportedGroup {
+            field_number,
+            wire_type: WireType::SGroup,
+        } = err
+        else {
+            panic!("expected SGroup UnsupportedGroup, got {err:?}");
+        };
+        fields.skip_protobuf_group(field_number).unwrap();
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 1);
+        let FieldValue::Varint(v) = next.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 1);
+        assert!(fields.next().is_none());
+    }
+
+    #[test]
+    fn skip_group_with_nested_fields_on_slice_iter() {
+        let bytes = message_with_group_then_varint();
+        let mut fields = slice_fields(&bytes);
+        let err = fields.next().unwrap().unwrap_err();
+        let ProtobufError::UnsupportedGroup {
+            field_number,
+            wire_type: WireType::SGroup,
+        } = err
+        else {
+            panic!("expected SGroup, got {err:?}");
+        };
+        assert_eq!(field_number.as_u32(), 1);
+        fields.skip_protobuf_group(field_number).unwrap();
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 3);
+        let FieldValue::Varint(v) = next.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 7);
+    }
+
+    #[test]
+    fn skip_nested_groups() {
+        // outer 1 { inner 2 { field 3 = 1 } } then field 4 = 2
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x13, // 2 SGroup
+            0x18, 0x01, // 3 varint 1
+            0x14, // 2 EGroup
+            0x0C, // 1 EGroup
+            0x20, 0x02, // 4 varint 2
+        ];
+        let mut fields = slice_fields(&bytes);
+        let err = fields.next().unwrap().unwrap_err();
+        let ProtobufError::UnsupportedGroup {
+            field_number,
+            wire_type: WireType::SGroup,
+        } = err
+        else {
+            panic!("expected SGroup, got {err:?}");
+        };
+        fields.skip_protobuf_group(field_number).unwrap();
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 4);
+        let FieldValue::Varint(v) = next.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 2);
+
+        // Same skip via ReadExtProtobuf on a cursor past the start tag.
+        let mut cursor = &bytes[1..]; // after 0x0B
+        cursor.skip_protobuf_group(field(1)).unwrap();
+        assert_eq!(cursor, &[0x20, 0x02]);
+    }
+
+    #[test]
+    fn skip_group_containing_len_and_fixed() {
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x12, 0x03, b'a', b'b', b'c', // field 2 len "abc"
+            0x15, 0x01, 0x02, 0x03, 0x04, // field 2 fixed32
+            0x09, 0, 0, 0, 0, 0, 0, 0, 0,    // field 1 fixed64
+            0x0C, // 1 EGroup
+            0x10, 0x05, // field 2 varint 5
+        ];
+        let mut fields = slice_fields(&bytes);
+        let err = fields.next().unwrap().unwrap_err();
+        let ProtobufError::UnsupportedGroup {
+            field_number,
+            wire_type: WireType::SGroup,
+        } = err
+        else {
+            panic!("expected SGroup, got {err:?}");
+        };
+        fields.skip_protobuf_group(field_number).unwrap();
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 2);
+        let FieldValue::Varint(v) = next.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 5);
+    }
+
+    #[test]
+    fn mismatched_end_group_is_an_error() {
+        // start field 1, end field 2
+        let bytes = [0x0B, 0x14];
+        let mut fields = slice_fields(&bytes);
+        let err = fields.next().unwrap().unwrap_err();
+        let ProtobufError::UnsupportedGroup {
+            field_number,
+            wire_type: WireType::SGroup,
+        } = err
+        else {
+            panic!("expected SGroup, got {err:?}");
+        };
+        let skip_err = fields.skip_protobuf_group(field_number).unwrap_err();
+        assert!(
+            matches!(
+                skip_err,
+                ProtobufError::MismatchedEndGroup { expected, got }
+                if expected.as_u32() == 1 && got.as_u32() == 2
+            ),
+            "got {skip_err:?}"
+        );
+    }
+
+    #[test]
+    fn truncated_group_is_unexpected_eof() {
+        let bytes = [0x0B, 0x08, 0x01]; // start group, varint field, no end
+        let mut fields = slice_fields(&bytes);
+        let err = fields.next().unwrap().unwrap_err();
+        let ProtobufError::UnsupportedGroup {
+            field_number,
+            wire_type: WireType::SGroup,
+        } = err
+        else {
+            panic!("expected SGroup, got {err:?}");
+        };
+        assert!(matches!(
+            fields.skip_protobuf_group(field_number),
+            Err(ProtobufError::UnexpectedEof)
+        ));
+    }
+
+    #[test]
+    fn skip_via_byte_iterator_ext() {
+        let bytes = message_with_group_then_varint();
+        let mut iter = bytes.into_iter();
+        // Advance past start tag 0x0B
+        assert_eq!(iter.next(), Some(0x0B));
+        iter.skip_protobuf_group(field(1)).unwrap();
+        let fields: Vec<_> = iter
+            .protobuf_fields()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 3);
     }
 }
 
