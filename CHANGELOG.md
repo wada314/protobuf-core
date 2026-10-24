@@ -19,6 +19,10 @@ Breaking relative to 0.6.0. Exhaustive matches on `FieldValue` and `ProtobufErro
 
 - `ProtobufError::UnsupportedGroup` — group tags are no longer reported as errors from field readers.
 
+### Internal
+
+- Field I/O shares a `WireCursor` trait (tag / varint / fixed / `skip_bytes` / `skip_group_body`). `FieldValueReader` extends it with length-delimited materialization only.
+
 ## [0.6.0]
 
 Breaking error-enum change. Callers that matched `ProtobufError` exhaustively must handle the new variant. Callers that treated group tags (wire types 3 and 4) as `InvalidWireType` must match `UnsupportedGroup` instead.

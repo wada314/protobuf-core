@@ -237,7 +237,8 @@ mod tests {
     #[test]
     fn test_write_group_tags() {
         let mut buffer = Vec::new();
-        let start: Field<Vec<u8>> = Field::new(FieldNumber::try_new(1).unwrap(), FieldValue::SGroup);
+        let start: Field<Vec<u8>> =
+            Field::new(FieldNumber::try_new(1).unwrap(), FieldValue::SGroup);
         let inner: Field<Vec<u8>> =
             Field::new(FieldNumber::try_new(2).unwrap(), FieldValue::from_uint64(1));
         let end: Field<Vec<u8>> = Field::new(FieldNumber::try_new(1).unwrap(), FieldValue::EGroup);
