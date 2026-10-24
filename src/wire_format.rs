@@ -20,14 +20,12 @@ pub enum WireType {
     Int64 = 1,
     /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields)
     Len = 2,
-    /// Start group (deprecated). Field readers return
-    /// [`crate::ProtobufError::UnsupportedGroup`]. Call
-    /// [`crate::ReadExtProtobuf::skip_protobuf_group`] (or the matching method on
-    /// a field iterator) to discard the body through the matching end tag.
+    /// Start group (deprecated). Field readers return [`crate::FieldValue::SGroup`].
+    /// The group body follows on the wire; call
+    /// [`crate::ReadExtProtobuf::skip_protobuf_group`] to discard through the
+    /// matching end tag, or read nested fields until [`crate::FieldValue::EGroup`].
     SGroup = 3,
-    /// End group (deprecated). Field readers return
-    /// [`crate::ProtobufError::UnsupportedGroup`]. A lone end-group with no open
-    /// group is a wire error; do not call skip on it.
+    /// End group (deprecated). Field readers return [`crate::FieldValue::EGroup`].
     EGroup = 4,
     /// 32-bit fixed-width values (Fixed32, SFixed32, Float)
     Int32 = 5,

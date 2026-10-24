@@ -106,12 +106,8 @@ where
             let data = reader.read_length_delimited(length)?;
             FieldValue::Len(data)
         }
-        WireType::SGroup | WireType::EGroup => {
-            return Err(ProtobufError::UnsupportedGroup {
-                field_number: tag.field_number,
-                wire_type: tag.wire_type,
-            });
-        }
+        WireType::SGroup => FieldValue::SGroup,
+        WireType::EGroup => FieldValue::EGroup,
     };
 
     Ok(Some(Field {
@@ -377,8 +373,8 @@ impl<I, F> FieldIterFromBytes<I, F> {
     /// Skip a group body after its start-group tag was already consumed.
     ///
     /// After [`protobuf_fields`](IteratorExtProtobuf::protobuf_fields) yields
-    /// [`ProtobufError::UnsupportedGroup`] with [`WireType::SGroup`], call this
-    /// with that field number before continuing to iterate.
+    /// [`FieldValue::SGroup`], call this with that field's number before
+    /// continuing to iterate (unless you will read the nested fields yourself).
     pub fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()>
     where
         I: Iterator<Item = u8>,
@@ -1542,20 +1538,12 @@ mod tests {
             })
         ));
 
-        // Wire types 3 and 4 are known group types; field readers reject them
-        // as UnsupportedGroup (not InvalidWireType).
-        use crate::wire_format::WireType;
-        for (byte, wire_type) in [(0x0Bu8, WireType::SGroup), (0x0C, WireType::EGroup)] {
+        // Wire types 3 and 4 are group tags; field readers return them as values.
+        for (byte, expected) in [(0x0Bu8, FieldValue::SGroup), (0x0C, FieldValue::EGroup)] {
             let bytes = [byte];
-            let (got_number, got_wire) = match bytes[..].read_protobuf_fields().next().unwrap() {
-                Err(ProtobufError::UnsupportedGroup {
-                    field_number,
-                    wire_type,
-                }) => (field_number.as_u32(), wire_type),
-                other => panic!("expected UnsupportedGroup, got {other:?}"),
-            };
-            assert_eq!(got_number, 1);
-            assert_eq!(got_wire, wire_type);
+            let field = bytes[..].read_protobuf_fields().next().unwrap().unwrap();
+            assert_eq!(field.field_number.as_u32(), 1);
+            assert_eq!(field.value, expected);
         }
     }
 }
@@ -1564,7 +1552,6 @@ mod tests {
 mod group_skip {
     use super::{AsRefExtProtobuf, IteratorExtProtobuf, ReadExtProtobuf};
     use crate::field_number::FieldNumber;
-    use crate::wire_format::WireType;
     use crate::{FieldValue, ProtobufError};
 
     fn field(n: u32) -> FieldNumber {
@@ -1573,6 +1560,17 @@ mod group_skip {
 
     fn slice_fields(bytes: &[u8]) -> super::FieldIterFromSlice<'_> {
         AsRefExtProtobuf::read_protobuf_fields(bytes)
+    }
+
+    /// Take the next field and assert it is an `SGroup`; return its field number.
+    fn expect_sgroup(fields: &mut super::FieldIterFromSlice<'_>) -> FieldNumber {
+        let field = fields.next().unwrap().unwrap();
+        assert!(
+            matches!(field.value, FieldValue::SGroup),
+            "expected SGroup, got {:?}",
+            field.value
+        );
+        field.field_number
     }
 
     /// field 1 start-group, nested field 2 varint 150, field 1 end-group, then
@@ -1590,14 +1588,7 @@ mod group_skip {
     fn skip_empty_group_then_read_next_field() {
         let bytes = [0x0B, 0x0C, 0x08, 0x01]; // empty group 1, then field 1 = 1
         let mut fields = slice_fields(&bytes);
-        let err = fields.next().unwrap().unwrap_err();
-        let ProtobufError::UnsupportedGroup {
-            field_number,
-            wire_type: WireType::SGroup,
-        } = err
-        else {
-            panic!("expected SGroup UnsupportedGroup, got {err:?}");
-        };
+        let field_number = expect_sgroup(&mut fields);
         fields.skip_protobuf_group(field_number).unwrap();
         let next = fields.next().unwrap().unwrap();
         assert_eq!(next.field_number.as_u32(), 1);
@@ -1612,14 +1603,7 @@ mod group_skip {
     fn skip_group_with_nested_fields_on_slice_iter() {
         let bytes = message_with_group_then_varint();
         let mut fields = slice_fields(&bytes);
-        let err = fields.next().unwrap().unwrap_err();
-        let ProtobufError::UnsupportedGroup {
-            field_number,
-            wire_type: WireType::SGroup,
-        } = err
-        else {
-            panic!("expected SGroup, got {err:?}");
-        };
+        let field_number = expect_sgroup(&mut fields);
         assert_eq!(field_number.as_u32(), 1);
         fields.skip_protobuf_group(field_number).unwrap();
         let next = fields.next().unwrap().unwrap();
@@ -1642,14 +1626,7 @@ mod group_skip {
             0x20, 0x02, // 4 varint 2
         ];
         let mut fields = slice_fields(&bytes);
-        let err = fields.next().unwrap().unwrap_err();
-        let ProtobufError::UnsupportedGroup {
-            field_number,
-            wire_type: WireType::SGroup,
-        } = err
-        else {
-            panic!("expected SGroup, got {err:?}");
-        };
+        let field_number = expect_sgroup(&mut fields);
         fields.skip_protobuf_group(field_number).unwrap();
         let next = fields.next().unwrap().unwrap();
         assert_eq!(next.field_number.as_u32(), 4);
@@ -1675,14 +1652,7 @@ mod group_skip {
             0x10, 0x05, // field 2 varint 5
         ];
         let mut fields = slice_fields(&bytes);
-        let err = fields.next().unwrap().unwrap_err();
-        let ProtobufError::UnsupportedGroup {
-            field_number,
-            wire_type: WireType::SGroup,
-        } = err
-        else {
-            panic!("expected SGroup, got {err:?}");
-        };
+        let field_number = expect_sgroup(&mut fields);
         fields.skip_protobuf_group(field_number).unwrap();
         let next = fields.next().unwrap().unwrap();
         assert_eq!(next.field_number.as_u32(), 2);
@@ -1693,18 +1663,36 @@ mod group_skip {
     }
 
     #[test]
+    fn read_group_body_field_by_field_until_egroup() {
+        let bytes = message_with_group_then_varint();
+        let mut fields = slice_fields(&bytes);
+        assert_eq!(expect_sgroup(&mut fields).as_u32(), 1);
+
+        let inner = fields.next().unwrap().unwrap();
+        assert_eq!(inner.field_number.as_u32(), 2);
+        let FieldValue::Varint(v) = inner.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 150);
+
+        let end = fields.next().unwrap().unwrap();
+        assert_eq!(end.field_number.as_u32(), 1);
+        assert!(matches!(end.value, FieldValue::EGroup));
+
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 3);
+        let FieldValue::Varint(v) = after.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 7);
+    }
+
+    #[test]
     fn mismatched_end_group_is_an_error() {
         // start field 1, end field 2
         let bytes = [0x0B, 0x14];
         let mut fields = slice_fields(&bytes);
-        let err = fields.next().unwrap().unwrap_err();
-        let ProtobufError::UnsupportedGroup {
-            field_number,
-            wire_type: WireType::SGroup,
-        } = err
-        else {
-            panic!("expected SGroup, got {err:?}");
-        };
+        let field_number = expect_sgroup(&mut fields);
         let skip_err = fields.skip_protobuf_group(field_number).unwrap_err();
         assert!(
             matches!(
@@ -1720,14 +1708,7 @@ mod group_skip {
     fn truncated_group_is_unexpected_eof() {
         let bytes = [0x0B, 0x08, 0x01]; // start group, varint field, no end
         let mut fields = slice_fields(&bytes);
-        let err = fields.next().unwrap().unwrap_err();
-        let ProtobufError::UnsupportedGroup {
-            field_number,
-            wire_type: WireType::SGroup,
-        } = err
-        else {
-            panic!("expected SGroup, got {err:?}");
-        };
+        let field_number = expect_sgroup(&mut fields);
         assert!(matches!(
             fields.skip_protobuf_group(field_number),
             Err(ProtobufError::UnexpectedEof)

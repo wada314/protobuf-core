@@ -7,16 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.0]
 
-Breaking error-enum change relative to 0.6.0. Callers that matched `UnsupportedGroup { wire_type }` must also bind `field_number`. Exhaustive matches must handle `MismatchedEndGroup`.
+Breaking relative to 0.6.0. Exhaustive matches on `FieldValue` and `ProtobufError` must update. Callers that treated group tags as `UnsupportedGroup` errors must match `FieldValue::SGroup` / `FieldValue::EGroup` instead.
 
 ### Added
 
+- `FieldValue::SGroup` and `FieldValue::EGroup` — field readers return these as successful tag-only values. Writers emit the corresponding tag with no payload. `encoded_size` for the value is `0` (tag size is in `Field::encoded_size`).
 - `skip_protobuf_group(field_number)` on `ReadExtProtobuf`, `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, and on `FieldIterFromBytes` / `FieldIterFromTryBytes` / `FieldIterFromRead` / `FieldIterFromSlice`. After a start-group tag has been consumed, skips nested fields until the matching end-group. Does not allocate length-delimited payloads while skipping.
-- `ProtobufError::MismatchedEndGroup { expected, got }` when an end-group field number does not match the open start-group.
+- `ProtobufError::MismatchedEndGroup { expected, got }` when an end-group field number does not match the open start-group during skip.
 
-### Changed
+### Removed
 
-- `ProtobufError::UnsupportedGroup` now includes `field_number` so callers can pass it to `skip_protobuf_group` after a field reader rejects a start-group tag.
+- `ProtobufError::UnsupportedGroup` — group tags are no longer reported as errors from field readers.
 
 ## [0.6.0]
 

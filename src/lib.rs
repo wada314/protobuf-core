@@ -67,6 +67,7 @@
 //!   - `I64([u8; 8])`: 64-bit fixed-width values (Fixed64, SFixed64, Double)
 //!   - `Len(L)`: Length-delimited values (String, Bytes, embedded messages, packed repeated
 //!     fields)
+//!   - `SGroup` / `EGroup`: Deprecated group start/end tags (no payload; body follows `SGroup`)
 //!
 //! ### Basic Types
 //!
@@ -157,29 +158,10 @@ pub enum ProtobufError {
     /// The tag's low 3 bits were not a known wire type (must be 0–5).
     ///
     /// Deprecated group types [`WireType::SGroup`] (3) and [`WireType::EGroup`]
-    /// (4) are known wire types; field readers report
-    /// [`UnsupportedGroup`](Self::UnsupportedGroup) for those instead.
+    /// (4) are known wire types; field readers return
+    /// [`FieldValue::SGroup`] / [`FieldValue::EGroup`] for those.
     #[error("Invalid wire type: {value} (must be 0-5)")]
     InvalidWireType { value: u8 },
-
-    /// A start-group or end-group tag was seen by a field reader.
-    ///
-    /// Field iterators do not return group payloads. After
-    /// [`WireType::SGroup`], call [`skip_protobuf_group`] on the same reader or
-    /// field iterator to discard the group body through the matching end tag.
-    /// [`WireType::EGroup`] with no open group is a wire error; do not skip.
-    ///
-    /// `wire_type` is always [`WireType::SGroup`] or [`WireType::EGroup`].
-    ///
-    /// [`skip_protobuf_group`]: ReadExtProtobuf::skip_protobuf_group
-    #[error(
-        "Deprecated group wire type {wire_type:?} for field {} is not returned as a field value",
-        field_number.as_u32()
-    )]
-    UnsupportedGroup {
-        field_number: FieldNumber,
-        wire_type: WireType,
-    },
 
     /// An end-group tag's field number did not match the open start-group.
     #[error(
