@@ -95,36 +95,32 @@ pub(crate) trait WireCursor {
 
     /// Skip a group body after the start-group tag has already been consumed.
     ///
-    /// Reads tags until the matching end-group for `field_number`. Nested
-    /// start-group tags push another frame; their end tags must match in LIFO
-    /// order.
+    /// Reads tags until the matching end-group for `field_number`. A nested
+    /// start-group recurses into this method so the call stack is the open-group
+    /// stack.
     fn skip_group_body(&mut self, field_number: FieldNumber) -> Result<()> {
-        // Open frames: the outermost group whose start tag was already consumed,
-        // then any nested groups entered while scanning.
-        let mut open: Vec<FieldNumber> = vec![field_number];
-
-        while let Some(&expected) = open.last() {
+        loop {
             let tag = self.read_tag()?.ok_or(ProtobufError::UnexpectedEof)?;
             match tag.wire_type {
                 WireType::SGroup => {
-                    open.push(tag.field_number);
+                    // Start tag already consumed; skip the nested body through
+                    // its matching end tag.
+                    self.skip_group_body(tag.field_number)?;
                 }
                 WireType::EGroup => {
-                    if tag.field_number != expected {
+                    if tag.field_number != field_number {
                         return Err(ProtobufError::MismatchedEndGroup {
-                            expected,
+                            expected: field_number,
                             got: tag.field_number,
                         });
                     }
-                    open.pop();
+                    return Ok(());
                 }
                 wire_type => {
                     self.skip_field_payload(wire_type)?;
                 }
             }
         }
-
-        Ok(())
     }
 }
 
