@@ -74,11 +74,11 @@ where
     }
 }
 
-/// Trait for reading field values from different data sources.
+/// [`WireCursor`] that can materialize a byte buffer into `L`.
 ///
-/// Extends [`WireCursor`] with byte-buffer materialization into `L`.
-/// Different implementations handle Iterator, Read, slice, etc.
-pub(crate) trait FieldValueReader<L>: WireCursor {
+/// Streaming sources build `L` with the caller's closure; the slice source
+/// borrows `&[u8]`.
+pub(crate) trait BufWireCursor<L>: WireCursor {
     /// Read exactly `length` bytes into an `L` buffer.
     ///
     /// This is the materializing counterpart of [`WireCursor::skip_bytes`].
@@ -87,7 +87,7 @@ pub(crate) trait FieldValueReader<L>: WireCursor {
     fn read_bytes(&mut self, length: usize) -> Result<L>;
 }
 
-/// Parse a complete field (tag + value) from a field value reader.
+/// Parse a complete field (tag + value) from a [`BufWireCursor`].
 ///
 /// `L` is the length-delimited payload. Streaming readers build it with the
 /// caller's closure. The slice reader uses `&'a [u8]`.
@@ -97,7 +97,7 @@ pub(crate) trait FieldValueReader<L>: WireCursor {
 /// [`skip_group_body`].
 pub(crate) fn parse_field<L, R>(reader: &mut R) -> Result<Option<Field<L>>>
 where
-    R: FieldValueReader<L>,
+    R: BufWireCursor<L>,
 {
     let Some(tag) = read_tag(reader)? else {
         return Ok(None);
@@ -327,7 +327,7 @@ where
 // IteratorExtProtobuf
 // ============================================================================
 
-/// Helper struct implementing FieldValueReader for Iterator<Item = u8>
+/// Helper struct implementing BufWireCursor for Iterator<Item = u8>
 struct IteratorReader<'a, I, F>(&'a mut I, &'a mut F);
 
 impl<I, F> WireCursor for IteratorReader<'_, I, F>
@@ -347,7 +347,7 @@ where
     }
 }
 
-impl<I, F, L> FieldValueReader<L> for IteratorReader<'_, I, F>
+impl<I, F, L> BufWireCursor<L> for IteratorReader<'_, I, F>
 where
     I: Iterator<Item = u8>,
     F: FnMut(usize) -> Result<L>,
@@ -476,7 +476,7 @@ where
 // TryIteratorExtProtobuf
 // ============================================================================
 
-/// Helper struct implementing FieldValueReader for Iterator<Item = Result<u8, E>>
+/// Helper struct implementing BufWireCursor for Iterator<Item = Result<u8, E>>
 struct TryIteratorReader<'a, I, F>(&'a mut I, &'a mut F);
 
 impl<I, E, F> WireCursor for TryIteratorReader<'_, I, F>
@@ -497,7 +497,7 @@ where
     }
 }
 
-impl<I, E, F, L> FieldValueReader<L> for TryIteratorReader<'_, I, F>
+impl<I, E, F, L> BufWireCursor<L> for TryIteratorReader<'_, I, F>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
@@ -636,7 +636,7 @@ where
 // ReadExtProtobuf
 // ============================================================================
 
-/// Helper struct implementing FieldValueReader for Read
+/// Helper struct implementing BufWireCursor for Read
 struct ReadReader<'a, R, F>(&'a mut R, &'a mut F);
 
 impl<R, F> WireCursor for ReadReader<'_, R, F>
@@ -656,7 +656,7 @@ where
     }
 }
 
-impl<R, F, L> FieldValueReader<L> for ReadReader<'_, R, F>
+impl<R, F, L> BufWireCursor<L> for ReadReader<'_, R, F>
 where
     R: Read,
     F: FnMut(usize) -> Result<L>,
@@ -813,7 +813,7 @@ where
 // AsRefExtProtobuf
 // ============================================================================
 
-/// Helper struct implementing FieldValueReader for slice-based readers
+/// Helper struct implementing BufWireCursor for slice-based readers
 pub(crate) struct SliceReader<'a, 'b> {
     pub(crate) slice: &'b mut &'a [u8],
 }
@@ -843,7 +843,7 @@ impl WireCursor for SliceReader<'_, '_> {
     }
 }
 
-impl<'a> FieldValueReader<&'a [u8]> for SliceReader<'a, '_> {
+impl<'a> BufWireCursor<&'a [u8]> for SliceReader<'a, '_> {
     fn read_bytes(&mut self, length: usize) -> Result<&'a [u8]> {
         let (value_slice, remaining) = self
             .slice
