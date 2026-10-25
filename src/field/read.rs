@@ -81,7 +81,19 @@ pub(crate) trait WireCursor {
         let Some(tag) = self.read_tag()? else {
             return Ok(None);
         };
-        skip_field_payload(self, tag.wire_type)?;
+        match tag.wire_type {
+            WireType::Varint => {
+                self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+            }
+            WireType::Int32 => self.skip_bytes(4)?,
+            WireType::Int64 => self.skip_bytes(8)?,
+            WireType::Len => {
+                let length_varint = self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+                let length = length_varint.try_to_uint32()? as usize;
+                self.skip_bytes(length)?;
+            }
+            WireType::SGroup | WireType::EGroup => {}
+        }
         Ok(Some(tag))
     }
 
@@ -163,29 +175,6 @@ pub(crate) trait BufWireCursor<L>: WireCursor {
             field_number: tag.field_number,
             value,
         }))
-    }
-}
-
-/// Skip the payload of one field after its tag has already been consumed.
-///
-/// Group tags have no payload.
-fn skip_field_payload<C>(cursor: &mut C, wire_type: WireType) -> Result<()>
-where
-    C: WireCursor + ?Sized,
-{
-    match wire_type {
-        WireType::Varint => {
-            cursor.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-            Ok(())
-        }
-        WireType::Int32 => cursor.skip_bytes(4),
-        WireType::Int64 => cursor.skip_bytes(8),
-        WireType::Len => {
-            let length_varint = cursor.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-            let length = length_varint.try_to_uint32()? as usize;
-            cursor.skip_bytes(length)
-        }
-        WireType::SGroup | WireType::EGroup => Ok(()),
     }
 }
 
