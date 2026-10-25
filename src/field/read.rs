@@ -76,13 +76,15 @@ where
 
 /// Trait for reading field values from different data sources.
 ///
-/// Extends [`WireCursor`] with length-delimited payload materialization.
+/// Extends [`WireCursor`] with byte-buffer materialization into `L`.
 /// Different implementations handle Iterator, Read, slice, etc.
 pub(crate) trait FieldValueReader<L>: WireCursor {
-    /// Read a length-delimited byte sequence.
+    /// Read exactly `length` bytes into an `L` buffer.
     ///
-    /// `length` is the number of bytes after the length varint has been parsed.
-    fn read_length_delimited(&mut self, length: usize) -> Result<L>;
+    /// This is the materializing counterpart of [`WireCursor::skip_bytes`].
+    /// For a Len field, the length varint is parsed first; this method only
+    /// consumes the following payload bytes.
+    fn read_bytes(&mut self, length: usize) -> Result<L>;
 }
 
 /// Parse a complete field (tag + value) from a field value reader.
@@ -117,7 +119,7 @@ where
         WireType::Len => {
             let length_varint = reader.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
             let length = length_varint.try_to_uint32()? as usize;
-            let data = reader.read_length_delimited(length)?;
+            let data = reader.read_bytes(length)?;
             FieldValue::Len(data)
         }
         WireType::SGroup => FieldValue::SGroup,
@@ -351,7 +353,7 @@ where
     F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
-    fn read_length_delimited(&mut self, length: usize) -> Result<L> {
+    fn read_bytes(&mut self, length: usize) -> Result<L> {
         let mut payload = make_payload(self.1, length)?;
         for byte in &mut payload.as_mut()[..length] {
             *byte = self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
@@ -502,7 +504,7 @@ where
     F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
-    fn read_length_delimited(&mut self, length: usize) -> Result<L> {
+    fn read_bytes(&mut self, length: usize) -> Result<L> {
         let mut payload = make_payload(self.1, length)?;
         for byte in &mut payload.as_mut()[..length] {
             *byte = self
@@ -660,7 +662,7 @@ where
     F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
-    fn read_length_delimited(&mut self, length: usize) -> Result<L> {
+    fn read_bytes(&mut self, length: usize) -> Result<L> {
         let mut payload = make_payload(self.1, length)?;
         self.0.read_exact(&mut payload.as_mut()[..length])?;
         Ok(payload)
@@ -842,7 +844,7 @@ impl WireCursor for SliceReader<'_, '_> {
 }
 
 impl<'a> FieldValueReader<&'a [u8]> for SliceReader<'a, '_> {
-    fn read_length_delimited(&mut self, length: usize) -> Result<&'a [u8]> {
+    fn read_bytes(&mut self, length: usize) -> Result<&'a [u8]> {
         let (value_slice, remaining) = self
             .slice
             .split_at_checked(length)
