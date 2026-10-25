@@ -31,6 +31,7 @@ pub(crate) mod write;
 pub use self::read::{
     AsRefExtProtobuf, FieldIterFromBytes, FieldIterFromRead, FieldIterFromSlice,
     FieldIterFromTryBytes, IteratorExtProtobuf, ReadExtProtobuf, TryIteratorExtProtobuf,
+    UntilGroupEnds,
 };
 pub use self::write::WriteExtProtobuf;
 
@@ -47,9 +48,10 @@ pub use self::write::WriteExtProtobuf;
 ///  - Slice readers borrow the input as `&'a [u8]`.
 ///
 /// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
-/// does not include the group body. After an `SGroup`, call
-/// [`skip_protobuf_group`](crate::ReadExtProtobuf::skip_protobuf_group) (or write
-/// nested fields and a matching `EGroup`) before reading the next top-level field.
+/// does not include the group body. After an `SGroup`, skip the body with
+/// [`skip_until`](crate::ReadExtProtobuf::skip_until) and
+/// [`UntilGroupEnds`](crate::UntilGroupEnds) (or read nested fields until a
+/// matching `EGroup`) before reading the next top-level field.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
     /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`)

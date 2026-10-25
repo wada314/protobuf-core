@@ -44,11 +44,60 @@ where
 // Common parsing infrastructure
 // ============================================================================
 
+/// Predicate state for [`skip_until`](WireCursor::skip_until): stop after the
+/// matching end-group, including nested groups.
+///
+/// Build with [`after_start`](Self::after_start) once the start-group tag for
+/// that field number has already been consumed. For each subsequent skipped
+/// field, call [`feed`](Self::feed) (or pass it into a `FnMut` given to
+/// `skip_until`). `feed` returns `Ok(true)` when the matching end-group has
+/// been consumed.
+///
+/// Open groups are tracked with an explicit stack (LIFO field numbers).
+#[derive(Debug, Clone)]
+pub struct UntilGroupEnds {
+    stack: Vec<FieldNumber>,
+}
+
+impl UntilGroupEnds {
+    /// Start skipping a group body whose start tag was already consumed.
+    pub fn after_start(field_number: FieldNumber) -> Self {
+        Self {
+            stack: vec![field_number],
+        }
+    }
+
+    /// Observe one skipped field's tag.
+    ///
+    /// Returns `Ok(true)` when the group opened by [`after_start`](Self::after_start)
+    /// has been fully closed (including nested groups).
+    pub fn feed(&mut self, tag: Tag) -> Result<bool> {
+        match tag.wire_type {
+            WireType::SGroup => {
+                self.stack.push(tag.field_number);
+                Ok(false)
+            }
+            WireType::EGroup => {
+                let expected = *self.stack.last().ok_or(ProtobufError::UnexpectedEof)?;
+                if tag.field_number != expected {
+                    return Err(ProtobufError::MismatchedEndGroup {
+                        expected,
+                        got: tag.field_number,
+                    });
+                }
+                self.stack.pop();
+                Ok(self.stack.is_empty())
+            }
+            _ => Ok(false),
+        }
+    }
+}
+
 /// Byte-level cursor over protobuf wire data.
 ///
 /// Required methods are atomic fragments (`read_varint` / `read_fixed` /
 /// `skip_bytes`). Default methods compose those into tags, one field skip,
-/// and group-body skip.
+/// and conditional multi-field skip.
 pub(crate) trait WireCursor {
     /// Read a varint (returns `None` when the stream is empty).
     fn read_varint(&mut self) -> Result<Option<Varint>>;
@@ -97,27 +146,27 @@ pub(crate) trait WireCursor {
         Ok(Some(tag))
     }
 
-    /// Skip a group body after the start-group tag has already been consumed.
+    /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// Composes [`skip_field`](Self::skip_field): nested start-groups recurse
-    /// so the call stack is the open-group stack.
-    fn skip_group_body(&mut self, field_number: FieldNumber) -> Result<()> {
+    /// Each iteration runs [`skip_field`](Self::skip_field) (so length-delimited
+    /// payloads are discarded without allocating) and passes the field's [`Tag`]
+    /// to `pred`. EOF before `pred` succeeds is [`ProtobufError::UnexpectedEof`].
+    ///
+    /// For a group body after its start tag was consumed, use
+    /// [`UntilGroupEnds`]:
+    ///
+    /// ```ignore
+    /// let mut until = UntilGroupEnds::after_start(field_number);
+    /// cursor.skip_until(|tag| until.feed(tag))?;
+    /// ```
+    fn skip_until<F>(&mut self, mut pred: F) -> Result<()>
+    where
+        F: FnMut(Tag) -> Result<bool>,
+    {
         loop {
             let tag = self.skip_field()?.ok_or(ProtobufError::UnexpectedEof)?;
-            match tag.wire_type {
-                WireType::SGroup => {
-                    self.skip_group_body(tag.field_number)?;
-                }
-                WireType::EGroup => {
-                    if tag.field_number != field_number {
-                        return Err(ProtobufError::MismatchedEndGroup {
-                            expected: field_number,
-                            got: tag.field_number,
-                        });
-                    }
-                    return Ok(());
-                }
-                _ => {}
+            if pred(tag)? {
+                return Ok(());
             }
         }
     }
@@ -142,7 +191,7 @@ pub(crate) trait BufWireCursor<L>: WireCursor {
     ///
     /// For [`FieldValue::SGroup`] / [`FieldValue::EGroup`], only the tag is
     /// consumed; a start-group body remains on the cursor for the caller to
-    /// read or [`skip_group_body`](WireCursor::skip_group_body).
+    /// read or [`skip_until`](WireCursor::skip_until) with [`UntilGroupEnds`].
     fn parse_field(&mut self) -> Result<Option<Field<L>>> {
         let Some(tag) = self.read_tag()? else {
             return Ok(None);
@@ -328,16 +377,17 @@ pub struct FieldIterFromBytes<I, F = fn(usize) -> Result<Vec<u8>>> {
 }
 
 impl<I, F> FieldIterFromBytes<I, F> {
-    /// Skip a group body after its start-group tag was already consumed.
+    /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// After [`protobuf_fields`](IteratorExtProtobuf::protobuf_fields) yields
-    /// [`FieldValue::SGroup`], call this with that field's number before
-    /// continuing to iterate (unless you will read the nested fields yourself).
-    pub fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()>
+    /// See [`WireCursor::skip_until`]. Length-delimited payloads are discarded
+    /// without allocating. For a group body after [`FieldValue::SGroup`], use
+    /// [`UntilGroupEnds`].
+    pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
     where
         I: Iterator<Item = u8>,
+        P: FnMut(Tag) -> Result<bool>,
     {
-        IterCursor(&mut self.iter).skip_group_body(field_number)
+        IterCursor(&mut self.iter).skip_until(pred)
     }
 }
 
@@ -404,10 +454,13 @@ pub trait IteratorExtProtobuf {
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
 
-    /// Skip a group body after its start-group tag was already consumed.
+    /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// Nested groups are skipped until the matching end-group for `field_number`.
-    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()>;
+    /// See [`FieldIterFromBytes::skip_until`]. For a group body, use
+    /// [`UntilGroupEnds`].
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>;
 }
 
 impl<I> IteratorExtProtobuf for I
@@ -423,8 +476,11 @@ where
         FieldIterFromBytes { iter: self, make }
     }
 
-    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
-        IterCursor(self).skip_group_body(field_number)
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        IterCursor(self).skip_until(pred)
     }
 }
 
@@ -487,11 +543,14 @@ where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
 {
-    /// Skip a group body after its start-group tag was already consumed.
+    /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// See [`FieldIterFromBytes::skip_protobuf_group`].
-    pub fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
-        TryIterCursor(&mut self.iter).skip_group_body(field_number)
+    /// See [`FieldIterFromBytes::skip_until`].
+    pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        TryIterCursor(&mut self.iter).skip_until(pred)
     }
 }
 
@@ -563,10 +622,13 @@ pub trait TryIteratorExtProtobuf {
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
 
-    /// Skip a group body after its start-group tag was already consumed.
+    /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// Nested groups are skipped until the matching end-group for `field_number`.
-    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()>;
+    /// See [`FieldIterFromBytes::skip_until`]. For a group body, use
+    /// [`UntilGroupEnds`].
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>;
 }
 
 impl<I, E> TryIteratorExtProtobuf for I
@@ -583,8 +645,11 @@ where
         FieldIterFromTryBytes { iter: self, make }
     }
 
-    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
-        TryIterCursor(self).skip_group_body(field_number)
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        TryIterCursor(self).skip_until(pred)
     }
 }
 
@@ -635,14 +700,15 @@ pub struct FieldIterFromRead<R, F = fn(usize) -> Result<Vec<u8>>> {
 }
 
 impl<R, F> FieldIterFromRead<R, F> {
-    /// Skip a group body after its start-group tag was already consumed.
+    /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// See [`FieldIterFromBytes::skip_protobuf_group`].
-    pub fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()>
+    /// See [`FieldIterFromBytes::skip_until`].
+    pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
     where
         R: Read,
+        P: FnMut(Tag) -> Result<bool>,
     {
-        ReadCursor(&mut self.reader).skip_group_body(field_number)
+        ReadCursor(&mut self.reader).skip_until(pred)
     }
 }
 
@@ -740,11 +806,14 @@ pub trait ReadExtProtobuf {
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
 
-    /// Skip a group body after its start-group tag was already consumed.
+    /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// Nested groups are skipped until the matching end-group for `field_number`.
-    /// Works for any `Read`, including a mutable slice cursor (`&mut &[u8]`).
-    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()>;
+    /// See [`FieldIterFromBytes::skip_until`]. For a group body, use
+    /// [`UntilGroupEnds`]. Works for any `Read`, including a mutable slice
+    /// cursor (`&mut &[u8]`).
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>;
 }
 
 impl<R> ReadExtProtobuf for R
@@ -760,8 +829,11 @@ where
         FieldIterFromRead { reader: self, make }
     }
 
-    fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
-        ReadCursor(self).skip_group_body(field_number)
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        ReadCursor(self).skip_until(pred)
     }
 }
 
@@ -816,14 +888,17 @@ pub struct FieldIterFromSlice<'a> {
 }
 
 impl<'a> FieldIterFromSlice<'a> {
-    /// Skip a group body after its start-group tag was already consumed.
+    /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// See [`FieldIterFromBytes::skip_protobuf_group`].
-    pub fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
+    /// See [`FieldIterFromBytes::skip_until`].
+    pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
         SliceReader {
             slice: &mut self.slice,
         }
-        .skip_group_body(field_number)
+        .skip_until(pred)
     }
 }
 
@@ -1523,11 +1598,12 @@ mod tests {
 #[cfg(test)]
 mod group_skip {
     use super::{
-        AsRefExtProtobuf, IterCursor, IteratorExtProtobuf, ReadExtProtobuf, SliceReader, WireCursor,
+        AsRefExtProtobuf, IterCursor, IteratorExtProtobuf, ReadExtProtobuf, SliceReader,
+        UntilGroupEnds, WireCursor,
     };
     use crate::field_number::FieldNumber;
     use crate::wire_format::WireType;
-    use crate::{FieldValue, ProtobufError};
+    use crate::{FieldValue, ProtobufError, Result};
 
     fn field(n: u32) -> FieldNumber {
         FieldNumber::try_new(n).unwrap()
@@ -1564,7 +1640,8 @@ mod group_skip {
         let bytes = [0x0B, 0x0C, 0x08, 0x01]; // empty group 1, then field 1 = 1
         let mut fields = slice_fields(&bytes);
         let field_number = expect_sgroup(&mut fields);
-        fields.skip_protobuf_group(field_number).unwrap();
+        let mut until = UntilGroupEnds::after_start(field_number);
+        fields.skip_until(|tag| until.feed(tag)).unwrap();
         let next = fields.next().unwrap().unwrap();
         assert_eq!(next.field_number.as_u32(), 1);
         let FieldValue::Varint(v) = next.value else {
@@ -1580,7 +1657,8 @@ mod group_skip {
         let mut fields = slice_fields(&bytes);
         let field_number = expect_sgroup(&mut fields);
         assert_eq!(field_number.as_u32(), 1);
-        fields.skip_protobuf_group(field_number).unwrap();
+        let mut until = UntilGroupEnds::after_start(field_number);
+        fields.skip_until(|tag| until.feed(tag)).unwrap();
         let next = fields.next().unwrap().unwrap();
         assert_eq!(next.field_number.as_u32(), 3);
         let FieldValue::Varint(v) = next.value else {
@@ -1602,7 +1680,8 @@ mod group_skip {
         ];
         let mut fields = slice_fields(&bytes);
         let field_number = expect_sgroup(&mut fields);
-        fields.skip_protobuf_group(field_number).unwrap();
+        let mut until = UntilGroupEnds::after_start(field_number);
+        fields.skip_until(|tag| until.feed(tag)).unwrap();
         let next = fields.next().unwrap().unwrap();
         assert_eq!(next.field_number.as_u32(), 4);
         let FieldValue::Varint(v) = next.value else {
@@ -1612,7 +1691,8 @@ mod group_skip {
 
         // Same skip via ReadExtProtobuf on a cursor past the start tag.
         let mut cursor = &bytes[1..]; // after 0x0B
-        cursor.skip_protobuf_group(field(1)).unwrap();
+        let mut until = UntilGroupEnds::after_start(field(1));
+        cursor.skip_until(|tag| until.feed(tag)).unwrap();
         assert_eq!(cursor, &[0x20, 0x02]);
     }
 
@@ -1628,7 +1708,8 @@ mod group_skip {
         ];
         let mut fields = slice_fields(&bytes);
         let field_number = expect_sgroup(&mut fields);
-        fields.skip_protobuf_group(field_number).unwrap();
+        let mut until = UntilGroupEnds::after_start(field_number);
+        fields.skip_until(|tag| until.feed(tag)).unwrap();
         let next = fields.next().unwrap().unwrap();
         assert_eq!(next.field_number.as_u32(), 2);
         let FieldValue::Varint(v) = next.value else {
@@ -1668,7 +1749,8 @@ mod group_skip {
         let bytes = [0x0B, 0x14];
         let mut fields = slice_fields(&bytes);
         let field_number = expect_sgroup(&mut fields);
-        let skip_err = fields.skip_protobuf_group(field_number).unwrap_err();
+        let mut until = UntilGroupEnds::after_start(field_number);
+        let skip_err = fields.skip_until(|tag| until.feed(tag)).unwrap_err();
         assert!(
             matches!(
                 skip_err,
@@ -1684,8 +1766,9 @@ mod group_skip {
         let bytes = [0x0B, 0x08, 0x01]; // start group, varint field, no end
         let mut fields = slice_fields(&bytes);
         let field_number = expect_sgroup(&mut fields);
+        let mut until = UntilGroupEnds::after_start(field_number);
         assert!(matches!(
-            fields.skip_protobuf_group(field_number),
+            fields.skip_until(|tag| until.feed(tag)),
             Err(ProtobufError::UnexpectedEof)
         ));
     }
@@ -1696,11 +1779,9 @@ mod group_skip {
         let mut iter = bytes.into_iter();
         // Advance past start tag 0x0B
         assert_eq!(iter.next(), Some(0x0B));
-        iter.skip_protobuf_group(field(1)).unwrap();
-        let fields: Vec<_> = iter
-            .protobuf_fields()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
+        let mut until = UntilGroupEnds::after_start(field(1));
+        iter.skip_until(|tag| until.feed(tag)).unwrap();
+        let fields: Vec<_> = iter.protobuf_fields().collect::<Result<Vec<_>>>().unwrap();
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].field_number.as_u32(), 3);
     }
@@ -1715,8 +1796,8 @@ mod group_skip {
         assert_eq!(start.field_number.as_u32(), 1);
         assert_eq!(start.wire_type, WireType::SGroup);
 
-        // Body still present: skip it via composition.
-        cursor.skip_group_body(start.field_number).unwrap();
+        let mut until = UntilGroupEnds::after_start(start.field_number);
+        cursor.skip_until(|tag| until.feed(tag)).unwrap();
 
         let after = cursor.skip_field().unwrap().unwrap();
         assert_eq!(after.field_number.as_u32(), 3);
@@ -1733,7 +1814,8 @@ mod group_skip {
 
         let start = cursor.skip_field().unwrap().unwrap();
         assert_eq!(start.wire_type, WireType::SGroup);
-        cursor.skip_group_body(start.field_number).unwrap();
+        let mut until = UntilGroupEnds::after_start(start.field_number);
+        cursor.skip_until(|tag| until.feed(tag)).unwrap();
         assert!(iter.next().is_none());
     }
 }
