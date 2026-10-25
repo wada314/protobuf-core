@@ -21,7 +21,7 @@ Breaking relative to 0.6.0. Exhaustive matches on `FieldValue` and `ProtobufErro
 
 ### Internal
 
-- Field I/O shares a `WireCursor` trait (tag / varint / fixed / `skip_bytes` / `skip_group_body`). `FieldValueReader` extends it with length-delimited materialization only.
+- Field I/O shares a fragment-level `WireCursor` (varint / fixed / `skip_bytes`). One complete field is `parse_field` / `skip_field` (`skip_field` returns the `Tag`). Group bodies use `skip_group_body`, composed from recursive `skip_field`. `FieldValueReader` extends `WireCursor` with Len materialization only.
 
 ## [0.6.0]
 
