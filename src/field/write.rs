@@ -75,6 +75,8 @@ where
             FieldValue::I32(_) => WireType::Int32,
             FieldValue::I64(_) => WireType::Int64,
             FieldValue::Len(_) => WireType::Len,
+            FieldValue::SGroup => WireType::SGroup,
+            FieldValue::EGroup => WireType::EGroup,
         };
         let tag = Tag {
             field_number: field.field_number,
@@ -83,7 +85,7 @@ where
         let tag_varint = tag.to_encoded();
         bytes_written += self.write_varint(&tag_varint)?;
 
-        // Write value
+        // Write value (group tags have no payload)
         match &field.value {
             FieldValue::Varint(varint) => {
                 bytes_written += self.write_varint(varint)?;
@@ -105,6 +107,7 @@ where
                 self.write_all(data_slice)?;
                 bytes_written += data_slice.len();
             }
+            FieldValue::SGroup | FieldValue::EGroup => {}
         }
 
         Ok(bytes_written)
@@ -221,6 +224,28 @@ mod tests {
             FieldValue::Len("Hello".to_string().into_bytes()),
         );
         assert_eq!(field.encoded_size(), 7); // tag (1 byte) + length (1 byte) + data (5 bytes)
+
+        // Group tags are tag-only (value encoded_size is 0).
+        let start: Field<Vec<u8>> =
+            Field::new(FieldNumber::try_new(1).unwrap(), FieldValue::SGroup);
+        assert_eq!(start.value.encoded_size(), 0);
+        assert_eq!(start.encoded_size(), 1); // 0x0B
+        let end: Field<Vec<u8>> = Field::new(FieldNumber::try_new(1).unwrap(), FieldValue::EGroup);
+        assert_eq!(end.encoded_size(), 1); // 0x0C
+    }
+
+    #[test]
+    fn test_write_group_tags() {
+        let mut buffer = Vec::new();
+        let start: Field<Vec<u8>> =
+            Field::new(FieldNumber::try_new(1).unwrap(), FieldValue::SGroup);
+        let inner: Field<Vec<u8>> =
+            Field::new(FieldNumber::try_new(2).unwrap(), FieldValue::from_uint64(1));
+        let end: Field<Vec<u8>> = Field::new(FieldNumber::try_new(1).unwrap(), FieldValue::EGroup);
+        buffer.write_protobuf_field(&start).unwrap();
+        buffer.write_protobuf_field(&inner).unwrap();
+        buffer.write_protobuf_field(&end).unwrap();
+        assert_eq!(buffer, vec![0x0B, 0x10, 0x01, 0x0C]);
     }
 
     #[test]

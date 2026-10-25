@@ -31,6 +31,7 @@ pub(crate) mod write;
 pub use self::read::{
     AsRefExtProtobuf, FieldIterFromBytes, FieldIterFromRead, FieldIterFromSlice,
     FieldIterFromTryBytes, IteratorExtProtobuf, ReadExtProtobuf, TryIteratorExtProtobuf,
+    until_group_ends,
 };
 pub use self::write::WriteExtProtobuf;
 
@@ -45,6 +46,12 @@ pub use self::write::WriteExtProtobuf;
 ///    `read_protobuf_fields_with` and `protobuf_fields_with` take
 ///    `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>` and call it once per payload.
 ///  - Slice readers borrow the input as `&'a [u8]`.
+///
+/// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
+/// does not include the group body. After an `SGroup`, skip the body with
+/// [`skip_until`](crate::ReadExtProtobuf::skip_until) and
+/// [`until_group_ends`](crate::until_group_ends) (or read nested fields until a
+/// matching `EGroup`) before reading the next top-level field.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
     /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`)
@@ -55,6 +62,10 @@ pub enum FieldValue<L> {
     I64([u8; 8]),
     /// Length-delimited values (`String`, `Bytes`, embedded messages, packed repeated fields)
     Len(L),
+    /// Start-group tag (deprecated). No payload bytes follow the tag itself.
+    SGroup,
+    /// End-group tag (deprecated). No payload bytes follow the tag itself.
+    EGroup,
 }
 
 impl<L> FieldValue<L> {
@@ -149,6 +160,8 @@ impl<L> FieldValue<L> {
                 let length_varint = Varint::from_uint64(length);
                 length_varint.varint_size() + data_slice.len()
             }
+            // Group tags carry no payload; the tag size is counted in `Field::encoded_size`.
+            Self::SGroup | Self::EGroup => 0,
         }
     }
 }
@@ -189,6 +202,8 @@ impl<L> Field<L> {
             FieldValue::I32(_) => WireType::Int32,
             FieldValue::I64(_) => WireType::Int64,
             FieldValue::Len(_) => WireType::Len,
+            FieldValue::SGroup => WireType::SGroup,
+            FieldValue::EGroup => WireType::EGroup,
         };
         let tag = Tag {
             field_number: self.field_number,

@@ -5,6 +5,7 @@
 //! payload with a closure `FnMut(usize) -> Result<L>`. Slice sources borrow them as `&[u8]`.
 
 use crate::field::{Field, FieldValue};
+use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::{DecodeOutcome, Varint};
 use crate::wire_format::WireType;
@@ -43,14 +44,70 @@ where
 // Common parsing infrastructure
 // ============================================================================
 
-/// Trait for reading field values from different data sources
+/// Predicate for [`skip_until`](WireCursor::skip_until): stop after the matching
+/// end-group, including nested groups.
 ///
-/// This trait abstracts the reading operations needed to parse field values.
-/// Different implementations handle different data source types (Iterator, Read, slice, etc.)
-pub(crate) trait FieldValueReader<L> {
-    /// Read a tag (field number + wire type)
+/// Call after the start-group tag for `field_number` has already been consumed.
+/// Open groups are tracked with an explicit stack (LIFO field numbers) captured
+/// inside the returned closure.
+///
+/// ```
+/// use ::protobuf_core::{AsRefExtProtobuf, FieldValue, until_group_ends};
+///
+/// let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
+/// let mut fields = bytes.as_slice().read_protobuf_fields();
+/// let start = fields.next().unwrap().unwrap();
+/// assert!(matches!(start.value, FieldValue::SGroup));
+/// fields.skip_until(until_group_ends(start.field_number)).unwrap();
+/// ```
+pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<bool> {
+    let mut stack = vec![field_number];
+    move |tag| match tag.wire_type {
+        WireType::SGroup => {
+            stack.push(tag.field_number);
+            Ok(false)
+        }
+        WireType::EGroup => {
+            let Some(&expected) = stack.last() else {
+                // Pred misuse: called after the tracked group already closed.
+                debug_assert!(
+                    false,
+                    "until_group_ends predicate called after the tracked group closed"
+                );
+                return Err(ProtobufError::UnexpectedEof);
+            };
+            if tag.field_number != expected {
+                return Err(ProtobufError::MismatchedEndGroup {
+                    expected,
+                    got: tag.field_number,
+                });
+            }
+            stack.pop();
+            Ok(stack.is_empty())
+        }
+        _ => Ok(false),
+    }
+}
+
+/// Byte-level cursor over protobuf wire data.
+///
+/// Required methods are atomic fragments (`read_varint` / `read_fixed` /
+/// `skip_bytes`). Default methods compose those into tags, one field skip,
+/// and conditional multi-field skip.
+pub(crate) trait WireCursor {
+    /// Read a varint (returns `None` when the stream is empty).
+    fn read_varint(&mut self) -> Result<Option<Varint>>;
+
+    /// Read exactly `N` bytes (fixed-width wire types).
+    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]>;
+
+    /// Discard exactly `length` bytes without allocating a payload buffer.
+    fn skip_bytes(&mut self, length: usize) -> Result<()>;
+
+    /// Read a tag (field number + wire type).
     ///
-    /// Default implementation uses `read_varint` and converts the varint to a tag.
+    /// Returns `Ok(None)` at EOF before any tag byte. Invalid field numbers and
+    /// wire types surface as [`ProtobufError`].
     fn read_tag(&mut self) -> Result<Option<Tag>> {
         match self.read_varint()? {
             Some(varint) => Tag::from_encoded(varint).map(Some),
@@ -58,78 +115,116 @@ pub(crate) trait FieldValueReader<L> {
         }
     }
 
-    /// Read a varint value (returns None when the stream is empty)
-    fn read_varint(&mut self) -> Result<Option<Varint>>;
-
-    /// Read exactly N bytes (for fixed-size wire types like Int32, Int64, Fixed32, Fixed64)
-    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]>;
-
-    /// Read a length-delimited byte sequence
+    /// Skip one complete field and return its tag.
     ///
-    /// The length parameter is the number of bytes to read after the length varint has been parsed.
-    fn read_length_delimited(&mut self, length: usize) -> Result<L>;
+    /// Dual of [`BufWireCursor::parse_field`]: the payload is discarded instead
+    /// of materialized. For [`WireType::SGroup`] / [`WireType::EGroup`], only
+    /// the tag is consumed; the start-group body is left for the caller.
+    ///
+    /// Returns `Ok(None)` at EOF before any tag byte.
+    fn skip_field(&mut self) -> Result<Option<Tag>> {
+        let Some(tag) = self.read_tag()? else {
+            return Ok(None);
+        };
+        match tag.wire_type {
+            WireType::Varint => {
+                self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+            }
+            WireType::Int32 => self.skip_bytes(4)?,
+            WireType::Int64 => self.skip_bytes(8)?,
+            WireType::Len => {
+                let length_varint = self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+                let length = length_varint.try_to_uint32()? as usize;
+                self.skip_bytes(length)?;
+            }
+            WireType::SGroup | WireType::EGroup => {}
+        }
+        Ok(Some(tag))
+    }
+
+    /// Skip fields until `pred` returns `Ok(true)`.
+    ///
+    /// Each iteration runs [`skip_field`](Self::skip_field) (so length-delimited
+    /// payloads are discarded without allocating) and passes the field's [`Tag`]
+    /// to `pred`. EOF before `pred` succeeds is [`ProtobufError::UnexpectedEof`].
+    ///
+    /// For a group body after its start tag was consumed, use
+    /// [`until_group_ends`] (see [`FieldIterFromSlice::skip_until`] for a
+    /// runnable public example).
+    fn skip_until<F>(&mut self, mut pred: F) -> Result<()>
+    where
+        F: FnMut(Tag) -> Result<bool>,
+    {
+        loop {
+            let tag = self.skip_field()?.ok_or(ProtobufError::UnexpectedEof)?;
+            if pred(tag)? {
+                return Ok(());
+            }
+        }
+    }
 }
 
-/// Parse a complete field (tag + value) from a field value reader
+/// [`WireCursor`] that can materialize a byte buffer into `L`.
 ///
-/// This is the common parsing logic for reading a complete field.
-/// `L` is the length-delimited payload. Streaming readers build it with the
-/// caller's closure. The slice reader uses `&'a [u8]`.
-pub(crate) fn parse_field<L, R>(reader: &mut R) -> Result<Option<Field<L>>>
-where
-    R: FieldValueReader<L>,
-{
-    // Read tag
-    let Some(tag) = reader.read_tag()? else {
-        return Ok(None);
-    };
+/// Streaming sources build `L` with the caller's closure; the slice source
+/// borrows `&[u8]`.
+pub(crate) trait BufWireCursor<L>: WireCursor {
+    /// Read exactly `length` bytes into an `L` buffer.
+    ///
+    /// This is the materializing counterpart of [`WireCursor::skip_bytes`].
+    /// For a Len field, the length varint is parsed first; this method only
+    /// consumes the following payload bytes.
+    fn read_bytes(&mut self, length: usize) -> Result<L>;
 
-    // Parse value based on wire type
-    let value = match tag.wire_type {
-        WireType::Varint => {
-            let varint = reader.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-            FieldValue::Varint(varint)
-        }
-        WireType::Int32 => {
-            let bytes = reader.read_fixed::<4>()?;
-            FieldValue::I32(bytes)
-        }
-        WireType::Int64 => {
-            let bytes = reader.read_fixed::<8>()?;
-            FieldValue::I64(bytes)
-        }
-        WireType::Len => {
-            // Read length prefix (varint)
-            let length_varint = reader.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-            let length = length_varint.try_to_uint32()? as usize;
-            let data = reader.read_length_delimited(length)?;
-            FieldValue::Len(data)
-        }
-        WireType::SGroup | WireType::EGroup => {
-            return Err(ProtobufError::UnsupportedGroup {
-                wire_type: tag.wire_type,
-            });
-        }
-    };
+    /// Parse a complete field (tag + value).
+    ///
+    /// `L` is the length-delimited payload. Streaming readers build it with the
+    /// caller's closure. The slice reader uses `&'a [u8]`.
+    ///
+    /// For [`FieldValue::SGroup`] / [`FieldValue::EGroup`], only the tag is
+    /// consumed; a start-group body remains on the cursor for the caller to
+    /// read or [`skip_until`](WireCursor::skip_until) with [`until_group_ends`].
+    fn parse_field(&mut self) -> Result<Option<Field<L>>> {
+        let Some(tag) = self.read_tag()? else {
+            return Ok(None);
+        };
 
-    Ok(Some(Field {
-        field_number: tag.field_number,
-        value,
-    }))
+        let value = match tag.wire_type {
+            WireType::Varint => {
+                let varint = self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+                FieldValue::Varint(varint)
+            }
+            WireType::Int32 => {
+                let bytes = self.read_fixed::<4>()?;
+                FieldValue::I32(bytes)
+            }
+            WireType::Int64 => {
+                let bytes = self.read_fixed::<8>()?;
+                FieldValue::I64(bytes)
+            }
+            WireType::Len => {
+                let length_varint = self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+                let length = length_varint.try_to_uint32()? as usize;
+                let data = self.read_bytes(length)?;
+                FieldValue::Len(data)
+            }
+            WireType::SGroup => FieldValue::SGroup,
+            WireType::EGroup => FieldValue::EGroup,
+        };
+
+        Ok(Some(Field {
+            field_number: tag.field_number,
+            value,
+        }))
+    }
 }
 
-// ============================================================================
-// IteratorExtProtobuf
-// ============================================================================
+/// [`WireCursor`] over `Iterator<Item = u8>` (no length-delimited allocator).
+struct IterCursor<'a, I>(&'a mut I);
 
-/// Helper struct implementing FieldValueReader for Iterator<Item = u8>
-struct IteratorReader<'a, I, F>(&'a mut I, &'a mut F);
-
-impl<'a, I, F, L> FieldValueReader<L> for IteratorReader<'a, I, F>
+impl<I> WireCursor for IterCursor<'_, I>
 where
     I: Iterator<Item = u8>,
-    F: FnMut(usize) -> Result<L>,
-    L: AsMut<[u8]>,
 {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::IteratorExtVarint;
@@ -148,7 +243,114 @@ where
         Ok(bytes)
     }
 
-    fn read_length_delimited(&mut self, length: usize) -> Result<L> {
+    fn skip_bytes(&mut self, length: usize) -> Result<()> {
+        for _ in 0..length {
+            self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
+        }
+        Ok(())
+    }
+}
+
+/// [`WireCursor`] over `Iterator<Item = Result<u8, E>>`.
+struct TryIterCursor<'a, I>(&'a mut I);
+
+impl<I, E> WireCursor for TryIterCursor<'_, I>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        use crate::varint::TryIteratorExtVarint;
+        match self.0.read_varint_partial()? {
+            DecodeOutcome::Complete(v) => Ok(Some(v)),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
+        }
+    }
+
+    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
+        let mut bytes = [0u8; N];
+        for byte in bytes.iter_mut() {
+            *byte = self
+                .0
+                .next()
+                .ok_or(ProtobufError::UnexpectedEof)?
+                .map_err(Into::into)?;
+        }
+        Ok(bytes)
+    }
+
+    fn skip_bytes(&mut self, length: usize) -> Result<()> {
+        for _ in 0..length {
+            self.0
+                .next()
+                .ok_or(ProtobufError::UnexpectedEof)?
+                .map_err(Into::into)?;
+        }
+        Ok(())
+    }
+}
+
+/// [`WireCursor`] over `std::io::Read`.
+struct ReadCursor<'a, R>(&'a mut R);
+
+impl<R> WireCursor for ReadCursor<'_, R>
+where
+    R: Read,
+{
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        use crate::varint::ReadExtVarint;
+        self.0.read_varint()
+    }
+
+    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
+        let mut bytes = [0u8; N];
+        self.0.read_exact(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    fn skip_bytes(&mut self, mut length: usize) -> Result<()> {
+        let mut buf = [0u8; 256];
+        while length > 0 {
+            let n = length.min(buf.len());
+            self.0.read_exact(&mut buf[..n])?;
+            length -= n;
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// IteratorExtProtobuf
+// ============================================================================
+
+/// Helper struct implementing BufWireCursor for Iterator<Item = u8>
+struct IteratorReader<'a, I, F>(&'a mut I, &'a mut F);
+
+impl<I, F> WireCursor for IteratorReader<'_, I, F>
+where
+    I: Iterator<Item = u8>,
+{
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        IterCursor(self.0).read_varint()
+    }
+
+    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
+        IterCursor(self.0).read_fixed()
+    }
+
+    fn skip_bytes(&mut self, length: usize) -> Result<()> {
+        IterCursor(self.0).skip_bytes(length)
+    }
+}
+
+impl<I, F, L> BufWireCursor<L> for IteratorReader<'_, I, F>
+where
+    I: Iterator<Item = u8>,
+    F: FnMut(usize) -> Result<L>,
+    L: AsMut<[u8]>,
+{
+    fn read_bytes(&mut self, length: usize) -> Result<L> {
         let mut payload = make_payload(self.1, length)?;
         for byte in &mut payload.as_mut()[..length] {
             *byte = self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
@@ -166,6 +368,21 @@ pub struct FieldIterFromBytes<I, F = fn(usize) -> Result<Vec<u8>>> {
     make: F,
 }
 
+impl<I, F> FieldIterFromBytes<I, F> {
+    /// Skip fields until `pred` returns `Ok(true)`.
+    ///
+    /// Length-delimited payloads are discarded without allocating. For a group
+    /// body after [`FieldValue::SGroup`], use [`until_group_ends`] (see
+    /// [`FieldIterFromSlice::skip_until`] for a runnable example).
+    pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        I: Iterator<Item = u8>,
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        IterCursor(&mut self.iter).skip_until(pred)
+    }
+}
+
 impl<I, F, L> Iterator for FieldIterFromBytes<I, F>
 where
     I: Iterator<Item = u8>,
@@ -176,7 +393,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut reader = IteratorReader(&mut self.iter, &mut self.make);
-        match parse_field(&mut reader) {
+        match reader.parse_field() {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -228,6 +445,14 @@ pub trait IteratorExtProtobuf {
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
+
+    /// Skip fields until `pred` returns `Ok(true)`.
+    ///
+    /// See [`FieldIterFromBytes::skip_until`]. For a group body, use
+    /// [`until_group_ends`].
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>;
 }
 
 impl<I> IteratorExtProtobuf for I
@@ -242,44 +467,48 @@ where
     {
         FieldIterFromBytes { iter: self, make }
     }
+
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        IterCursor(self).skip_until(pred)
+    }
 }
 
 // ============================================================================
 // TryIteratorExtProtobuf
 // ============================================================================
 
-/// Helper struct implementing FieldValueReader for Iterator<Item = Result<u8, E>>
+/// Helper struct implementing BufWireCursor for Iterator<Item = Result<u8, E>>
 struct TryIteratorReader<'a, I, F>(&'a mut I, &'a mut F);
 
-impl<'a, I, E, F, L> FieldValueReader<L> for TryIteratorReader<'a, I, F>
+impl<I, E, F> WireCursor for TryIteratorReader<'_, I, F>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        TryIterCursor(self.0).read_varint()
+    }
+
+    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
+        TryIterCursor(self.0).read_fixed()
+    }
+
+    fn skip_bytes(&mut self, length: usize) -> Result<()> {
+        TryIterCursor(self.0).skip_bytes(length)
+    }
+}
+
+impl<I, E, F, L> BufWireCursor<L> for TryIteratorReader<'_, I, F>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
     E: Into<ProtobufError>,
     F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
-    fn read_varint(&mut self) -> Result<Option<Varint>> {
-        use crate::varint::TryIteratorExtVarint;
-        match self.0.read_varint_partial()? {
-            DecodeOutcome::Complete(v) => Ok(Some(v)),
-            DecodeOutcome::Empty => Ok(None),
-            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
-        }
-    }
-
-    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
-        let mut bytes = [0u8; N];
-        for byte in bytes.iter_mut() {
-            *byte = self
-                .0
-                .next()
-                .ok_or(ProtobufError::UnexpectedEof)?
-                .map_err(Into::into)?;
-        }
-        Ok(bytes)
-    }
-
-    fn read_length_delimited(&mut self, length: usize) -> Result<L> {
+    fn read_bytes(&mut self, length: usize) -> Result<L> {
         let mut payload = make_payload(self.1, length)?;
         for byte in &mut payload.as_mut()[..length] {
             *byte = self
@@ -301,6 +530,22 @@ pub struct FieldIterFromTryBytes<I, F = fn(usize) -> Result<Vec<u8>>> {
     make: F,
 }
 
+impl<I, E, F> FieldIterFromTryBytes<I, F>
+where
+    I: Iterator<Item = ::std::result::Result<u8, E>>,
+    E: Into<ProtobufError>,
+{
+    /// Skip fields until `pred` returns `Ok(true)`.
+    ///
+    /// See [`FieldIterFromBytes::skip_until`].
+    pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        TryIterCursor(&mut self.iter).skip_until(pred)
+    }
+}
+
 impl<I, E, F, L> Iterator for FieldIterFromTryBytes<I, F>
 where
     I: Iterator<Item = ::std::result::Result<u8, E>>,
@@ -312,7 +557,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut reader = TryIteratorReader(&mut self.iter, &mut self.make);
-        match parse_field(&mut reader) {
+        match reader.parse_field() {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -368,6 +613,14 @@ pub trait TryIteratorExtProtobuf {
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
+
+    /// Skip fields until `pred` returns `Ok(true)`.
+    ///
+    /// See [`FieldIterFromBytes::skip_until`]. For a group body, use
+    /// [`until_group_ends`].
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>;
 }
 
 impl<I, E> TryIteratorExtProtobuf for I
@@ -383,33 +636,46 @@ where
     {
         FieldIterFromTryBytes { iter: self, make }
     }
+
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        TryIterCursor(self).skip_until(pred)
+    }
 }
 
 // ============================================================================
 // ReadExtProtobuf
 // ============================================================================
 
-/// Helper struct implementing FieldValueReader for Read
+/// Helper struct implementing BufWireCursor for Read
 struct ReadReader<'a, R, F>(&'a mut R, &'a mut F);
 
-impl<'a, R, F, L> FieldValueReader<L> for ReadReader<'a, R, F>
+impl<R, F> WireCursor for ReadReader<'_, R, F>
+where
+    R: Read,
+{
+    fn read_varint(&mut self) -> Result<Option<Varint>> {
+        ReadCursor(self.0).read_varint()
+    }
+
+    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
+        ReadCursor(self.0).read_fixed()
+    }
+
+    fn skip_bytes(&mut self, length: usize) -> Result<()> {
+        ReadCursor(self.0).skip_bytes(length)
+    }
+}
+
+impl<R, F, L> BufWireCursor<L> for ReadReader<'_, R, F>
 where
     R: Read,
     F: FnMut(usize) -> Result<L>,
     L: AsMut<[u8]>,
 {
-    fn read_varint(&mut self) -> Result<Option<Varint>> {
-        use crate::varint::ReadExtVarint;
-        self.0.read_varint()
-    }
-
-    fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
-        let mut bytes = [0u8; N];
-        self.0.read_exact(&mut bytes)?;
-        Ok(bytes)
-    }
-
-    fn read_length_delimited(&mut self, length: usize) -> Result<L> {
+    fn read_bytes(&mut self, length: usize) -> Result<L> {
         let mut payload = make_payload(self.1, length)?;
         self.0.read_exact(&mut payload.as_mut()[..length])?;
         Ok(payload)
@@ -425,6 +691,19 @@ pub struct FieldIterFromRead<R, F = fn(usize) -> Result<Vec<u8>>> {
     make: F,
 }
 
+impl<R, F> FieldIterFromRead<R, F> {
+    /// Skip fields until `pred` returns `Ok(true)`.
+    ///
+    /// See [`FieldIterFromBytes::skip_until`].
+    pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        R: Read,
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        ReadCursor(&mut self.reader).skip_until(pred)
+    }
+}
+
 impl<R, F, L> Iterator for FieldIterFromRead<R, F>
 where
     R: Read,
@@ -435,7 +714,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut reader = ReadReader(&mut self.reader, &mut self.make);
-        match parse_field(&mut reader) {
+        match reader.parse_field() {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -518,6 +797,15 @@ pub trait ReadExtProtobuf {
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
+
+    /// Skip fields until `pred` returns `Ok(true)`.
+    ///
+    /// See [`FieldIterFromBytes::skip_until`]. For a group body, use
+    /// [`until_group_ends`]. Works for any `Read`, including a mutable slice
+    /// cursor (`&mut &[u8]`).
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>;
 }
 
 impl<R> ReadExtProtobuf for R
@@ -532,18 +820,25 @@ where
     {
         FieldIterFromRead { reader: self, make }
     }
+
+    fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        ReadCursor(self).skip_until(pred)
+    }
 }
 
 // ============================================================================
 // AsRefExtProtobuf
 // ============================================================================
 
-/// Helper struct implementing FieldValueReader for slice-based readers
+/// Helper struct implementing BufWireCursor for slice-based readers
 pub(crate) struct SliceReader<'a, 'b> {
     pub(crate) slice: &'b mut &'a [u8],
 }
 
-impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
+impl WireCursor for SliceReader<'_, '_> {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::ReadExtVarint;
         self.slice.read_varint()
@@ -558,7 +853,18 @@ impl<'a, 'b> FieldValueReader<&'a [u8]> for SliceReader<'a, 'b> {
         Ok(*bytes)
     }
 
-    fn read_length_delimited(&mut self, length: usize) -> Result<&'a [u8]> {
+    fn skip_bytes(&mut self, length: usize) -> Result<()> {
+        let (_, remaining) = self
+            .slice
+            .split_at_checked(length)
+            .ok_or(ProtobufError::UnexpectedEof)?;
+        *self.slice = remaining;
+        Ok(())
+    }
+}
+
+impl<'a> BufWireCursor<&'a [u8]> for SliceReader<'a, '_> {
+    fn read_bytes(&mut self, length: usize) -> Result<&'a [u8]> {
         let (value_slice, remaining) = self
             .slice
             .split_at_checked(length)
@@ -573,6 +879,38 @@ pub struct FieldIterFromSlice<'a> {
     slice: &'a [u8],
 }
 
+impl<'a> FieldIterFromSlice<'a> {
+    /// Skip fields until `pred` returns `Ok(true)`.
+    ///
+    /// Length-delimited payloads are discarded without allocating. After an
+    /// [`FieldValue::SGroup`], pair this with [`until_group_ends`]:
+    ///
+    /// ```
+    /// use ::protobuf_core::{AsRefExtProtobuf, FieldValue, until_group_ends};
+    ///
+    /// // field 1 SGroup, field 2 varint 1, field 1 EGroup, field 3 varint 7
+    /// let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
+    /// let mut fields = bytes.as_slice().read_protobuf_fields();
+    ///
+    /// let start = fields.next().unwrap().unwrap();
+    /// assert!(matches!(start.value, FieldValue::SGroup));
+    ///
+    /// fields.skip_until(until_group_ends(start.field_number)).unwrap();
+    ///
+    /// let after = fields.next().unwrap().unwrap();
+    /// assert_eq!(after.field_number.as_u32(), 3);
+    /// ```
+    pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        SliceReader {
+            slice: &mut self.slice,
+        }
+        .skip_until(pred)
+    }
+}
+
 impl<'a> Iterator for FieldIterFromSlice<'a> {
     type Item = Result<Field<&'a [u8]>>;
 
@@ -580,7 +918,7 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
         let mut reader = SliceReader {
             slice: &mut self.slice,
         };
-        parse_field(&mut reader).transpose()
+        reader.parse_field().transpose()
     }
 }
 
@@ -1256,17 +1594,267 @@ mod tests {
             })
         ));
 
-        // Wire types 3 and 4 are known group types; field readers reject them
-        // as UnsupportedGroup (not InvalidWireType).
-        use crate::wire_format::WireType;
-        for (byte, wire_type) in [(0x0Bu8, WireType::SGroup), (0x0C, WireType::EGroup)] {
+        // Wire types 3 and 4 are group tags; field readers return them as values.
+        for (byte, expected) in [(0x0Bu8, FieldValue::SGroup), (0x0C, FieldValue::EGroup)] {
             let bytes = [byte];
-            let got = match bytes[..].read_protobuf_fields().next().unwrap() {
-                Err(ProtobufError::UnsupportedGroup { wire_type }) => wire_type,
-                other => panic!("expected UnsupportedGroup, got {other:?}"),
-            };
-            assert_eq!(got, wire_type);
+            let field = bytes[..].read_protobuf_fields().next().unwrap().unwrap();
+            assert_eq!(field.field_number.as_u32(), 1);
+            assert_eq!(field.value, expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod group_skip {
+    use super::{
+        AsRefExtProtobuf, IterCursor, IteratorExtProtobuf, ReadExtProtobuf, SliceReader,
+        WireCursor, until_group_ends,
+    };
+    use crate::field_number::FieldNumber;
+    use crate::wire_format::WireType;
+    use crate::{FieldValue, ProtobufError, Result};
+
+    fn field(n: u32) -> FieldNumber {
+        FieldNumber::try_new(n).unwrap()
+    }
+
+    fn slice_fields(bytes: &[u8]) -> super::FieldIterFromSlice<'_> {
+        AsRefExtProtobuf::read_protobuf_fields(bytes)
+    }
+
+    /// Take the next field and assert it is an `SGroup`; return its field number.
+    fn expect_sgroup(fields: &mut super::FieldIterFromSlice<'_>) -> FieldNumber {
+        let field = fields.next().unwrap().unwrap();
+        assert!(
+            matches!(field.value, FieldValue::SGroup),
+            "expected SGroup, got {:?}",
+            field.value
+        );
+        field.field_number
+    }
+
+    /// field 1 start-group, nested field 2 varint 150, field 1 end-group, then
+    /// field 3 varint 7.
+    fn message_with_group_then_varint() -> Vec<u8> {
+        vec![
+            0x0B, // field 1 SGroup
+            0x10, 0x96, 0x01, // field 2 varint 150
+            0x0C, // field 1 EGroup
+            0x18, 0x07, // field 3 varint 7
+        ]
+    }
+
+    #[test]
+    fn skip_empty_group_then_read_next_field() {
+        let bytes = [0x0B, 0x0C, 0x08, 0x01]; // empty group 1, then field 1 = 1
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        fields.skip_until(until_group_ends(field_number)).unwrap();
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 1);
+        let FieldValue::Varint(v) = next.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 1);
+        assert!(fields.next().is_none());
+    }
+
+    #[test]
+    fn skip_group_with_nested_fields_on_slice_iter() {
+        let bytes = message_with_group_then_varint();
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        assert_eq!(field_number.as_u32(), 1);
+        fields.skip_until(until_group_ends(field_number)).unwrap();
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 3);
+        let FieldValue::Varint(v) = next.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 7);
+    }
+
+    #[test]
+    fn skip_nested_groups() {
+        // outer 1 { inner 2 { field 3 = 1 } } then field 4 = 2
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x13, // 2 SGroup
+            0x18, 0x01, // 3 varint 1
+            0x14, // 2 EGroup
+            0x0C, // 1 EGroup
+            0x20, 0x02, // 4 varint 2
+        ];
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        fields.skip_until(until_group_ends(field_number)).unwrap();
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 4);
+        let FieldValue::Varint(v) = next.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 2);
+
+        // Same skip via ReadExtProtobuf on a cursor past the start tag.
+        let mut cursor = &bytes[1..]; // after 0x0B
+        cursor.skip_until(until_group_ends(field(1))).unwrap();
+        assert_eq!(cursor, &[0x20, 0x02]);
+    }
+
+    #[test]
+    fn skip_group_containing_len_and_fixed() {
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x12, 0x03, b'a', b'b', b'c', // field 2 len "abc"
+            0x15, 0x01, 0x02, 0x03, 0x04, // field 2 fixed32
+            0x09, 0, 0, 0, 0, 0, 0, 0, 0,    // field 1 fixed64
+            0x0C, // 1 EGroup
+            0x10, 0x05, // field 2 varint 5
+        ];
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        fields.skip_until(until_group_ends(field_number)).unwrap();
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 2);
+        let FieldValue::Varint(v) = next.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 5);
+    }
+
+    #[test]
+    fn read_group_body_field_by_field_until_egroup() {
+        let bytes = message_with_group_then_varint();
+        let mut fields = slice_fields(&bytes);
+        assert_eq!(expect_sgroup(&mut fields).as_u32(), 1);
+
+        let inner = fields.next().unwrap().unwrap();
+        assert_eq!(inner.field_number.as_u32(), 2);
+        let FieldValue::Varint(v) = inner.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 150);
+
+        let end = fields.next().unwrap().unwrap();
+        assert_eq!(end.field_number.as_u32(), 1);
+        assert!(matches!(end.value, FieldValue::EGroup));
+
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 3);
+        let FieldValue::Varint(v) = after.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 7);
+    }
+
+    #[test]
+    fn mismatched_end_group_is_an_error() {
+        // start field 1, end field 2
+        let bytes = [0x0B, 0x14];
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        let skip_err = fields
+            .skip_until(until_group_ends(field_number))
+            .unwrap_err();
+        assert!(
+            matches!(
+                skip_err,
+                ProtobufError::MismatchedEndGroup { expected, got }
+                if expected.as_u32() == 1 && got.as_u32() == 2
+            ),
+            "got {skip_err:?}"
+        );
+    }
+
+    #[test]
+    fn truncated_group_is_unexpected_eof() {
+        let bytes = [0x0B, 0x08, 0x01]; // start group, varint field, no end
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        assert!(matches!(
+            fields.skip_until(until_group_ends(field_number)),
+            Err(ProtobufError::UnexpectedEof)
+        ));
+    }
+
+    #[test]
+    fn skip_via_byte_iterator_ext() {
+        let bytes = message_with_group_then_varint();
+        let mut iter = bytes.into_iter();
+        // Advance past start tag 0x0B
+        assert_eq!(iter.next(), Some(0x0B));
+        iter.skip_until(until_group_ends(field(1))).unwrap();
+        let fields: Vec<_> = iter.protobuf_fields().collect::<Result<Vec<_>>>().unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 3);
+    }
+
+    #[test]
+    fn skip_field_returns_tag_including_groups() {
+        let bytes = message_with_group_then_varint();
+        let mut slice = bytes.as_slice();
+        let mut cursor = SliceReader { slice: &mut slice };
+
+        let start = cursor.skip_field().unwrap().unwrap();
+        assert_eq!(start.field_number.as_u32(), 1);
+        assert_eq!(start.wire_type, WireType::SGroup);
+
+        cursor
+            .skip_until(until_group_ends(start.field_number))
+            .unwrap();
+
+        let after = cursor.skip_field().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 3);
+        assert_eq!(after.wire_type, WireType::Varint);
+        assert!(cursor.skip_field().unwrap().is_none());
+    }
+
+    #[test]
+    fn skip_field_on_iter_cursor_skips_len_payload() {
+        // field 1 SGroup, field 2 len "ab", field 1 EGroup
+        let bytes = [0x0B, 0x12, 0x02, b'a', b'b', 0x0C];
+        let mut iter = bytes.into_iter();
+        let mut cursor = IterCursor(&mut iter);
+
+        let start = cursor.skip_field().unwrap().unwrap();
+        assert_eq!(start.wire_type, WireType::SGroup);
+        cursor
+            .skip_until(until_group_ends(start.field_number))
+            .unwrap();
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn skip_via_try_byte_iterator_ext() {
+        use super::TryIteratorExtProtobuf;
+        use ::std::io::{Cursor, Read};
+
+        let bytes = message_with_group_then_varint();
+        let mut iter = Cursor::new(bytes).bytes();
+        assert_eq!(iter.next().unwrap().unwrap(), 0x0B);
+        iter.skip_until(until_group_ends(field(1))).unwrap();
+        let fields: Vec<_> = iter.protobuf_fields().collect::<Result<Vec<_>>>().unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 3);
+    }
+
+    #[test]
+    fn skip_via_field_iter_from_read() {
+        use ::std::io::Cursor;
+
+        let bytes = message_with_group_then_varint();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields();
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+        fields
+            .skip_until(until_group_ends(start.field_number))
+            .unwrap();
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 3);
+        let FieldValue::Varint(v) = after.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 7);
     }
 }
 

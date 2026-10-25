@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0]
+
+Breaking relative to 0.6.0. Exhaustive matches on `FieldValue` and `ProtobufError` must update. Callers that treated group tags as `UnsupportedGroup` errors must match `FieldValue::SGroup` / `FieldValue::EGroup` instead. Note that 0.6.0’s `UnsupportedGroup` rejection was short-lived: 0.7.0 replaces it with successful group value variants (group handling churned twice between 0.5 → 0.7).
+
+### Added
+
+- `FieldValue::SGroup` and `FieldValue::EGroup` — field readers return these as successful tag-only values. Writers emit the corresponding tag with no payload. `encoded_size` for the value is `0` (tag size is in `Field::encoded_size`).
+- `skip_until(pred)` on `ReadExtProtobuf`, `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, and on `FieldIterFromBytes` / `FieldIterFromTryBytes` / `FieldIterFromRead` / `FieldIterFromSlice`. Skips fields (without allocating Len payloads) until `pred(Tag) -> Result<bool>` returns `Ok(true)`.
+- `until_group_ends(field_number)` — returns `impl FnMut(Tag) -> Result<bool>` for `skip_until` after an `SGroup` tag was consumed; handles nested groups (stack inside the closure) and reports `MismatchedEndGroup`.
+- `ProtobufError::MismatchedEndGroup { expected, got }` when an end-group field number does not match the open start-group during skip.
+
+### Removed
+
+- `ProtobufError::UnsupportedGroup` — group tags are no longer reported as errors from field readers.
+
+### Internal
+
+- Field I/O shares `WireCursor` (required: varint / fixed / `skip_bytes`; default methods: `read_tag`, `skip_field`, `skip_until`) and `BufWireCursor<L>` (`read_bytes` plus default `parse_field`). `skip_field` returns the `Tag`; group bodies use `skip_until` with `until_group_ends`.
+
 ## [0.6.0]
 
 Breaking error-enum change. Callers that matched `ProtobufError` exhaustively must handle the new variant. Callers that treated group tags (wire types 3 and 4) as `InvalidWireType` must match `UnsupportedGroup` instead.
