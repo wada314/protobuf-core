@@ -21,7 +21,7 @@ Breaking relative to 0.6.0. Exhaustive matches on `FieldValue` and `ProtobufErro
 
 ### Internal
 
-- Field I/O shares a fragment-level `WireCursor` (varint / fixed / `skip_bytes` only). Tag and field decoding are free functions beside each other: `read_tag`, `parse_field` / `skip_field` (`skip_field` returns the `Tag`), and `skip_group_body` (recursive `skip_field`). `BufWireCursor<L>` extends `WireCursor` with `read_bytes` (materialize exactly `length` bytes into `L`; the Len length prefix is parsed separately).
+- Field I/O shares `WireCursor` (required: varint / fixed / `skip_bytes`; default methods: `read_tag`, `skip_field`, `skip_group_body`) and `BufWireCursor<L>` (`read_bytes` plus default `parse_field`). `skip_field` returns the `Tag`; `skip_group_body` recurses via `skip_field`.
 
 ## [0.6.0]
 

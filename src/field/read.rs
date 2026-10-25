@@ -46,9 +46,9 @@ where
 
 /// Byte-level cursor over protobuf wire data.
 ///
-/// Only fragment operations live here (`read_varint` / `read_fixed` /
-/// `skip_bytes`). Tag and field decoding live beside [`parse_field`]:
-/// [`read_tag`], [`skip_field`], [`skip_group_body`].
+/// Required methods are atomic fragments (`read_varint` / `read_fixed` /
+/// `skip_bytes`). Default methods compose those into tags, one field skip,
+/// and group-body skip.
 pub(crate) trait WireCursor {
     /// Read a varint (returns `None` when the stream is empty).
     fn read_varint(&mut self) -> Result<Option<Varint>>;
@@ -58,19 +58,56 @@ pub(crate) trait WireCursor {
 
     /// Discard exactly `length` bytes without allocating a payload buffer.
     fn skip_bytes(&mut self, length: usize) -> Result<()>;
-}
 
-/// Read a tag (field number + wire type) from a cursor.
-///
-/// Returns `Ok(None)` at EOF before any tag byte. Invalid field numbers and
-/// wire types surface as [`ProtobufError`].
-pub(crate) fn read_tag<C>(cursor: &mut C) -> Result<Option<Tag>>
-where
-    C: WireCursor + ?Sized,
-{
-    match cursor.read_varint()? {
-        Some(varint) => Tag::from_encoded(varint).map(Some),
-        None => Ok(None),
+    /// Read a tag (field number + wire type).
+    ///
+    /// Returns `Ok(None)` at EOF before any tag byte. Invalid field numbers and
+    /// wire types surface as [`ProtobufError`].
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
+        match self.read_varint()? {
+            Some(varint) => Tag::from_encoded(varint).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Skip one complete field and return its tag.
+    ///
+    /// Dual of [`BufWireCursor::parse_field`]: the payload is discarded instead
+    /// of materialized. For [`WireType::SGroup`] / [`WireType::EGroup`], only
+    /// the tag is consumed; the start-group body is left for the caller.
+    ///
+    /// Returns `Ok(None)` at EOF before any tag byte.
+    fn skip_field(&mut self) -> Result<Option<Tag>> {
+        let Some(tag) = self.read_tag()? else {
+            return Ok(None);
+        };
+        skip_field_payload(self, tag.wire_type)?;
+        Ok(Some(tag))
+    }
+
+    /// Skip a group body after the start-group tag has already been consumed.
+    ///
+    /// Composes [`skip_field`](Self::skip_field): nested start-groups recurse
+    /// so the call stack is the open-group stack.
+    fn skip_group_body(&mut self, field_number: FieldNumber) -> Result<()> {
+        loop {
+            let tag = self.skip_field()?.ok_or(ProtobufError::UnexpectedEof)?;
+            match tag.wire_type {
+                WireType::SGroup => {
+                    self.skip_group_body(tag.field_number)?;
+                }
+                WireType::EGroup => {
+                    if tag.field_number != field_number {
+                        return Err(ProtobufError::MismatchedEndGroup {
+                            expected: field_number,
+                            got: tag.field_number,
+                        });
+                    }
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -85,51 +122,48 @@ pub(crate) trait BufWireCursor<L>: WireCursor {
     /// For a Len field, the length varint is parsed first; this method only
     /// consumes the following payload bytes.
     fn read_bytes(&mut self, length: usize) -> Result<L>;
-}
 
-/// Parse a complete field (tag + value) from a [`BufWireCursor`].
-///
-/// `L` is the length-delimited payload. Streaming readers build it with the
-/// caller's closure. The slice reader uses `&'a [u8]`.
-///
-/// For [`FieldValue::SGroup`] / [`FieldValue::EGroup`], only the tag is consumed;
-/// a start-group body remains on the cursor for the caller to read or
-/// [`skip_group_body`].
-pub(crate) fn parse_field<L, R>(reader: &mut R) -> Result<Option<Field<L>>>
-where
-    R: BufWireCursor<L>,
-{
-    let Some(tag) = read_tag(reader)? else {
-        return Ok(None);
-    };
+    /// Parse a complete field (tag + value).
+    ///
+    /// `L` is the length-delimited payload. Streaming readers build it with the
+    /// caller's closure. The slice reader uses `&'a [u8]`.
+    ///
+    /// For [`FieldValue::SGroup`] / [`FieldValue::EGroup`], only the tag is
+    /// consumed; a start-group body remains on the cursor for the caller to
+    /// read or [`skip_group_body`](WireCursor::skip_group_body).
+    fn parse_field(&mut self) -> Result<Option<Field<L>>> {
+        let Some(tag) = self.read_tag()? else {
+            return Ok(None);
+        };
 
-    let value = match tag.wire_type {
-        WireType::Varint => {
-            let varint = reader.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-            FieldValue::Varint(varint)
-        }
-        WireType::Int32 => {
-            let bytes = reader.read_fixed::<4>()?;
-            FieldValue::I32(bytes)
-        }
-        WireType::Int64 => {
-            let bytes = reader.read_fixed::<8>()?;
-            FieldValue::I64(bytes)
-        }
-        WireType::Len => {
-            let length_varint = reader.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-            let length = length_varint.try_to_uint32()? as usize;
-            let data = reader.read_bytes(length)?;
-            FieldValue::Len(data)
-        }
-        WireType::SGroup => FieldValue::SGroup,
-        WireType::EGroup => FieldValue::EGroup,
-    };
+        let value = match tag.wire_type {
+            WireType::Varint => {
+                let varint = self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+                FieldValue::Varint(varint)
+            }
+            WireType::Int32 => {
+                let bytes = self.read_fixed::<4>()?;
+                FieldValue::I32(bytes)
+            }
+            WireType::Int64 => {
+                let bytes = self.read_fixed::<8>()?;
+                FieldValue::I64(bytes)
+            }
+            WireType::Len => {
+                let length_varint = self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+                let length = length_varint.try_to_uint32()? as usize;
+                let data = self.read_bytes(length)?;
+                FieldValue::Len(data)
+            }
+            WireType::SGroup => FieldValue::SGroup,
+            WireType::EGroup => FieldValue::EGroup,
+        };
 
-    Ok(Some(Field {
-        field_number: tag.field_number,
-        value,
-    }))
+        Ok(Some(Field {
+            field_number: tag.field_number,
+            value,
+        }))
+    }
 }
 
 /// Skip the payload of one field after its tag has already been consumed.
@@ -152,52 +186,6 @@ where
             cursor.skip_bytes(length)
         }
         WireType::SGroup | WireType::EGroup => Ok(()),
-    }
-}
-
-/// Skip one complete field and return its tag.
-///
-/// Dual of [`parse_field`]: the payload is discarded instead of materialized.
-/// For [`WireType::SGroup`] / [`WireType::EGroup`], only the tag is consumed
-/// (same as `parse_field`); the start-group body is left for the caller.
-///
-/// Returns `Ok(None)` at EOF before any tag byte.
-pub(crate) fn skip_field<C>(cursor: &mut C) -> Result<Option<Tag>>
-where
-    C: WireCursor + ?Sized,
-{
-    let Some(tag) = read_tag(cursor)? else {
-        return Ok(None);
-    };
-    skip_field_payload(cursor, tag.wire_type)?;
-    Ok(Some(tag))
-}
-
-/// Skip a group body after the start-group tag has already been consumed.
-///
-/// Composes [`skip_field`]: nested start-groups recurse so the call stack is
-/// the open-group stack.
-pub(crate) fn skip_group_body<C>(cursor: &mut C, field_number: FieldNumber) -> Result<()>
-where
-    C: WireCursor + ?Sized,
-{
-    loop {
-        let tag = skip_field(cursor)?.ok_or(ProtobufError::UnexpectedEof)?;
-        match tag.wire_type {
-            WireType::SGroup => {
-                skip_group_body(cursor, tag.field_number)?;
-            }
-            WireType::EGroup => {
-                if tag.field_number != field_number {
-                    return Err(ProtobufError::MismatchedEndGroup {
-                        expected: field_number,
-                        got: tag.field_number,
-                    });
-                }
-                return Ok(());
-            }
-            _ => {}
-        }
     }
 }
 
@@ -381,7 +369,7 @@ impl<I, F> FieldIterFromBytes<I, F> {
     where
         I: Iterator<Item = u8>,
     {
-        skip_group_body(&mut IterCursor(&mut self.iter), field_number)
+        IterCursor(&mut self.iter).skip_group_body(field_number)
     }
 }
 
@@ -395,7 +383,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut reader = IteratorReader(&mut self.iter, &mut self.make);
-        match parse_field(&mut reader) {
+        match reader.parse_field() {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -468,7 +456,7 @@ where
     }
 
     fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
-        skip_group_body(&mut IterCursor(self), field_number)
+        IterCursor(self).skip_group_body(field_number)
     }
 }
 
@@ -535,7 +523,7 @@ where
     ///
     /// See [`FieldIterFromBytes::skip_protobuf_group`].
     pub fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
-        skip_group_body(&mut TryIterCursor(&mut self.iter), field_number)
+        TryIterCursor(&mut self.iter).skip_group_body(field_number)
     }
 }
 
@@ -550,7 +538,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut reader = TryIteratorReader(&mut self.iter, &mut self.make);
-        match parse_field(&mut reader) {
+        match reader.parse_field() {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -628,7 +616,7 @@ where
     }
 
     fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
-        skip_group_body(&mut TryIterCursor(self), field_number)
+        TryIterCursor(self).skip_group_body(field_number)
     }
 }
 
@@ -686,7 +674,7 @@ impl<R, F> FieldIterFromRead<R, F> {
     where
         R: Read,
     {
-        skip_group_body(&mut ReadCursor(&mut self.reader), field_number)
+        ReadCursor(&mut self.reader).skip_group_body(field_number)
     }
 }
 
@@ -700,7 +688,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut reader = ReadReader(&mut self.reader, &mut self.make);
-        match parse_field(&mut reader) {
+        match reader.parse_field() {
             Ok(Some(field)) => Some(Ok(field)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -805,7 +793,7 @@ where
     }
 
     fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
-        skip_group_body(&mut ReadCursor(self), field_number)
+        ReadCursor(self).skip_group_body(field_number)
     }
 }
 
@@ -864,12 +852,10 @@ impl<'a> FieldIterFromSlice<'a> {
     ///
     /// See [`FieldIterFromBytes::skip_protobuf_group`].
     pub fn skip_protobuf_group(&mut self, field_number: FieldNumber) -> Result<()> {
-        skip_group_body(
-            &mut SliceReader {
-                slice: &mut self.slice,
-            },
-            field_number,
-        )
+        SliceReader {
+            slice: &mut self.slice,
+        }
+        .skip_group_body(field_number)
     }
 }
 
@@ -880,7 +866,7 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
         let mut reader = SliceReader {
             slice: &mut self.slice,
         };
-        parse_field(&mut reader).transpose()
+        reader.parse_field().transpose()
     }
 }
 
@@ -1569,8 +1555,7 @@ mod tests {
 #[cfg(test)]
 mod group_skip {
     use super::{
-        AsRefExtProtobuf, IterCursor, IteratorExtProtobuf, ReadExtProtobuf, SliceReader,
-        skip_field, skip_group_body,
+        AsRefExtProtobuf, IterCursor, IteratorExtProtobuf, ReadExtProtobuf, SliceReader, WireCursor,
     };
     use crate::field_number::FieldNumber;
     use crate::wire_format::WireType;
@@ -1758,17 +1743,17 @@ mod group_skip {
         let mut slice = bytes.as_slice();
         let mut cursor = SliceReader { slice: &mut slice };
 
-        let start = skip_field(&mut cursor).unwrap().unwrap();
+        let start = cursor.skip_field().unwrap().unwrap();
         assert_eq!(start.field_number.as_u32(), 1);
         assert_eq!(start.wire_type, WireType::SGroup);
 
         // Body still present: skip it via composition.
-        skip_group_body(&mut cursor, start.field_number).unwrap();
+        cursor.skip_group_body(start.field_number).unwrap();
 
-        let after = skip_field(&mut cursor).unwrap().unwrap();
+        let after = cursor.skip_field().unwrap().unwrap();
         assert_eq!(after.field_number.as_u32(), 3);
         assert_eq!(after.wire_type, WireType::Varint);
-        assert!(skip_field(&mut cursor).unwrap().is_none());
+        assert!(cursor.skip_field().unwrap().is_none());
     }
 
     #[test]
@@ -1778,9 +1763,9 @@ mod group_skip {
         let mut iter = bytes.into_iter();
         let mut cursor = IterCursor(&mut iter);
 
-        let start = skip_field(&mut cursor).unwrap().unwrap();
+        let start = cursor.skip_field().unwrap().unwrap();
         assert_eq!(start.wire_type, WireType::SGroup);
-        skip_group_body(&mut cursor, start.field_number).unwrap();
+        cursor.skip_group_body(start.field_number).unwrap();
         assert!(iter.next().is_none());
     }
 }
