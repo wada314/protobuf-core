@@ -189,42 +189,6 @@ where
     }
 }
 
-fn skip_bytes_from_iterator<I>(iter: &mut I, length: usize) -> Result<()>
-where
-    I: Iterator<Item = u8>,
-{
-    for _ in 0..length {
-        iter.next().ok_or(ProtobufError::UnexpectedEof)?;
-    }
-    Ok(())
-}
-
-fn skip_bytes_from_try_iterator<I, E>(iter: &mut I, length: usize) -> Result<()>
-where
-    I: Iterator<Item = ::std::result::Result<u8, E>>,
-    E: Into<ProtobufError>,
-{
-    for _ in 0..length {
-        iter.next()
-            .ok_or(ProtobufError::UnexpectedEof)?
-            .map_err(Into::into)?;
-    }
-    Ok(())
-}
-
-fn skip_bytes_from_read<R>(reader: &mut R, mut length: usize) -> Result<()>
-where
-    R: Read,
-{
-    let mut buf = [0u8; 256];
-    while length > 0 {
-        let n = length.min(buf.len());
-        reader.read_exact(&mut buf[..n])?;
-        length -= n;
-    }
-    Ok(())
-}
-
 /// [`WireCursor`] over `Iterator<Item = u8>` (no length-delimited allocator).
 struct IterCursor<'a, I>(&'a mut I);
 
@@ -250,7 +214,10 @@ where
     }
 
     fn skip_bytes(&mut self, length: usize) -> Result<()> {
-        skip_bytes_from_iterator(self.0, length)
+        for _ in 0..length {
+            self.0.next().ok_or(ProtobufError::UnexpectedEof)?;
+        }
+        Ok(())
     }
 }
 
@@ -284,7 +251,13 @@ where
     }
 
     fn skip_bytes(&mut self, length: usize) -> Result<()> {
-        skip_bytes_from_try_iterator(self.0, length)
+        for _ in 0..length {
+            self.0
+                .next()
+                .ok_or(ProtobufError::UnexpectedEof)?
+                .map_err(Into::into)?;
+        }
+        Ok(())
     }
 }
 
@@ -306,8 +279,14 @@ where
         Ok(bytes)
     }
 
-    fn skip_bytes(&mut self, length: usize) -> Result<()> {
-        skip_bytes_from_read(self.0, length)
+    fn skip_bytes(&mut self, mut length: usize) -> Result<()> {
+        let mut buf = [0u8; 256];
+        while length > 0 {
+            let n = length.min(buf.len());
+            self.0.read_exact(&mut buf[..n])?;
+            length -= n;
+        }
+        Ok(())
     }
 }
 
