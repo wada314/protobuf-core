@@ -13,7 +13,7 @@ Breaking relative to 0.6.0. Exhaustive matches on `FieldValue` and `ProtobufErro
 
 - `FieldValue::SGroup` and `FieldValue::EGroup` — field readers return these as successful tag-only values. Writers emit the corresponding tag with no payload. `encoded_size` for the value is `0` (tag size is in `Field::encoded_size`).
 - `skip_until(pred)` on `ReadExtProtobuf`, `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, and on `FieldIterFromBytes` / `FieldIterFromTryBytes` / `FieldIterFromRead` / `FieldIterFromSlice`. Skips fields (without allocating Len payloads) until `pred(Tag) -> Result<bool>` returns `Ok(true)`.
-- `UntilGroupEnds` — stack-based predicate for `skip_until` after an `SGroup` tag was consumed; handles nested groups and reports `MismatchedEndGroup`.
+- `until_group_ends(field_number)` — returns `impl FnMut(Tag) -> Result<bool>` for `skip_until` after an `SGroup` tag was consumed; handles nested groups (stack inside the closure) and reports `MismatchedEndGroup`.
 - `ProtobufError::MismatchedEndGroup { expected, got }` when an end-group field number does not match the open start-group during skip.
 
 ### Removed
@@ -22,7 +22,7 @@ Breaking relative to 0.6.0. Exhaustive matches on `FieldValue` and `ProtobufErro
 
 ### Internal
 
-- Field I/O shares `WireCursor` (required: varint / fixed / `skip_bytes`; default methods: `read_tag`, `skip_field`, `skip_until`) and `BufWireCursor<L>` (`read_bytes` plus default `parse_field`). `skip_field` returns the `Tag`; group bodies use `skip_until` with `UntilGroupEnds`.
+- Field I/O shares `WireCursor` (required: varint / fixed / `skip_bytes`; default methods: `read_tag`, `skip_field`, `skip_until`) and `BufWireCursor<L>` (`read_bytes` plus default `parse_field`). `skip_field` returns the `Tag`; group bodies use `skip_until` with `until_group_ends`.
 
 ## [0.6.0]
 

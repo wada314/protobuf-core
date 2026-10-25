@@ -37,7 +37,7 @@ let fields: Vec<Field<&[u8]>> = bytes
 
 The example above is `AsRefExtProtobuf`: `read_protobuf_fields` borrows `Field<&[u8]>`. `ReadExtProtobuf::read_protobuf_fields` and `IteratorExtProtobuf::protobuf_fields` (also `TryIteratorExtProtobuf::protobuf_fields`) build each length-delimited payload as `Vec<u8>`. Their `*_with` methods take `FnMut(usize) -> Result<L, ProtobufError>` where `L: AsMut<[u8]>`. The payload length is known before its bytes are read. The closure returns at least that many initialized bytes, and the reader overwrites the first `len` of them. A shorter buffer panics. Capture an allocator in the closure when the buffer needs one. An error from another type converts with `map_err(Into::into)` inside the closure.
 
-Deprecated group wire types (`SGroup` / `EGroup`) are returned as tag-only `FieldValue` variants. The group body stays on the cursor; read nested fields until the matching `EGroup`, or discard without allocating Len payloads via `skip_until` and `UntilGroupEnds`.
+Deprecated group wire types (`SGroup` / `EGroup`) are returned as tag-only `FieldValue` variants. The group body stays on the cursor; read nested fields until the matching `EGroup`, or discard without allocating Len payloads via `skip_until` and `until_group_ends`.
 
 ### Writing Fields
 

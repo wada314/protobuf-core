@@ -22,7 +22,7 @@ pub enum WireType {
     Len = 2,
     /// Start group (deprecated). Field readers return [`crate::FieldValue::SGroup`].
     /// The group body follows on the wire; discard it with
-    /// [`crate::ReadExtProtobuf::skip_until`] and [`crate::UntilGroupEnds`], or
+    /// [`crate::ReadExtProtobuf::skip_until`] and [`crate::until_group_ends`], or
     /// read nested fields until [`crate::FieldValue::EGroup`].
     SGroup = 3,
     /// End group (deprecated). Field readers return [`crate::FieldValue::EGroup`].
