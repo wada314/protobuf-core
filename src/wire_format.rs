@@ -21,9 +21,9 @@ pub enum WireType {
     /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields)
     Len = 2,
     /// Start group (deprecated). Field readers return [`crate::FieldValue::SGroup`].
-    /// The group body follows on the wire; discard it with
-    /// [`crate::ReadExtProtobuf::skip_until`] and [`crate::until_group_ends`], or
-    /// read nested fields until [`crate::FieldValue::EGroup`].
+    /// The group body follows on the wire; discard it with the field iterator's
+    /// `skip_until` and [`crate::until_group_ends`], or read nested fields until
+    /// [`crate::FieldValue::EGroup`].
     SGroup = 3,
     /// End group (deprecated). Field readers return [`crate::FieldValue::EGroup`].
     EGroup = 4,

@@ -49,7 +49,8 @@ pub use self::write::WriteExtProtobuf;
 ///
 /// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
 /// does not include the group body. After an `SGroup`, skip the body with
-/// [`skip_until`](crate::ReadExtProtobuf::skip_until) and
+/// [`FieldIterFromSlice::skip_until`](crate::FieldIterFromSlice::skip_until) /
+/// [`FieldIterFromRead::skip_until`](crate::FieldIterFromRead::skip_until) and
 /// [`until_group_ends`](crate::until_group_ends) (or read nested fields until a
 /// matching `EGroup`) before reading the next top-level field.
 #[derive(Debug, Clone, PartialEq)]

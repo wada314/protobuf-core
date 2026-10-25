@@ -797,15 +797,6 @@ pub trait ReadExtProtobuf {
         Self: Sized,
         F: FnMut(usize) -> Result<L>,
         L: AsMut<[u8]>;
-
-    /// Skip fields until `pred` returns `Ok(true)`.
-    ///
-    /// See [`FieldIterFromBytes::skip_until`]. For a group body, use
-    /// [`until_group_ends`]. Works for any `Read`, including a mutable slice
-    /// cursor (`&mut &[u8]`).
-    fn skip_until<P>(&mut self, pred: P) -> Result<()>
-    where
-        P: FnMut(Tag) -> Result<bool>;
 }
 
 impl<R> ReadExtProtobuf for R
@@ -819,13 +810,6 @@ where
         L: AsMut<[u8]>,
     {
         FieldIterFromRead { reader: self, make }
-    }
-
-    fn skip_until<P>(&mut self, pred: P) -> Result<()>
-    where
-        P: FnMut(Tag) -> Result<bool>,
-    {
-        ReadCursor(self).skip_until(pred)
     }
 }
 
@@ -1694,11 +1678,6 @@ mod group_skip {
             panic!("expected varint");
         };
         assert_eq!(v.to_uint64(), 2);
-
-        // Same skip via ReadExtProtobuf on a cursor past the start tag.
-        let mut cursor = &bytes[1..]; // after 0x0B
-        cursor.skip_until(until_group_ends(field(1))).unwrap();
-        assert_eq!(cursor, &[0x20, 0x02]);
     }
 
     #[test]
