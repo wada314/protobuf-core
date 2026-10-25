@@ -12,7 +12,7 @@ Breaking relative to 0.6.0. Exhaustive matches on `FieldValue` and `ProtobufErro
 ### Added
 
 - `FieldValue::SGroup` and `FieldValue::EGroup` — field readers return these as successful tag-only values. Writers emit the corresponding tag with no payload. `encoded_size` for the value is `0` (tag size is in `Field::encoded_size`).
-- `skip_until(pred)` on `ReadExtProtobuf`, `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, and on `FieldIterFromBytes` / `FieldIterFromTryBytes` / `FieldIterFromRead` / `FieldIterFromSlice`. Skips fields (without allocating Len payloads) until `pred(Tag) -> Result<bool>` returns `Ok(true)`.
+- `skip_until(pred)` on `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, and on `FieldIterFromBytes` / `FieldIterFromTryBytes` / `FieldIterFromRead` / `FieldIterFromSlice`. Skips fields (without allocating Len payloads) until `pred(Tag) -> Result<bool>` returns `Ok(true)`. Not on `ReadExtProtobuf` / `AsRefExtProtobuf`: call it on the field iterator returned by `read_protobuf_fields*`.
 - `until_group_ends(field_number)` — returns `impl FnMut(Tag) -> Result<bool>` for `skip_until` after an `SGroup` tag was consumed; handles nested groups (stack inside the closure) and reports `MismatchedEndGroup`.
 - `ProtobufError::MismatchedEndGroup { expected, got }` when an end-group field number does not match the open start-group during skip.
 
