@@ -46,8 +46,9 @@ where
 
 /// Byte-level cursor over protobuf wire data.
 ///
-/// Only fragment operations live here. One complete field is
-/// [`parse_field`] / [`skip_field`]; a group body is [`skip_group_body`].
+/// Only fragment operations live here (`read_varint` / `read_fixed` /
+/// `skip_bytes`). Tag and field decoding live beside [`parse_field`]:
+/// [`read_tag`], [`skip_field`], [`skip_group_body`].
 pub(crate) trait WireCursor {
     /// Read a varint (returns `None` when the stream is empty).
     fn read_varint(&mut self) -> Result<Option<Varint>>;
@@ -57,13 +58,19 @@ pub(crate) trait WireCursor {
 
     /// Discard exactly `length` bytes without allocating a payload buffer.
     fn skip_bytes(&mut self, length: usize) -> Result<()>;
+}
 
-    /// Read a tag (field number + wire type).
-    fn read_tag(&mut self) -> Result<Option<Tag>> {
-        match self.read_varint()? {
-            Some(varint) => Tag::from_encoded(varint).map(Some),
-            None => Ok(None),
-        }
+/// Read a tag (field number + wire type) from a cursor.
+///
+/// Returns `Ok(None)` at EOF before any tag byte. Invalid field numbers and
+/// wire types surface as [`ProtobufError`].
+pub(crate) fn read_tag<C>(cursor: &mut C) -> Result<Option<Tag>>
+where
+    C: WireCursor + ?Sized,
+{
+    match cursor.read_varint()? {
+        Some(varint) => Tag::from_encoded(varint).map(Some),
+        None => Ok(None),
     }
 }
 
@@ -90,7 +97,7 @@ pub(crate) fn parse_field<L, R>(reader: &mut R) -> Result<Option<Field<L>>>
 where
     R: FieldValueReader<L>,
 {
-    let Some(tag) = reader.read_tag()? else {
+    let Some(tag) = read_tag(reader)? else {
         return Ok(None);
     };
 
@@ -157,7 +164,7 @@ pub(crate) fn skip_field<C>(cursor: &mut C) -> Result<Option<Tag>>
 where
     C: WireCursor + ?Sized,
 {
-    let Some(tag) = cursor.read_tag()? else {
+    let Some(tag) = read_tag(cursor)? else {
         return Ok(None);
     };
     skip_field_payload(cursor, tag.wire_type)?;
@@ -1747,9 +1754,7 @@ mod group_skip {
     fn skip_field_returns_tag_including_groups() {
         let bytes = message_with_group_then_varint();
         let mut slice = bytes.as_slice();
-        let mut cursor = SliceReader {
-            slice: &mut slice,
-        };
+        let mut cursor = SliceReader { slice: &mut slice };
 
         let start = skip_field(&mut cursor).unwrap().unwrap();
         assert_eq!(start.field_number.as_u32(), 1);
