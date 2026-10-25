@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Breaking relative to 0.7.0. Call sites that used byte-iterator field/varint/tag traits, or that called `Read` decode methods without a byte budget, must update.
+
+### Added
+
+- `VarintIterFromRead` — return type of `ReadExtVarint::read_varints` (replaces `VarintIterFromTryBytes` / `VarintIterFromBytes`).
+
+### Changed
+
+- `ReadExtVarint`, `ReadExtTag`, and `ReadExtProtobuf` methods take an explicit byte budget `len` and bound the reader with `std::io::Take`.
+- `ReadExtProtobuf::read_protobuf_fields(self, len)` and `read_protobuf_fields_with(self, len, make)`.
+- `FieldIterFromRead` holds `Take<R>`; its `skip_until` has no extra `len` (already bounded).
+- `AsRefExtProtobuf` is unchanged: no extra `len` argument; the slice length is the bound.
+
+### Removed
+
+- Iterator-input traits and types: `IteratorExtVarint`, `TryIteratorExtVarint`, `IteratorExtTag`, `TryIteratorExtTag`, `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, `FieldIterFromBytes`, `FieldIterFromTryBytes`, `VarintIterFromBytes`, `VarintIterFromTryBytes`.
+- Use `AsRefExtProtobuf` on a slice, or `ReadExt*` with `len`, instead of feeding byte iterators.
+
 ## [0.7.0]
 
 Breaking relative to 0.6.0. Exhaustive matches on `FieldValue` and `ProtobufError` must update. Callers that treated group tags as `UnsupportedGroup` errors must match `FieldValue::SGroup` / `FieldValue::EGroup` instead. Note that 0.6.0’s `UnsupportedGroup` rejection was short-lived: 0.7.0 replaces it with successful group value variants (group handling churned twice between 0.5 → 0.7).

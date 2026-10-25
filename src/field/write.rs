@@ -377,9 +377,10 @@ mod tests {
             buffer.write_protobuf_field(&original_field).unwrap();
 
             // Read
+            let len = buffer.len();
             let reader = buffer.as_slice();
             let fields: Vec<_> = reader
-                .read_protobuf_fields()
+                .read_protobuf_fields(len)
                 .collect::<::std::result::Result<Vec<_>, _>>()
                 .unwrap();
             assert_eq!(fields.len(), 1);
@@ -398,9 +399,10 @@ mod tests {
             buffer.write_protobuf_field(&original_field).unwrap();
 
             // Read
+            let len = buffer.len();
             let reader = buffer.as_slice();
             let fields: Vec<_> = reader
-                .read_protobuf_fields()
+                .read_protobuf_fields(len)
                 .collect::<::std::result::Result<Vec<_>, _>>()
                 .unwrap();
             assert_eq!(fields.len(), 1);
@@ -431,9 +433,10 @@ mod tests {
             buffer.write_protobuf_fields(&original_fields).unwrap();
 
             // Read
+            let len = buffer.len();
             let reader = buffer.as_slice();
             let read_fields: Vec<_> = reader
-                .read_protobuf_fields()
+                .read_protobuf_fields(len)
                 .collect::<::std::result::Result<Vec<_>, _>>()
                 .unwrap();
 
@@ -482,9 +485,10 @@ mod tests {
                 .sum::<usize>();
             assert_eq!(written, expected);
 
+            let len = buffer.len();
             let read_fields: Vec<_> = buffer
                 .as_slice()
-                .read_protobuf_fields()
+                .read_protobuf_fields(len)
                 .collect::<::std::result::Result<Vec<_>, _>>()
                 .unwrap();
             assert_eq!(read_fields, original_fields);

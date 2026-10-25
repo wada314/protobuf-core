@@ -11,12 +11,9 @@ use ::std::io::Write;
 
 mod read;
 
-// Iterator return types for `read_varints` (re-exported at the crate root).
+// Read helpers for `read_varints` (re-exported at the crate root).
 #[allow(unused_imports)]
-pub use read::{
-    DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint,
-    VarintIterFromBytes, VarintIterFromTryBytes,
-};
+pub use read::{DecodeOutcome, DecodeState, ReadExtVarint, VarintIterFromRead};
 /// A deserialized varint value.
 ///
 /// This type represents the decoded 8-byte value from serialized bytes
