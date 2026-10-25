@@ -95,12 +95,22 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 
 /// Byte-level cursor over protobuf wire data.
 ///
-/// Required methods are atomic fragments (`read_varint` / `read_fixed` /
-/// `skip_bytes`). Default methods compose those into tags, one field skip,
-/// and conditional multi-field skip.
+/// Required methods are atomic fragments (`remaining` / `read_varint` /
+/// `read_fixed` / `skip_bytes`). Default methods compose those into tags, one
+/// field skip, and conditional multi-field skip.
+///
+/// Soft end-of-input is signaled by [`remaining`](Self::remaining) `== 0`
+/// (field iterators stop there). Mid-field emptiness is
+/// [`ProtobufError::UnexpectedEof`].
 pub(crate) trait WireCursor {
-    /// Read a varint (returns `None` when the stream is empty).
-    fn read_varint(&mut self) -> Result<Option<Varint>>;
+    /// Bytes still allowed in this cursor's bound (`Take::limit` / slice length).
+    fn remaining(&self) -> usize;
+
+    /// Read a varint.
+    ///
+    /// Empty input is [`ProtobufError::UnexpectedEof`] (caller must check
+    /// [`remaining`](Self::remaining) first for soft end).
+    fn read_varint(&mut self) -> Result<Varint>;
 
     /// Read exactly `N` bytes (fixed-width wire types).
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]>;
@@ -110,13 +120,10 @@ pub(crate) trait WireCursor {
 
     /// Read a tag (field number + wire type).
     ///
-    /// Returns `Ok(None)` at EOF before any tag byte. Invalid field numbers and
-    /// wire types surface as [`ProtobufError`].
-    fn read_tag(&mut self) -> Result<Option<Tag>> {
-        match self.read_varint()? {
-            Some(varint) => Tag::from_encoded(varint).map(Some),
-            None => Ok(None),
-        }
+    /// Empty input is [`ProtobufError::UnexpectedEof`]. Invalid field numbers
+    /// and wire types surface as [`ProtobufError`].
+    fn read_tag(&mut self) -> Result<Tag> {
+        Tag::from_encoded(self.read_varint()?)
     }
 
     /// Skip one complete field and return its tag.
@@ -125,25 +132,22 @@ pub(crate) trait WireCursor {
     /// of materialized. For [`WireType::SGroup`] / [`WireType::EGroup`], only
     /// the tag is consumed; the start-group body is left for the caller.
     ///
-    /// Returns `Ok(None)` at EOF before any tag byte.
-    fn skip_field(&mut self) -> Result<Option<Tag>> {
-        let Some(tag) = self.read_tag()? else {
-            return Ok(None);
-        };
+    /// Empty input is [`ProtobufError::UnexpectedEof`].
+    fn skip_field(&mut self) -> Result<Tag> {
+        let tag = self.read_tag()?;
         match tag.wire_type {
             WireType::Varint => {
-                self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
+                self.read_varint()?;
             }
             WireType::Int32 => self.skip_bytes(4)?,
             WireType::Int64 => self.skip_bytes(8)?,
             WireType::Len => {
-                let length_varint = self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-                let length = length_varint.try_to_uint32()? as usize;
+                let length = self.read_varint()?.try_to_uint32()? as usize;
                 self.skip_bytes(length)?;
             }
             WireType::SGroup | WireType::EGroup => {}
         }
-        Ok(Some(tag))
+        Ok(tag)
     }
 
     /// Skip fields until `pred` returns `Ok(true)`.
@@ -160,7 +164,10 @@ pub(crate) trait WireCursor {
         F: FnMut(Tag) -> Result<bool>,
     {
         loop {
-            let tag = self.skip_field()?.ok_or(ProtobufError::UnexpectedEof)?;
+            if self.remaining() == 0 {
+                return Err(ProtobufError::UnexpectedEof);
+            }
+            let tag = self.skip_field()?;
             if pred(tag)? {
                 return Ok(());
             }
@@ -185,57 +192,51 @@ pub(crate) trait BufWireCursor<L>: WireCursor {
     /// `L` is the length-delimited payload. Streaming readers build it with the
     /// caller's closure. The slice reader uses `&'a [u8]`.
     ///
+    /// Empty input is [`ProtobufError::UnexpectedEof`] (field iterators check
+    /// [`remaining`](WireCursor::remaining) first for soft end).
+    ///
     /// For [`FieldValue::SGroup`] / [`FieldValue::EGroup`], only the tag is
     /// consumed; a start-group body remains on the cursor for the caller to
     /// read or [`skip_until`](WireCursor::skip_until) with [`until_group_ends`].
-    fn parse_field(&mut self) -> Result<Option<Field<L>>> {
-        let Some(tag) = self.read_tag()? else {
-            return Ok(None);
-        };
+    fn parse_field(&mut self) -> Result<Field<L>> {
+        let tag = self.read_tag()?;
 
         let value = match tag.wire_type {
-            WireType::Varint => {
-                let varint = self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-                FieldValue::Varint(varint)
-            }
-            WireType::Int32 => {
-                let bytes = self.read_fixed::<4>()?;
-                FieldValue::I32(bytes)
-            }
-            WireType::Int64 => {
-                let bytes = self.read_fixed::<8>()?;
-                FieldValue::I64(bytes)
-            }
+            WireType::Varint => FieldValue::Varint(self.read_varint()?),
+            WireType::Int32 => FieldValue::I32(self.read_fixed::<4>()?),
+            WireType::Int64 => FieldValue::I64(self.read_fixed::<8>()?),
             WireType::Len => {
-                let length_varint = self.read_varint()?.ok_or(ProtobufError::UnexpectedEof)?;
-                let length = length_varint.try_to_uint32()? as usize;
-                let data = self.read_bytes(length)?;
-                FieldValue::Len(data)
+                let length = self.read_varint()?.try_to_uint32()? as usize;
+                FieldValue::Len(self.read_bytes(length)?)
             }
             WireType::SGroup => FieldValue::SGroup,
             WireType::EGroup => FieldValue::EGroup,
         };
 
-        Ok(Some(Field {
+        Ok(Field {
             field_number: tag.field_number,
             value,
-        }))
+        })
     }
 }
 
-/// [`WireCursor`] over `std::io::Read`.
+/// [`WireCursor`] over a length-bounded [`Take`].
 ///
-/// The reader is expected to already be length-bounded (for example via
-/// [`Take`] from [`ReadExtProtobuf`]). Nested varint reads use the reader's EOF.
-struct ReadCursor<'a, R>(&'a mut R);
+/// Nested varint reads use the take's EOF; [`remaining`](WireCursor::remaining)
+/// is [`Take::limit`].
+struct ReadCursor<'a, R>(&'a mut Take<R>);
 
 impl<R> WireCursor for ReadCursor<'_, R>
 where
     R: Read,
 {
-    fn read_varint(&mut self) -> Result<Option<Varint>> {
+    fn remaining(&self) -> usize {
+        usize::try_from(self.0.limit()).unwrap_or(usize::MAX)
+    }
+
+    fn read_varint(&mut self) -> Result<Varint> {
         use crate::varint::ReadExtVarint;
-        self.0.read_varint()
+        self.0.read_varint()?.ok_or(ProtobufError::UnexpectedEof)
     }
 
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
@@ -259,14 +260,18 @@ where
 // ReadExtProtobuf
 // ============================================================================
 
-/// Helper struct implementing BufWireCursor for Read
-struct ReadReader<'a, R, F>(&'a mut R, &'a mut F);
+/// Helper struct implementing BufWireCursor for a length-bounded [`Take`].
+struct ReadReader<'a, R, F>(&'a mut Take<R>, &'a mut F);
 
 impl<R, F> WireCursor for ReadReader<'_, R, F>
 where
     R: Read,
 {
-    fn read_varint(&mut self) -> Result<Option<Varint>> {
+    fn remaining(&self) -> usize {
+        usize::try_from(self.0.limit()).unwrap_or(usize::MAX)
+    }
+
+    fn read_varint(&mut self) -> Result<Varint> {
         ReadCursor(self.0).read_varint()
     }
 
@@ -329,11 +334,10 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut reader = ReadReader(&mut self.reader, &mut self.make);
-        match reader.parse_field() {
-            Ok(Some(field)) => Some(Ok(field)),
-            Ok(None) => None,
-            Err(err) => Some(Err(err)),
+        if reader.remaining() == 0 {
+            return None;
         }
+        Some(reader.parse_field())
     }
 }
 
@@ -448,9 +452,15 @@ pub(crate) struct SliceReader<'a, 'b> {
 }
 
 impl WireCursor for SliceReader<'_, '_> {
-    fn read_varint(&mut self) -> Result<Option<Varint>> {
+    fn remaining(&self) -> usize {
+        self.slice.len()
+    }
+
+    fn read_varint(&mut self) -> Result<Varint> {
         use crate::varint::ReadExtVarint;
-        self.slice.read_varint()
+        self.slice
+            .read_varint()?
+            .ok_or(ProtobufError::UnexpectedEof)
     }
 
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
@@ -527,7 +537,10 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
         let mut reader = SliceReader {
             slice: &mut self.slice,
         };
-        reader.parse_field().transpose()
+        if reader.remaining() == 0 {
+            return None;
+        }
+        Some(reader.parse_field())
     }
 }
 
@@ -1163,7 +1176,7 @@ mod group_skip {
         let mut slice = bytes.as_slice();
         let mut cursor = SliceReader { slice: &mut slice };
 
-        let start = cursor.skip_field().unwrap().unwrap();
+        let start = cursor.skip_field().unwrap();
         assert_eq!(start.field_number.as_u32(), 1);
         assert_eq!(start.wire_type, WireType::SGroup);
 
@@ -1171,10 +1184,10 @@ mod group_skip {
             .skip_until(until_group_ends(start.field_number))
             .unwrap();
 
-        let after = cursor.skip_field().unwrap().unwrap();
+        let after = cursor.skip_field().unwrap();
         assert_eq!(after.field_number.as_u32(), 3);
         assert_eq!(after.wire_type, WireType::Varint);
-        assert!(cursor.skip_field().unwrap().is_none());
+        assert_eq!(cursor.remaining(), 0);
     }
 
     #[test]
@@ -1184,11 +1197,12 @@ mod group_skip {
         let mut slice = bytes.as_slice();
         let mut cursor = SliceReader { slice: &mut slice };
 
-        let start = cursor.skip_field().unwrap().unwrap();
+        let start = cursor.skip_field().unwrap();
         assert_eq!(start.wire_type, WireType::SGroup);
         cursor
             .skip_until(until_group_ends(start.field_number))
             .unwrap();
+        assert_eq!(cursor.remaining(), 0);
         assert!(slice.is_empty());
     }
 

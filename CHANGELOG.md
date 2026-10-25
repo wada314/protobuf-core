@@ -20,6 +20,10 @@ Breaking relative to 0.7.0. Call sites that used byte-iterator field/varint/tag 
 - `FieldIterFromRead` holds `Take<R>`; its `skip_until` has no extra `len` (already bounded).
 - `AsRefExtProtobuf` is unchanged: no extra `len` argument; the slice length is the bound.
 
+### Internal
+
+- `WireCursor` / `BufWireCursor` drop `Option` from `read_varint` / `read_tag` / `skip_field` / `parse_field`; empty input is `UnexpectedEof`. Soft end uses new `remaining()` (`Take::limit` / slice length); field iterators stop when `remaining() == 0`. Read-side impls are specialized on `Take`.
+
 ### Removed
 
 - Iterator-input traits and types: `IteratorExtVarint`, `TryIteratorExtVarint`, `IteratorExtTag`, `TryIteratorExtTag`, `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, `FieldIterFromBytes`, `FieldIterFromTryBytes`, `VarintIterFromBytes`, `VarintIterFromTryBytes`.
