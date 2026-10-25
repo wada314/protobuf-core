@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Breaking relative to 0.7.0. Call sites that used byte-iterator field/varint/tag traits, or that called `Read` decode methods without a byte budget, must update.
+Breaking relative to 0.7.0. Call sites that used byte-iterator field/varint/tag traits must update. Field `Read` APIs take an explicit message budget `len`; varint/tag `Read` methods do not.
 
 ### Added
 
@@ -15,15 +15,15 @@ Breaking relative to 0.7.0. Call sites that used byte-iterator field/varint/tag 
 
 ### Changed
 
-- `ReadExtVarint`, `ReadExtTag`, and `ReadExtProtobuf` methods take an explicit byte budget `len` and bound the reader with `std::io::Take`.
-- `ReadExtProtobuf::read_protobuf_fields(self, len)` and `read_protobuf_fields_with(self, len, make)`.
+- `ReadExtProtobuf::read_protobuf_fields(self, len)` and `read_protobuf_fields_with(self, len, make)` take an explicit byte budget `len` and bound the reader with `std::io::Take`. That is the only `Read` decode API that takes `len`.
+- `ReadExtVarint` / `ReadExtTag` methods (`read_varint`, `read_varint_partial`, `read_varint_resume`, `read_varints`, and the tag equivalents) do **not** take `len`. The reader's EOF (or an existing `Take` from the field API / caller) is the bound. `read_varints` returns `VarintIterFromRead<&mut Self>` with no `Take` wrapper.
 - `FieldIterFromRead` holds `Take<R>`; its `skip_until` has no extra `len` (already bounded).
 - `AsRefExtProtobuf` is unchanged: no extra `len` argument; the slice length is the bound.
 
 ### Removed
 
 - Iterator-input traits and types: `IteratorExtVarint`, `TryIteratorExtVarint`, `IteratorExtTag`, `TryIteratorExtTag`, `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, `FieldIterFromBytes`, `FieldIterFromTryBytes`, `VarintIterFromBytes`, `VarintIterFromTryBytes`.
-- Use `AsRefExtProtobuf` on a slice, or `ReadExt*` with `len`, instead of feeding byte iterators.
+- Use `AsRefExtProtobuf` on a slice, or `ReadExtProtobuf` with `len` / `ReadExtVarint`/`ReadExtTag` until EOF, instead of feeding byte iterators.
 
 ## [0.7.0]
 

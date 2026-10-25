@@ -86,7 +86,11 @@ pub enum Outcome {
 
 /// Extension trait for reading tags from Read instances.
 ///
-/// Each method takes a `len` byte budget, forwarded to [`ReadExtVarint`].
+/// Reads until the reader's EOF (or an existing [`std::io::Take`] bound).
+/// Methods do not take a separate byte-budget argument; they forward to
+/// [`ReadExtVarint`].
+///
+/// [`ReadExtVarint`]: crate::varint::ReadExtVarint
 ///
 /// # Example
 /// ```
@@ -94,54 +98,49 @@ pub enum Outcome {
 /// use ::protobuf_core::ReadExtTag;
 ///
 /// let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
-/// let len = data.len();
 /// let mut reader = Cursor::new(data);
-/// let tag = reader.read_tag(len).unwrap().unwrap();
+/// let tag = reader.read_tag().unwrap().unwrap();
 /// assert_eq!(tag.field_number.as_u32(), 1);
 /// ```
 pub trait ReadExtTag {
-    /// Read a tag from this reader, consuming at most `len` bytes.
-    fn read_tag(&mut self, len: usize) -> Result<Option<Tag>>;
+    /// Read a tag from this reader until EOF or a complete value.
+    fn read_tag(&mut self) -> Result<Option<Tag>>;
 
     /// Read a tag from this reader, supporting incomplete input.
-    ///
-    /// Consumes at most `len` bytes.
-    fn read_tag_partial(&mut self, len: usize) -> Result<Outcome>;
+    fn read_tag_partial(&mut self) -> Result<Outcome>;
 
     /// Resume tag decoding with additional bytes from this reader.
-    ///
-    /// Consumes at most `len` bytes.
-    fn read_tag_resume(&mut self, len: usize, state: DecodeState) -> Result<Outcome>;
+    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome>;
 }
 
 impl<R> ReadExtTag for R
 where
     R: Read,
 {
-    fn read_tag(&mut self, len: usize) -> Result<Option<Tag>> {
+    fn read_tag(&mut self) -> Result<Option<Tag>> {
         use crate::varint::{DecodeOutcome, ReadExtVarint};
 
-        match self.read_varint_partial(len)? {
+        match self.read_varint_partial()? {
             DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
             DecodeOutcome::Empty => Ok(None),
             DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
         }
     }
 
-    fn read_tag_partial(&mut self, len: usize) -> Result<Outcome> {
+    fn read_tag_partial(&mut self) -> Result<Outcome> {
         use crate::varint::{DecodeOutcome, ReadExtVarint};
 
-        match self.read_varint_partial(len)? {
+        match self.read_varint_partial()? {
             DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
             DecodeOutcome::Empty => Ok(Outcome::Empty),
             DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
         }
     }
 
-    fn read_tag_resume(&mut self, len: usize, state: DecodeState) -> Result<Outcome> {
+    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome> {
         use crate::varint::{DecodeOutcome, ReadExtVarint};
 
-        match self.read_varint_resume(len, state)? {
+        match self.read_varint_resume(state)? {
             DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
             DecodeOutcome::Empty => Ok(Outcome::Empty),
             DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
@@ -283,9 +282,8 @@ mod tests {
         use ::std::io::Cursor;
 
         let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
-        let len = data.len();
         let mut reader = Cursor::new(data);
-        let tag = reader.read_tag(len).unwrap().unwrap();
+        let tag = reader.read_tag().unwrap().unwrap();
         assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
         assert_eq!(tag.wire_type, WireType::Varint);
     }
@@ -297,7 +295,7 @@ mod tests {
 
         let data = vec![];
         let mut reader = Cursor::new(data);
-        let tag = reader.read_tag(0).unwrap();
+        let tag = reader.read_tag().unwrap();
         assert_eq!(tag, None);
     }
 
@@ -309,9 +307,8 @@ mod tests {
         // u32::MAX = 4,294,967,295 (0xFFFFFFFF)
         // Use 0x100000000 (4,294,967,296) which exceeds u32::MAX
         let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x10]; // Value: 0x100000000
-        let len = bytes.len();
         let mut reader = Cursor::new(bytes);
-        let result = reader.read_tag(len);
+        let result = reader.read_tag();
 
         assert!(result.is_err());
         if let Err(ProtobufError::VarintDowncastOutOfRange { value, target_type }) = result {
@@ -358,12 +355,12 @@ mod tests {
         use ::std::io::Cursor;
 
         let mut reader = Cursor::new(vec![0x80u8]);
-        let state = match reader.read_tag_partial(1).unwrap() {
+        let state = match reader.read_tag_partial().unwrap() {
             Outcome::Incomplete(state) => state,
             other => panic!("expected Incomplete, got {other:?}"),
         };
         let mut reader = Cursor::new(vec![0x01u8]);
-        match reader.read_tag_resume(1, state).unwrap() {
+        match reader.read_tag_resume(state).unwrap() {
             Outcome::Complete(tag) => {
                 assert_eq!(tag.field_number.as_u32(), 16);
                 assert_eq!(tag.wire_type, WireType::Varint);
@@ -373,13 +370,13 @@ mod tests {
     }
 
     #[test]
-    fn test_read_ext_tag_len_budget_incomplete() {
+    fn test_read_ext_tag_short_reader_incomplete() {
         use super::{Outcome, ReadExtTag};
-        use ::std::io::Cursor;
+        use ::std::io::{Cursor, Read};
 
-        // 2-byte tag encoding, but budget of 1.
+        // 2-byte tag encoding; Take of 1 yields Incomplete.
         let mut reader = Cursor::new(vec![0x80u8, 0x01]);
-        let outcome = reader.read_tag_partial(1).unwrap();
+        let outcome = reader.by_ref().take(1).read_tag_partial().unwrap();
         assert!(matches!(outcome, Outcome::Incomplete(_)));
         assert_eq!(reader.position(), 1);
     }

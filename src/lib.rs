@@ -103,7 +103,8 @@
 //! ## Tag/Varint Traits
 //!
 //! For lower-level operations, the library provides traits for reading and writing tags and
-//! varints. Each `Read` method takes an explicit byte budget `len`:
+//! varints. These `Read` methods do not take a byte budget; they stop at the reader's EOF
+//! (or an existing [`std::io::Take`] from [`ReadExtProtobuf`] / the caller):
 //!
 //! - [`ReadExtTag`]: Read tags from `std::io::Read` (with partial/resume for chunked input)
 //! - [`ReadExtVarint`]: Read varints from `std::io::Read` (with partial/resume for chunked input)

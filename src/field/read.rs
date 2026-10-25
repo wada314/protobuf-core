@@ -226,8 +226,7 @@ pub(crate) trait BufWireCursor<L>: WireCursor {
 /// [`WireCursor`] over `std::io::Read`.
 ///
 /// The reader is expected to already be length-bounded (for example via
-/// [`Take`] from [`ReadExtProtobuf`]). Nested varint reads therefore pass
-/// [`usize::MAX`] as the budget.
+/// [`Take`] from [`ReadExtProtobuf`]). Nested varint reads use the reader's EOF.
 struct ReadCursor<'a, R>(&'a mut R);
 
 impl<R> WireCursor for ReadCursor<'_, R>
@@ -236,7 +235,7 @@ where
 {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::ReadExtVarint;
-        self.0.read_varint(usize::MAX)
+        self.0.read_varint()
     }
 
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
@@ -451,8 +450,7 @@ pub(crate) struct SliceReader<'a, 'b> {
 impl WireCursor for SliceReader<'_, '_> {
     fn read_varint(&mut self) -> Result<Option<Varint>> {
         use crate::varint::ReadExtVarint;
-        let n = self.slice.len();
-        self.slice.read_varint(n)
+        self.slice.read_varint()
     }
 
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
