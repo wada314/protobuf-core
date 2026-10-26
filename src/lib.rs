@@ -94,6 +94,10 @@
 //!   byte budget `len` (bounded via [`std::io::Take`])
 //!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] where `L: AsMut<[u8]>`
 //!
+//! Field iterators expose `skip_until` / `take_until` / `copy_until`. After an
+//! [`FieldValue::SGroup`], pair those with [`until_group_ends`] to discard or
+//! preserve the group body (start tag already consumed).
+//!
 //! Byte iterators are not supported; use a slice or a `Read` with `len`.
 //!
 //! ## Writing Traits

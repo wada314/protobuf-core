@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0]
+
+Additive public API for unknown-field group preserve. Callers that only skip groups need no changes.
+
+### Added
+
+- `FieldIterFromSlice::take_until(pred)` — after an `SGroup` tag was consumed, returns a zero-copy `&[u8]` span of the group body through the matching `EGroup` (use with `until_group_ends`). Exact wire bytes.
+- `FieldIterFromSlice::copy_until(pred, out)` / `FieldIterFromRead::copy_until(pred, out)` — same stop semantics as `skip_until`, writing preserved wire bytes to `out`. The slice path copies the `take_until` span; the `Read` path re-encodes tag and length-prefix varints canonically and copies fixed / Len payloads verbatim.
+- Contract mirrors `until_group_ends`: the start-group tag is already consumed (caller writes it to a preserve blob if needed); the helper advances past the matching end-group. Nested groups use the same stack rules. On predicate / decode error, the input cursor may have advanced; `Read` `copy_until` may leave a partial write in `out`.
+
+### Internal
+
+- `WireCursor` gains required `copy_bytes` and default `copy_field` / `copy_until`.
+
 ## [0.6.0]
 
 Breaking relative to 0.5.0. Exhaustive matches on `FieldValue` and `ProtobufError` must update. Call sites that used byte-iterator field/varint/tag traits must move to a slice or `Read`. Field `Read` APIs take an explicit message budget `len`; varint/tag `Read` methods do not.

@@ -47,11 +47,12 @@ pub use self::write::WriteExtProtobuf;
 ///  - Slice readers borrow the input as `&'a [u8]`.
 ///
 /// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
-/// does not include the group body. After an `SGroup`, skip the body with
-/// [`FieldIterFromSlice::skip_until`](crate::FieldIterFromSlice::skip_until) /
-/// [`FieldIterFromRead::skip_until`](crate::FieldIterFromRead::skip_until) and
-/// [`until_group_ends`](crate::until_group_ends) (or read nested fields until a
-/// matching `EGroup`) before reading the next top-level field.
+/// does not include the group body. After an `SGroup`, discard the body with
+/// [`skip_until`](crate::FieldIterFromSlice::skip_until) +
+/// [`until_group_ends`](crate::until_group_ends), preserve it with
+/// [`take_until`](crate::FieldIterFromSlice::take_until) /
+/// [`copy_until`](crate::FieldIterFromSlice::copy_until) (same predicate), or
+/// read nested fields until a matching `EGroup` before the next top-level field.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
     /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`)

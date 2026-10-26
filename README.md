@@ -37,7 +37,22 @@ let fields: Vec<Field<&[u8]>> = bytes
 
 The example above is `AsRefExtProtobuf`: `read_protobuf_fields` borrows `Field<&[u8]>` (the slice length is the bound). `ReadExtProtobuf::read_protobuf_fields(len)` / `read_protobuf_fields_with(len, make)` take an explicit message byte budget and wrap the reader in `std::io::Take`. Lower-level `ReadExtVarint` / `ReadExtTag` methods do not take `len`; they read until that reader's EOF (or an existing `Take`). Length-delimited payloads default to `Vec<u8>`; the `*_with` closure is `FnMut(usize) -> Result<L, ProtobufError>` where `L: AsMut<[u8]>`. The payload length is known before its bytes are read. The closure returns at least that many initialized bytes, and the reader overwrites the first `len` of them. A shorter buffer panics. Capture an allocator in the closure when the buffer needs one. Byte iterators are not supported; use a slice or a `Read` (with `len` for field APIs).
 
-Deprecated group wire types (`SGroup` / `EGroup`) are returned as tag-only `FieldValue` variants. The group body stays on the cursor; read nested fields until the matching `EGroup`, or discard without allocating Len payloads via `skip_until` and `until_group_ends`.
+Deprecated group wire types (`SGroup` / `EGroup`) are returned as tag-only `FieldValue` variants. The group body stays on the cursor; read nested fields until the matching `EGroup`, discard via `skip_until` + `until_group_ends`, or preserve the body (and matching end tag) via `take_until` / `copy_until` with the same predicate — the start tag is already consumed, so write it yourself first when building an unknown-field blob.
+
+```rust
+use protobuf_core::{AsRefExtProtobuf, FieldValue, WriteExtProtobuf, until_group_ends};
+
+let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
+let mut fields = bytes.as_slice().read_protobuf_fields();
+let start = fields.next().unwrap().unwrap();
+assert!(matches!(start.value, FieldValue::SGroup));
+
+let mut preserved = Vec::new();
+preserved.write_protobuf_field(&start).unwrap();
+let body = fields.take_until(until_group_ends(start.field_number)).unwrap();
+preserved.extend_from_slice(body);
+assert_eq!(&preserved[..], &bytes[..bytes.len() - 2]);
+```
 
 ### Writing Fields
 
