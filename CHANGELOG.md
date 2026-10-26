@@ -5,12 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0]
 
-Breaking relative to 0.7.0. Call sites that used byte-iterator field/varint/tag traits must update. Field `Read` APIs take an explicit message budget `len`; varint/tag `Read` methods do not.
+Breaking relative to 0.5.0. Exhaustive matches on `FieldValue` and `ProtobufError` must update. Call sites that used byte-iterator field/varint/tag traits must move to a slice or `Read`. Field `Read` APIs take an explicit message budget `len`; varint/tag `Read` methods do not.
 
 ### Added
 
+- `FieldValue::SGroup` and `FieldValue::EGroup` — field readers return these as successful tag-only values (0.5.0 reported group tags as `InvalidWireType`). Writers emit the corresponding tag with no payload. `encoded_size` for the value is `0` (tag size is in `Field::encoded_size`).
+- `skip_until(pred)` on `FieldIterFromRead` / `FieldIterFromSlice`. Skips fields (without allocating Len payloads) until `pred(Tag) -> Result<bool>` returns `Ok(true)`. Not on `ReadExtProtobuf` / `AsRefExtProtobuf`: call it on the field iterator returned by `read_protobuf_fields*`.
+- `until_group_ends(field_number)` — returns `impl FnMut(Tag) -> Result<bool>` for `skip_until` after an `SGroup` tag was consumed; handles nested groups (stack inside the closure) and reports `MismatchedEndGroup`.
+- `ProtobufError::MismatchedEndGroup { expected, got }` when an end-group field number does not match the open start-group during skip.
 - `VarintIterFromRead` — return type of `ReadExtVarint::read_varints` (replaces `VarintIterFromTryBytes` / `VarintIterFromBytes`).
 
 ### Changed
@@ -19,46 +23,16 @@ Breaking relative to 0.7.0. Call sites that used byte-iterator field/varint/tag 
 - `ReadExtVarint` / `ReadExtTag` methods (`read_varint`, `read_varint_partial`, `read_varint_resume`, `read_varints`, and the tag equivalents) do **not** take `len`. The reader's EOF (or an existing `Take` from the field API / caller) is the bound. `read_varints` returns `VarintIterFromRead<&mut Self>` with no `Take` wrapper.
 - `FieldIterFromRead` holds `Take<R>`; its `skip_until` has no extra `len` (already bounded).
 - `AsRefExtProtobuf` is unchanged: no extra `len` argument; the slice length is the bound.
+- `InvalidWireType` remains only for tag low-bits outside 0–5 (for example from `WireType::try_from`). Group wire types are known and return `FieldValue::SGroup` / `FieldValue::EGroup` on the field-read path.
 
 ### Internal
 
-- `WireCursor` / `BufWireCursor` drop `Option` from `read_varint` / `read_tag` / `skip_field` / `parse_field`; empty input is `UnexpectedEof`. Soft end uses new `remaining()` (`Take::limit` / slice length); field iterators stop when `remaining() == 0`. Read-side impls are specialized on `Take`.
+- Field I/O shares `WireCursor` (required: `remaining` / varint / fixed / `skip_bytes`; default methods: `read_tag`, `skip_field`, `skip_until`) and `BufWireCursor<L>` (`read_bytes` plus default `parse_field`). Empty input is `UnexpectedEof`; soft end is `remaining() == 0`. `skip_field` returns the `Tag`; group bodies use `skip_until` with `until_group_ends`. Read-side impls are specialized on `Take`.
 
 ### Removed
 
 - Iterator-input traits and types: `IteratorExtVarint`, `TryIteratorExtVarint`, `IteratorExtTag`, `TryIteratorExtTag`, `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, `FieldIterFromBytes`, `FieldIterFromTryBytes`, `VarintIterFromBytes`, `VarintIterFromTryBytes`.
 - Use `AsRefExtProtobuf` on a slice, or `ReadExtProtobuf` with `len` / `ReadExtVarint`/`ReadExtTag` until EOF, instead of feeding byte iterators.
-
-## [0.7.0]
-
-Breaking relative to 0.6.0. Exhaustive matches on `FieldValue` and `ProtobufError` must update. Callers that treated group tags as `UnsupportedGroup` errors must match `FieldValue::SGroup` / `FieldValue::EGroup` instead. Note that 0.6.0’s `UnsupportedGroup` rejection was short-lived: 0.7.0 replaces it with successful group value variants (group handling churned twice between 0.5 → 0.7).
-
-### Added
-
-- `FieldValue::SGroup` and `FieldValue::EGroup` — field readers return these as successful tag-only values. Writers emit the corresponding tag with no payload. `encoded_size` for the value is `0` (tag size is in `Field::encoded_size`).
-- `skip_until(pred)` on `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, and on `FieldIterFromBytes` / `FieldIterFromTryBytes` / `FieldIterFromRead` / `FieldIterFromSlice`. Skips fields (without allocating Len payloads) until `pred(Tag) -> Result<bool>` returns `Ok(true)`. Not on `ReadExtProtobuf` / `AsRefExtProtobuf`: call it on the field iterator returned by `read_protobuf_fields*`.
-- `until_group_ends(field_number)` — returns `impl FnMut(Tag) -> Result<bool>` for `skip_until` after an `SGroup` tag was consumed; handles nested groups (stack inside the closure) and reports `MismatchedEndGroup`.
-- `ProtobufError::MismatchedEndGroup { expected, got }` when an end-group field number does not match the open start-group during skip.
-
-### Removed
-
-- `ProtobufError::UnsupportedGroup` — group tags are no longer reported as errors from field readers.
-
-### Internal
-
-- Field I/O shares `WireCursor` (required: varint / fixed / `skip_bytes`; default methods: `read_tag`, `skip_field`, `skip_until`) and `BufWireCursor<L>` (`read_bytes` plus default `parse_field`). `skip_field` returns the `Tag`; group bodies use `skip_until` with `until_group_ends`.
-
-## [0.6.0]
-
-Breaking error-enum change. Callers that matched `ProtobufError` exhaustively must handle the new variant. Callers that treated group tags (wire types 3 and 4) as `InvalidWireType` must match `UnsupportedGroup` instead.
-
-### Added
-
-- `ProtobufError::UnsupportedGroup { wire_type }` — field readers report this when they see a start-group or end-group tag. `wire_type` is `WireType::SGroup` or `WireType::EGroup`. Groups are still not read or skipped; this only names the rejection correctly.
-
-### Changed
-
-- `InvalidWireType` is only for tag low-bits outside 0–5 (for example from `WireType::try_from`). Its rustdoc notes that group types are known and use `UnsupportedGroup` on the field-read path.
 
 ## [0.5.0]
 
