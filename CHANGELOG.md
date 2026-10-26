@@ -5,9 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0]
 
 Breaking relative to 0.7.0. Call sites that used byte-iterator field/varint/tag traits must update. Field `Read` APIs take an explicit message budget `len`; varint/tag `Read` methods do not.
+
+crates.io never received 0.6.0 or 0.7.0; the published jump from 0.5.0 also includes the 0.6.0 and 0.7.0 sections below.
 
 ### Added
 
