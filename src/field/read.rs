@@ -917,6 +917,52 @@ mod tests {
     }
 
     #[test]
+    fn test_read_ext_oversized_budget_is_unexpected_eof() {
+        use super::ReadExtProtobuf;
+        use crate::ProtobufError;
+        use ::std::io::Cursor;
+
+        // One complete field (3 bytes), but the budget claims more than the
+        // underlying reader can supply. After the field is consumed, Take still
+        // has remaining capacity while the cursor is at EOF, so the next poll is
+        // UnexpectedEof (not a soft end).
+        let data = vec![0x08, 0x96, 0x01]; // field 1: 150
+        let result: ::std::result::Result<Vec<_>, _> =
+            Cursor::new(data).read_protobuf_fields(100).collect();
+        assert!(
+            matches!(result, Err(ProtobufError::UnexpectedEof)),
+            "got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_read_ext_truncated_fixed_and_len() {
+        use super::ReadExtProtobuf;
+        use crate::ProtobufError;
+        use ::std::io::{Cursor, ErrorKind};
+
+        // Mid-field truncation on the Read path: `read_exact` surfaces as IoError.
+        for input in [
+            &[0x0D, 0x01, 0x02, 0x03][..],    // truncated i32
+            &[0x09, 0, 0, 0, 0, 0, 0, 0][..], // truncated i64
+            &[0x0A, 0x05, b'a', b'b'][..],    // truncated len
+        ] {
+            let error = Cursor::new(input)
+                .read_protobuf_fields(input.len())
+                .next()
+                .unwrap()
+                .unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    ProtobufError::IoError(ref err) if err.kind() == ErrorKind::UnexpectedEof
+                ),
+                "input={input:?} got {error:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_as_ref_ext_algorithm_edges() {
         use super::AsRefExtProtobuf;
         use crate::ProtobufError;
@@ -1211,6 +1257,59 @@ mod group_skip {
         use ::std::io::Cursor;
 
         let bytes = message_with_group_then_varint();
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+        fields
+            .skip_until(until_group_ends(start.field_number))
+            .unwrap();
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 3);
+        let FieldValue::Varint(v) = after.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 7);
+    }
+
+    #[test]
+    fn skip_group_with_len_payload_on_read_iter() {
+        use ::std::io::Cursor;
+
+        // Exercises ReadCursor::skip_bytes via Len inside skip_until.
+        // field 1 SGroup, field 2 len "ab", field 1 EGroup, field 3 varint 7
+        let bytes = [0x0B, 0x12, 0x02, b'a', b'b', 0x0C, 0x18, 0x07];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+        fields
+            .skip_until(until_group_ends(start.field_number))
+            .unwrap();
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 3);
+        let FieldValue::Varint(v) = after.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 7);
+    }
+
+    #[test]
+    fn skip_large_len_payload_on_read_iter() {
+        use crate::varint::Varint;
+        use ::std::io::Cursor;
+
+        // Len payload longer than ReadCursor's 256-byte skip buffer so the
+        // multi-chunk skip_bytes loop runs.
+        const PAYLOAD_LEN: usize = 300;
+        let mut bytes = vec![0x0B]; // field 1 SGroup
+        bytes.push(0x12); // field 2 Len
+        let (encoded, count) = Varint::from_uint64(PAYLOAD_LEN as u64).encode();
+        bytes.extend_from_slice(&encoded[..count]);
+        bytes.extend(::std::iter::repeat_n(0u8, PAYLOAD_LEN));
+        bytes.push(0x0C); // field 1 EGroup
+        bytes.extend_from_slice(&[0x18, 0x07]); // field 3 varint 7
+
         let len = bytes.len();
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
