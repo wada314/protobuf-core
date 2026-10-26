@@ -1,7 +1,9 @@
-//! Varint decoding (reading) from iterators and `std::io::Read`.
+//! Varint decoding (reading) from `std::io::Read`.
 //!
 //! This module provides extension traits and types for reading varints from
-//! various sources, including partial decoding and resume support.
+//! readers, including partial decoding and resume support. The reader's EOF
+//! (or an existing [`std::io::Take`] bound) is the byte limit; methods do not
+//! take a separate `len` argument.
 
 use crate::wire_format::{MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK};
 use crate::{ProtobufError, Result};
@@ -15,8 +17,6 @@ use super::Varint;
 /// Returned in [`DecodeOutcome::Incomplete`]. Use with [`read_varint_resume`] to continue parsing.
 ///
 /// [`read_varint_resume`]: ReadExtVarint::read_varint_resume
-/// Varint parsing is performed only through the extension traits
-/// ([`IteratorExtVarint`], [`TryIteratorExtVarint`], [`ReadExtVarint`], etc.).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct DecodeState {
     decoded_value: u64,
@@ -26,14 +26,14 @@ pub struct DecodeState {
 
 /// Result of a varint decode step.
 ///
-/// Returned by [`IteratorExtVarint::read_varint_partial`], [`ReadExtVarint::read_varint_partial`],
-/// and their `read_varint_resume` variants.
+/// Returned by [`ReadExtVarint::read_varint_partial`] and
+/// [`ReadExtVarint::read_varint_resume`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecodeOutcome {
     /// Parsing completed successfully.
     Complete(Varint),
     /// Parser ran out of input. Use [`read_varint_resume`] with the state
-    /// to continue from another reader/iterator/stream.
+    /// to continue from another reader/stream.
     ///
     /// [`read_varint_resume`]: ReadExtVarint::read_varint_resume
     Incomplete(DecodeState),
@@ -90,82 +90,20 @@ impl DecodeState {
     }
 }
 
-/// Iterator that reads varints from `Iterator<Item = Result<u8, E>>`.
+/// Iterator that reads varints from a `Read` until EOF.
 ///
-/// Yields [`Result<Varint>`] for each varint. Stops when the input is empty or an
-/// error occurs. [`ReadExtVarint::read_varints`] returns this type around
-/// [`std::io::Bytes`].
-pub struct VarintIterFromTryBytes<I> {
-    bytes: I,
+/// Yields [`Result<Varint>`] for each varint. Stops when the reader is empty or an
+/// error occurs. Returned by [`ReadExtVarint::read_varints`].
+pub struct VarintIterFromRead<R> {
+    reader: R,
 }
 
-/// Iterator that reads varints from `Iterator<Item = u8>`.
-///
-/// Standalone return type of [`IteratorExtVarint::read_varints`]. Internally adapts
-/// each byte to `Ok` and delegates to [`VarintIterFromTryBytes`].
-pub struct VarintIterFromBytes<I> {
-    inner: VarintIterFromTryBytes<ToResultIterator<I>>,
-}
-
-/// Adapts `Iterator<Item = u8>` to `Iterator<Item = Result<u8, Infallible>>`.
-///
-/// Implementation detail of [`VarintIterFromBytes`]; not part of the public API.
-pub(crate) struct ToResultIterator<I> {
-    inner: I,
-}
-
-impl<I> Iterator for ToResultIterator<I>
-where
-    I: Iterator<Item = u8>,
-{
-    type Item = ::std::result::Result<u8, ::std::convert::Infallible>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(Ok)
-    }
-}
-
-impl<I, E> VarintIterFromTryBytes<I>
-where
-    I: Iterator<Item = ::std::result::Result<u8, E>>,
-    E: Into<ProtobufError>,
-{
-    fn new(bytes: I) -> Self {
-        Self { bytes }
-    }
-}
-
-impl<I> VarintIterFromBytes<I>
-where
-    I: Iterator<Item = u8>,
-{
-    fn new(bytes: I) -> Self {
-        Self {
-            inner: VarintIterFromTryBytes::new(ToResultIterator { inner: bytes }),
-        }
-    }
-}
-
-impl<I> Iterator for VarintIterFromBytes<I>
-where
-    I: Iterator<Item = u8>,
-{
+impl<R: Read> Iterator for VarintIterFromRead<R> {
     type Item = Result<Varint>;
 
+    #[allow(clippy::unbuffered_bytes)] // Varint parsing requires byte-by-byte reading; caller should use BufReader for efficiency
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
-    }
-}
-
-impl<I, E> Iterator for VarintIterFromTryBytes<I>
-where
-    I: Iterator<Item = ::std::result::Result<u8, E>>,
-    E: Into<ProtobufError>,
-{
-    type Item = Result<Varint>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match DecodeState::new().feed(&mut self.bytes) {
+        match DecodeState::new().feed(self.reader.by_ref().bytes()) {
             Ok(DecodeOutcome::Complete(v)) => Some(Ok(v)),
             Ok(DecodeOutcome::Empty) => None,
             Ok(DecodeOutcome::Incomplete(_)) => Some(Err(ProtobufError::UnexpectedEof)),
@@ -175,191 +113,13 @@ where
 }
 
 // ============================================================================
-// IteratorExtVarint
-// ============================================================================
-
-/// This trait provides convenient methods to collect varints directly from
-/// any iterator that yields bytes.
-///
-/// # Example
-/// ```
-/// use ::protobuf_core::{DecodeOutcome, IteratorExtVarint, Varint};
-///
-/// let bytes = vec![0x96, 0x01]; // 150 in varint encoding
-/// let mut iter = bytes.into_iter();
-/// let outcome = iter.read_varint_partial().unwrap();
-/// let varint = match outcome {
-///     DecodeOutcome::Complete(v) => v,
-///     DecodeOutcome::Empty => panic!("expected varint"),
-///     DecodeOutcome::Incomplete(_) => panic!("unexpected incomplete"),
-/// };
-/// assert_eq!(varint.to_uint64(), 150);
-/// ```
-pub trait IteratorExtVarint {
-    /// Read a varint from this iterator (consumes bytes from the iterator).
-    ///
-    /// Returns `Ok(Some(varint))` when a complete varint was read, `Ok(None)` when the input
-    /// is empty, and `Err` when the input is incomplete or invalid.
-    fn read_varint(self) -> Result<Option<Varint>>;
-
-    /// Read a varint from this iterator, supporting incomplete input.
-    fn read_varint_partial(self) -> Result<DecodeOutcome>;
-
-    /// Resume varint decoding with additional bytes from this iterator.
-    ///
-    /// Use when a previous [`read_varint_partial`](IteratorExtVarint::read_varint_partial) returned
-    /// `DecodeOutcome::Incomplete(state)` and you have more bytes from another source.
-    fn read_varint_resume(self, state: DecodeState) -> Result<DecodeOutcome>;
-
-    /// Create an iterator that reads multiple varints from this iterator.
-    ///
-    /// Returns an iterator that yields `Result<Varint>` for each varint read.
-    /// The iterator stops when there are no more bytes available or an error occurs.
-    ///
-    /// # Example
-    /// ```
-    /// use ::protobuf_core::{IteratorExtVarint, Varint};
-    ///
-    /// let bytes = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
-    /// let iter = bytes.into_iter();
-    /// let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
-    /// assert_eq!(varints.len(), 2);
-    /// assert_eq!(varints[0].to_uint64(), 150);
-    /// assert_eq!(varints[1].to_uint64(), 127);
-    /// ```
-    fn read_varints(self) -> VarintIterFromBytes<Self>
-    where
-        Self: Sized + Iterator<Item = u8>;
-}
-
-impl<I> IteratorExtVarint for I
-where
-    I: Iterator<Item = u8>,
-{
-    fn read_varint(self) -> Result<Option<Varint>> {
-        match DecodeState::new().feed(self.map(Ok::<u8, ::std::convert::Infallible>)) {
-            Ok(DecodeOutcome::Complete(v)) => Ok(Some(v)),
-            Ok(DecodeOutcome::Empty) => Ok(None),
-            Ok(DecodeOutcome::Incomplete(_)) => Err(crate::ProtobufError::UnexpectedEof),
-            Err(e) => Err(e),
-        }
-    }
-
-    fn read_varint_partial(self) -> Result<DecodeOutcome> {
-        DecodeState::new().feed(self.map(Ok::<u8, ::std::convert::Infallible>))
-    }
-
-    fn read_varint_resume(self, state: DecodeState) -> Result<DecodeOutcome> {
-        state.feed(self.map(Ok::<u8, ::std::convert::Infallible>))
-    }
-
-    fn read_varints(self) -> VarintIterFromBytes<Self>
-    where
-        Self: Sized,
-    {
-        VarintIterFromBytes::new(self)
-    }
-}
-
-// ============================================================================
-// TryIteratorExtVarint
-// ============================================================================
-
-/// Extension trait for reading varints from byte iterators that yield `Result<u8, E>`.
-///
-/// This trait provides convenient methods to read varints directly from
-/// any iterator that yields `Result<u8, E>`, allowing proper error propagation.
-/// The error type `E` must implement `Into<ProtobufError>`.
-///
-/// # Example
-/// ```
-/// use ::std::io::{Cursor, Read};
-/// use ::protobuf_core::{DecodeOutcome, TryIteratorExtVarint, Varint};
-///
-/// let data = vec![0x96, 0x01]; // 150 in varint encoding
-/// let mut reader = Cursor::new(data);
-/// let iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
-/// let outcome = iter.read_varint_partial().unwrap();
-/// let varint = match outcome {
-///     DecodeOutcome::Complete(v) => v,
-///     _ => panic!("expected complete"),
-/// };
-/// assert_eq!(varint.to_uint64(), 150);
-/// ```
-pub trait TryIteratorExtVarint {
-    /// Read a varint from this iterator (consumes bytes from the iterator).
-    ///
-    /// Returns `Ok(Some(varint))` when a complete varint was read, `Ok(None)` when the input
-    /// is empty, and `Err` when the input is incomplete or invalid.
-    fn read_varint(self) -> Result<Option<Varint>>;
-
-    /// Read a varint from this iterator, supporting incomplete input.
-    fn read_varint_partial(self) -> Result<DecodeOutcome>;
-
-    /// Resume varint decoding with additional bytes from this iterator.
-    fn read_varint_resume(self, state: DecodeState) -> Result<DecodeOutcome>;
-
-    /// Create an iterator that reads multiple varints from this iterator.
-    ///
-    /// Returns an iterator that yields `Result<Varint>` for each varint read.
-    /// The iterator stops when there are no more bytes available or an error occurs.
-    ///
-    /// # Example
-    /// ```
-    /// use ::std::io::{Cursor, Read};
-    /// use ::protobuf_core::{TryIteratorExtVarint, Varint};
-    ///
-    /// let data = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
-    /// let reader = Cursor::new(data);
-    /// let iter = reader.bytes();
-    /// let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
-    /// assert_eq!(varints.len(), 2);
-    /// assert_eq!(varints[0].to_uint64(), 150);
-    /// assert_eq!(varints[1].to_uint64(), 127);
-    /// ```
-    fn read_varints(self) -> VarintIterFromTryBytes<Self>
-    where
-        Self: Sized + Iterator;
-}
-
-impl<I, E> TryIteratorExtVarint for I
-where
-    I: Iterator<Item = ::std::result::Result<u8, E>>,
-    E: Into<ProtobufError>,
-{
-    fn read_varint(self) -> Result<Option<Varint>> {
-        match DecodeState::new().feed(self) {
-            Ok(DecodeOutcome::Complete(v)) => Ok(Some(v)),
-            Ok(DecodeOutcome::Empty) => Ok(None),
-            Ok(DecodeOutcome::Incomplete(_)) => Err(crate::ProtobufError::UnexpectedEof),
-            Err(e) => Err(e),
-        }
-    }
-
-    fn read_varint_partial(self) -> Result<DecodeOutcome> {
-        DecodeState::new().feed(self)
-    }
-
-    fn read_varint_resume(self, state: DecodeState) -> Result<DecodeOutcome> {
-        state.feed(self)
-    }
-
-    fn read_varints(self) -> VarintIterFromTryBytes<Self>
-    where
-        Self: Sized,
-    {
-        VarintIterFromTryBytes::new(self)
-    }
-}
-
-// ============================================================================
 // ReadExtVarint
 // ============================================================================
 
 /// Extension trait for reading varints from Read instances.
 ///
-/// This trait provides a convenient method to read varints directly from
-/// any type that implements `std::io::Read`.
+/// Reads until the reader's EOF (or an existing [`std::io::Take`] bound).
+/// Methods do not take a separate byte-budget argument.
 ///
 /// # Performance Note
 ///
@@ -396,7 +156,7 @@ where
 /// assert_eq!(varint.to_uint64(), 150);
 /// ```
 pub trait ReadExtVarint {
-    /// Read a varint from this reader.
+    /// Read a varint from this reader until EOF or a complete value.
     ///
     /// Returns `Ok(Some(varint))` when a complete varint was read, `Ok(None)` when the input
     /// is empty (EOF), and `Err` when the input is incomplete or invalid.
@@ -414,10 +174,9 @@ pub trait ReadExtVarint {
     /// Resume varint decoding with additional bytes from this reader.
     fn read_varint_resume(&mut self, state: DecodeState) -> Result<DecodeOutcome>;
 
-    /// Create an iterator that reads multiple varints from this reader.
+    /// Create an iterator that reads multiple varints from this reader until EOF.
     ///
-    /// Returns an iterator that yields `Result<Varint>` for each varint read.
-    /// The iterator stops when there are no more bytes available (EOF) or an error occurs.
+    /// Yields `Result<Varint>` for each varint. Stops at EOF or when an error occurs.
     ///
     /// # Example
     /// ```
@@ -426,14 +185,17 @@ pub trait ReadExtVarint {
     ///
     /// let data = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
     /// let mut reader = Cursor::new(data);
-    /// let varints: Vec<Varint> = reader.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
+    /// let varints: Vec<Varint> = reader
+    ///     .read_varints()
+    ///     .collect::<Result<Vec<_>, _>>()
+    ///     .unwrap();
     /// assert_eq!(varints.len(), 2);
     /// assert_eq!(varints[0].to_uint64(), 150);
     /// assert_eq!(varints[1].to_uint64(), 127);
     /// ```
-    fn read_varints(&mut self) -> VarintIterFromTryBytes<::std::io::Bytes<&mut Self>>
+    fn read_varints(&mut self) -> VarintIterFromRead<&mut Self>
     where
-        Self: ::std::io::Read;
+        Self: Read;
 }
 
 impl<R> ReadExtVarint for R
@@ -442,17 +204,17 @@ where
 {
     #[allow(clippy::unbuffered_bytes)] // Varint parsing requires byte-by-byte reading; caller should use BufReader for efficiency
     fn read_varint_partial(&mut self) -> Result<DecodeOutcome> {
-        DecodeState::new().feed(self.bytes())
+        DecodeState::new().feed(self.by_ref().bytes())
     }
 
     #[allow(clippy::unbuffered_bytes)]
     fn read_varint_resume(&mut self, state: DecodeState) -> Result<DecodeOutcome> {
-        state.feed(self.bytes())
+        state.feed(self.by_ref().bytes())
     }
 
     #[allow(clippy::unbuffered_bytes)] // Varint parsing requires byte-by-byte reading; caller should use BufReader for efficiency
-    fn read_varints(&mut self) -> VarintIterFromTryBytes<::std::io::Bytes<&mut Self>> {
-        VarintIterFromTryBytes::new(self.bytes())
+    fn read_varints(&mut self) -> VarintIterFromRead<&mut Self> {
+        VarintIterFromRead { reader: self }
     }
 }
 
@@ -462,63 +224,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint,
-    };
+    use super::{DecodeOutcome, DecodeState, ReadExtVarint};
     use crate::ProtobufError;
     use crate::varint::Varint;
-
-    #[test]
-    fn test_read_varint_from_iterator() {
-        let input = [0x96, 0x01];
-        let iter = input.iter().copied();
-        let outcome = iter.read_varint_partial().unwrap();
-        let varint = match outcome {
-            DecodeOutcome::Complete(v) => v,
-            _ => panic!("expected Complete"),
-        };
-        assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
-    fn test_iterator_ext_varint_trait() {
-        let bytes = vec![0x96, 0x01];
-        let iter = bytes.into_iter();
-        let outcome = iter.read_varint_partial().unwrap();
-        let varint = match outcome {
-            DecodeOutcome::Complete(v) => v,
-            _ => panic!("expected Complete"),
-        };
-        assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
-    fn test_iterator_ext_varint_empty() {
-        let outcome = IteratorExtVarint::read_varint_partial(::std::iter::empty()).unwrap();
-        assert_eq!(outcome, DecodeOutcome::Empty);
-    }
-
-    #[test]
-    fn test_iterator_ext_varint_read_varints() {
-        let bytes = vec![0x96, 0x01, 0x7F, 0x01];
-        let iter = bytes.into_iter();
-        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
-        assert_eq!(varints.len(), 3);
-        assert_eq!(varints[0].to_uint64(), 150);
-        assert_eq!(varints[1].to_uint64(), 127);
-        assert_eq!(varints[2].to_uint64(), 1);
-    }
-
-    #[test]
-    fn test_iterator_ext_varint_incomplete() {
-        let bytes = vec![0x80u8];
-        let result = IteratorExtVarint::read_varint_partial(bytes.into_iter());
-        assert!(result.is_ok());
-        assert!(matches!(
-            result,
-            Ok(DecodeOutcome::Incomplete(state)) if state.bytes_consumed() == 1
-        ));
-    }
 
     #[test]
     fn test_read_ext_varint_from_slice() {
@@ -544,6 +252,19 @@ mod tests {
         let result = slice.read_varint_partial();
         assert!(result.is_ok());
         assert!(matches!(result, Ok(DecodeOutcome::Incomplete(_))));
+    }
+
+    #[test]
+    fn test_read_ext_varint_short_slice_incomplete() {
+        // Full encoding of 150 is [0x96, 0x01]; a one-byte view yields Incomplete.
+        let bytes = [0x96u8, 0x01];
+        let mut slice = &bytes[..1];
+        let outcome = slice.read_varint_partial().unwrap();
+        assert!(matches!(
+            outcome,
+            DecodeOutcome::Incomplete(state) if state.bytes_consumed() == 1
+        ));
+        assert!(slice.is_empty());
     }
 
     #[test]
@@ -594,62 +315,6 @@ mod tests {
     }
 
     #[test]
-    fn test_try_iterator_ext_varint() {
-        use ::std::io::{Cursor, Read};
-
-        let data = vec![0x96, 0x01];
-        let reader = Cursor::new(data);
-        let iter = reader.bytes();
-        let outcome = TryIteratorExtVarint::read_varint_partial(iter).unwrap();
-        let varint = match outcome {
-            DecodeOutcome::Complete(v) => v,
-            _ => panic!("expected Complete"),
-        };
-        assert_eq!(varint.to_uint64(), 150);
-    }
-
-    #[test]
-    fn test_try_iterator_ext_varint_empty() {
-        use ::std::io::{Cursor, Read};
-
-        let data = vec![];
-        let reader = Cursor::new(data);
-        let iter = reader.bytes();
-        let outcome = TryIteratorExtVarint::read_varint_partial(iter).unwrap();
-        assert_eq!(outcome, DecodeOutcome::Empty);
-    }
-
-    #[test]
-    fn test_try_iterator_ext_varint_error() {
-        use ::std::io::ErrorKind;
-
-        let error = ::std::io::Error::new(ErrorKind::UnexpectedEof, "test error");
-        let iter = ::std::iter::once(Err(error));
-        let result = TryIteratorExtVarint::read_varint_partial(iter);
-
-        assert!(result.is_err());
-        if let Err(ProtobufError::IoError(io_err)) = result {
-            assert_eq!(io_err.kind(), ErrorKind::UnexpectedEof);
-        } else {
-            panic!("Expected IoError");
-        }
-    }
-
-    #[test]
-    fn test_try_iterator_ext_varint_read_varints() {
-        use ::std::io::{Cursor, Read};
-
-        let data = vec![0x96, 0x01, 0x7F, 0x01];
-        let reader = Cursor::new(data);
-        let iter = reader.bytes();
-        let varints: Vec<Varint> = iter.read_varints().collect::<Result<Vec<_>, _>>().unwrap();
-        assert_eq!(varints.len(), 3);
-        assert_eq!(varints[0].to_uint64(), 150);
-        assert_eq!(varints[1].to_uint64(), 127);
-        assert_eq!(varints[2].to_uint64(), 1);
-    }
-
-    #[test]
     fn test_read_ext_varint_trait() {
         use ::std::io::Cursor;
 
@@ -661,6 +326,15 @@ mod tests {
             _ => panic!("expected Complete"),
         };
         assert_eq!(varint.to_uint64(), 150);
+    }
+
+    #[test]
+    fn test_read_ext_varint_empty() {
+        use ::std::io::Cursor;
+
+        let mut reader = Cursor::new(vec![]);
+        let outcome = reader.read_varint_partial().unwrap();
+        assert_eq!(outcome, DecodeOutcome::Empty);
     }
 
     #[test]
@@ -680,8 +354,27 @@ mod tests {
     }
 
     #[test]
+    fn test_read_ext_varint_read_varints_bounded_with_take() {
+        use ::std::io::{Cursor, Read};
+
+        // Two complete varints; Take covers only the first (2 bytes).
+        let data = vec![0x96, 0x01, 0x7F];
+        let mut reader = Cursor::new(data);
+        let varints: Vec<Varint> = reader
+            .by_ref()
+            .take(2)
+            .read_varints()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(varints.len(), 1);
+        assert_eq!(varints[0].to_uint64(), 150);
+        assert_eq!(reader.position(), 2);
+    }
+
+    #[test]
     fn test_write_varint_roundtrip() {
         use crate::varint::WriteExtVarint;
+        use ::std::io::Cursor;
 
         let test_values = vec![0, 1, 127, 128, 150, 255, 256, 65535, 0x7FFFFFFF];
 
@@ -691,8 +384,8 @@ mod tests {
             let mut buffer = Vec::new();
             buffer.write_varint(&varint).unwrap();
 
-            let iter = buffer.iter().copied();
-            let outcome = iter.read_varint_partial().unwrap();
+            let mut reader = Cursor::new(buffer);
+            let outcome = reader.read_varint_partial().unwrap();
             let decoded_varint = match outcome {
                 DecodeOutcome::Complete(v) => v,
                 _ => panic!("expected Complete"),
@@ -705,27 +398,33 @@ mod tests {
 
     #[test]
     fn test_read_varint_tenth_byte_overflow() {
-        use crate::ProtobufError;
+        use ::std::io::Cursor;
 
         // Nine continuation bytes, then a payload that does not fit in bit 63.
         let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02];
-        let result = bytes.into_iter().read_varint();
+        let mut reader = Cursor::new(bytes);
+        let result = reader.read_varint();
         assert!(matches!(result, Err(ProtobufError::VarintTooLong)));
 
         let bytes = vec![0x80u8; 10];
-        let result = bytes.into_iter().read_varint();
+        let mut reader = Cursor::new(bytes);
+        let result = reader.read_varint();
         assert!(matches!(result, Err(ProtobufError::VarintTooLong)));
     }
 
     #[test]
     fn test_read_varint_u64_max_and_overlong_zero() {
+        use ::std::io::Cursor;
+
         let bytes = vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
-        let varint = bytes.into_iter().read_varint().unwrap().unwrap();
+        let mut reader = Cursor::new(bytes);
+        let varint = reader.read_varint().unwrap().unwrap();
         assert_eq!(varint.to_uint64(), u64::MAX);
 
         // Overlong encoding of 0: the 10th byte contributes no bits. Parsers accept it.
         let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00];
-        let varint = bytes.into_iter().read_varint().unwrap().unwrap();
+        let mut reader = Cursor::new(bytes);
+        let varint = reader.read_varint().unwrap().unwrap();
         assert_eq!(varint.to_uint64(), 0);
     }
 
@@ -737,6 +436,7 @@ mod tests {
             MAX_5_BYTE_VARINT, MAX_6_BYTE_VARINT, MAX_7_BYTE_VARINT, MAX_8_BYTE_VARINT,
             MAX_9_BYTE_VARINT,
         };
+        use ::std::io::Cursor;
 
         let bounds = [
             (0u64, 1usize),
@@ -771,25 +471,27 @@ mod tests {
             assert_eq!(buffer.write_varint(&varint).unwrap(), size);
             assert_eq!(buffer, bytes[..count]);
 
-            let decoded = buffer.into_iter().read_varint().unwrap().unwrap();
+            let mut reader = Cursor::new(buffer);
+            let decoded = reader.read_varint().unwrap().unwrap();
             assert_eq!(decoded.to_uint64(), value, "roundtrip {value:#x}");
         }
     }
 
     #[test]
     fn test_read_varint_truncated_and_public_resume() {
-        use crate::ProtobufError;
+        use ::std::io::Cursor;
 
-        let truncated = vec![0x80u8].into_iter().read_varint();
+        let mut reader = Cursor::new(vec![0x80u8]);
+        let truncated = reader.read_varint();
         assert!(matches!(truncated, Err(ProtobufError::UnexpectedEof)));
 
-        let mut first = vec![0x80u8].into_iter();
-        let state = match (&mut first).read_varint_partial().unwrap() {
+        let mut first = Cursor::new(vec![0x80u8]);
+        let state = match first.read_varint_partial().unwrap() {
             DecodeOutcome::Incomplete(state) => state,
             other => panic!("expected Incomplete, got {other:?}"),
         };
-        let mut second = vec![0x01u8].into_iter();
-        match (&mut second).read_varint_resume(state).unwrap() {
+        let mut second = Cursor::new(vec![0x01u8]);
+        match second.read_varint_resume(state).unwrap() {
             DecodeOutcome::Complete(varint) => assert_eq!(varint.to_uint64(), 128),
             other => panic!("expected Complete, got {other:?}"),
         }

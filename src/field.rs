@@ -10,10 +10,11 @@
 //!
 //! ## Reading (Deserialization)
 //!
-//! The utilities read fields sequentially from `std::io::Read`, `Iterator<Item = u8>`,
-//! `Iterator<Item = Result<u8, E>>`, and `AsRef<[u8]>`, returning raw field values
-//! (varint bytes, fixed-width bytes, or length-delimited bytes) without interpretation
-//! of the semantic meaning.
+//! The utilities read fields sequentially from `std::io::Read` (with an explicit
+//! byte budget `len`) and from `AsRef<[u8]>` (the slice length is the bound),
+//! returning raw field values (varint bytes, fixed-width bytes, or
+//! length-delimited bytes) without interpretation of the semantic meaning.
+//! Byte iterators are not supported; use a slice or a `Read` with `len`.
 //!
 //! ## Writing (Serialization)
 //!
@@ -29,9 +30,7 @@ pub(crate) mod read;
 pub(crate) mod write;
 
 pub use self::read::{
-    AsRefExtProtobuf, FieldIterFromBytes, FieldIterFromRead, FieldIterFromSlice,
-    FieldIterFromTryBytes, IteratorExtProtobuf, ReadExtProtobuf, TryIteratorExtProtobuf,
-    until_group_ends,
+    AsRefExtProtobuf, FieldIterFromRead, FieldIterFromSlice, ReadExtProtobuf, until_group_ends,
 };
 pub use self::write::WriteExtProtobuf;
 
@@ -42,9 +41,9 @@ pub use self::write::WriteExtProtobuf;
 /// based on the field's schema definition.
 ///
 /// `L` is the type for length-delimited values (Len variant).
-///  - Streaming readers (`Read`, byte iterators) default to `Vec<u8>`.
-///    `read_protobuf_fields_with` and `protobuf_fields_with` take
-///    `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>` and call it once per payload.
+///  - Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`.
+///    `read_protobuf_fields_with` takes `FnMut(usize) -> Result<L>` with
+///    `L: AsMut<[u8]>` and calls it once per payload.
 ///  - Slice readers borrow the input as `&'a [u8]`.
 ///
 /// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
@@ -173,9 +172,9 @@ impl<L> FieldValue<L> {
 /// The caller must interpret the value based on the message schema.
 ///
 /// `L` is the type for length-delimited values (FieldValue::Len).
-/// Streaming readers (`Read`, byte iterators) default to `Vec<u8>`.
-/// `read_protobuf_fields_with` and `protobuf_fields_with` take
-/// `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>` and call it once per payload.
+/// Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`.
+/// `read_protobuf_fields_with` takes `FnMut(usize) -> Result<L>` with
+/// `L: AsMut<[u8]>` and calls it once per payload.
 /// Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {

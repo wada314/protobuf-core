@@ -58,7 +58,7 @@
 //!
 //! - [`Field<L>`]: Represents a raw protobuf field with a field number and value.
 //!   The `L` type parameter represents the type used for length-delimited values
-//!   (`Vec<u8>` from the streaming readers, a buffer returned by the caller's
+//!   (`Vec<u8>` from `Read` with a `len` budget, a buffer returned by the caller's
 //!   closure, or `&'a [u8]` for a slice read).
 //! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
 //!   - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64,
@@ -85,18 +85,16 @@
 //!
 //! ## Reading Traits
 //!
-//! The library provides several traits for reading protobuf fields from different sources:
+//! The library provides traits for reading protobuf fields from two sources:
 //!
-//! - [`IteratorExtProtobuf`]: Read fields from `Iterator<Item = u8>`
-//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] where `L: AsMut<[u8]>`
-//! - [`TryIteratorExtProtobuf`]: Read fields from
-//!   `Iterator<Item = Result<u8, E>>`
-//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] where `L: AsMut<[u8]>`
 //! - [`AsRefExtProtobuf`]: Read fields from `AsRef<[u8]>` types
-//!   (slices, arrays, etc.)
+//!   (slices, arrays, etc.). The slice length is the bound (no extra `len` arg).
 //!   - Output: [`Field<&[u8]>`] — Len values are borrowed `&[u8]` slices (zero-copy)
-//! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types
+//! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types with an explicit
+//!   byte budget `len` (bounded via [`std::io::Take`])
 //!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] where `L: AsMut<[u8]>`
+//!
+//! Byte iterators are not supported; use a slice or a `Read` with `len`.
 //!
 //! ## Writing Traits
 //!
@@ -105,12 +103,11 @@
 //! ## Tag/Varint Traits
 //!
 //! For lower-level operations, the library provides traits for reading and writing tags and
-//! varints:
+//! varints. These `Read` methods do not take a byte budget; they stop at the reader's EOF
+//! (or an existing [`std::io::Take`] from [`ReadExtProtobuf`] / the caller):
 //!
-//! - [`IteratorExtTag`] / [`TryIteratorExtTag`]
-//!   / [`ReadExtTag`]: Read tags (with partial/resume for chunked input)
-//! - [`IteratorExtVarint`] / [`TryIteratorExtVarint`]
-//!   / [`ReadExtVarint`]: Read varints (with partial/resume for chunked input)
+//! - [`ReadExtTag`]: Read tags from `std::io::Read` (with partial/resume for chunked input)
+//! - [`ReadExtVarint`]: Read varints from `std::io::Read` (with partial/resume for chunked input)
 //! - [`WriteExtVarint`]: Write varints
 //!
 //! ## Constants
@@ -128,15 +125,13 @@ pub(crate) mod varint;
 pub(crate) mod wire_format;
 
 pub use self::field::{
-    AsRefExtProtobuf, Field, FieldIterFromBytes, FieldIterFromRead, FieldIterFromSlice,
-    FieldIterFromTryBytes, FieldValue, IteratorExtProtobuf, ReadExtProtobuf,
-    TryIteratorExtProtobuf, WriteExtProtobuf, until_group_ends,
+    AsRefExtProtobuf, Field, FieldIterFromRead, FieldIterFromSlice, FieldValue, ReadExtProtobuf,
+    WriteExtProtobuf, until_group_ends,
 };
 pub use self::field_number::FieldNumber;
-pub use self::tag::{IteratorExtTag, Outcome as TagOutcome, ReadExtTag, Tag, TryIteratorExtTag};
+pub use self::tag::{Outcome as TagOutcome, ReadExtTag, Tag};
 pub use self::varint::{
-    DecodeOutcome, DecodeState, IteratorExtVarint, ReadExtVarint, TryIteratorExtVarint, Varint,
-    VarintIterFromBytes, VarintIterFromTryBytes, WriteExtVarint,
+    DecodeOutcome, DecodeState, ReadExtVarint, Varint, VarintIterFromRead, WriteExtVarint,
 };
 pub use self::wire_format::{
     FIELD_NUMBER_SHIFT, FIXED32_BYTES, FIXED64_BYTES, MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT,

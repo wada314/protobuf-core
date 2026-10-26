@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Breaking relative to 0.7.0. Call sites that used byte-iterator field/varint/tag traits must update. Field `Read` APIs take an explicit message budget `len`; varint/tag `Read` methods do not.
+
+### Added
+
+- `VarintIterFromRead` — return type of `ReadExtVarint::read_varints` (replaces `VarintIterFromTryBytes` / `VarintIterFromBytes`).
+
+### Changed
+
+- `ReadExtProtobuf::read_protobuf_fields(self, len)` and `read_protobuf_fields_with(self, len, make)` take an explicit byte budget `len` and bound the reader with `std::io::Take`. That is the only `Read` decode API that takes `len`.
+- `ReadExtVarint` / `ReadExtTag` methods (`read_varint`, `read_varint_partial`, `read_varint_resume`, `read_varints`, and the tag equivalents) do **not** take `len`. The reader's EOF (or an existing `Take` from the field API / caller) is the bound. `read_varints` returns `VarintIterFromRead<&mut Self>` with no `Take` wrapper.
+- `FieldIterFromRead` holds `Take<R>`; its `skip_until` has no extra `len` (already bounded).
+- `AsRefExtProtobuf` is unchanged: no extra `len` argument; the slice length is the bound.
+
+### Internal
+
+- `WireCursor` / `BufWireCursor` drop `Option` from `read_varint` / `read_tag` / `skip_field` / `parse_field`; empty input is `UnexpectedEof`. Soft end uses new `remaining()` (`Take::limit` / slice length); field iterators stop when `remaining() == 0`. Read-side impls are specialized on `Take`.
+
+### Removed
+
+- Iterator-input traits and types: `IteratorExtVarint`, `TryIteratorExtVarint`, `IteratorExtTag`, `TryIteratorExtTag`, `IteratorExtProtobuf`, `TryIteratorExtProtobuf`, `FieldIterFromBytes`, `FieldIterFromTryBytes`, `VarintIterFromBytes`, `VarintIterFromTryBytes`.
+- Use `AsRefExtProtobuf` on a slice, or `ReadExtProtobuf` with `len` / `ReadExtVarint`/`ReadExtTag` until EOF, instead of feeding byte iterators.
+
 ## [0.7.0]
 
 Breaking relative to 0.6.0. Exhaustive matches on `FieldValue` and `ProtobufError` must update. Callers that treated group tags as `UnsupportedGroup` errors must match `FieldValue::SGroup` / `FieldValue::EGroup` instead. Note that 0.6.0’s `UnsupportedGroup` rejection was short-lived: 0.7.0 replaces it with successful group value variants (group handling churned twice between 0.5 → 0.7).

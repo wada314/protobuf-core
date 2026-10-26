@@ -8,7 +8,7 @@ use crate::Result;
 use crate::field_number::FieldNumber;
 use crate::varint::{DecodeState, Varint};
 use crate::wire_format::{FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK, WireType};
-use ::std::convert::{From, Into, TryFrom};
+use ::std::convert::{From, TryFrom};
 use ::std::io::Read;
 
 /// A protobuf tag containing field number and wire type
@@ -69,8 +69,8 @@ impl TryFrom<Varint> for Tag {
 
 /// Result of a tag read step.
 ///
-/// Returned by [`IteratorExtTag::read_tag_partial`], [`ReadExtTag::read_tag_partial`],
-/// and their `read_tag_resume` variants.
+/// Returned by [`ReadExtTag::read_tag_partial`] and
+/// [`ReadExtTag::read_tag_resume`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     /// Parsing completed successfully.
@@ -78,140 +78,19 @@ pub enum Outcome {
     /// No bytes were read (empty input).
     Empty,
     /// Parser ran out of input. Use [`read_tag_resume`] with the state
-    /// to continue from another reader/iterator/stream.
+    /// to continue from another reader/stream.
     ///
     /// [`read_tag_resume`]: ReadExtTag::read_tag_resume
     Incomplete(DecodeState),
 }
 
-/// Extension trait for reading tag from byte iterators.
-///
-/// This trait provides a convenient method to read tag directly from
-/// any iterator that yields bytes.
-///
-/// # Example
-/// ```
-/// use ::protobuf_core::IteratorExtTag;
-///
-/// let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
-/// let mut iter = bytes.into_iter();
-/// let tag = iter.read_tag().unwrap().unwrap();
-/// assert_eq!(tag.field_number.as_u32(), 1);
-/// ```
-pub trait IteratorExtTag {
-    /// Read a tag from this iterator.
-    fn read_tag(&mut self) -> Result<Option<Tag>>;
-
-    /// Read a tag from this iterator, supporting incomplete input.
-    fn read_tag_partial(&mut self) -> Result<Outcome>;
-
-    /// Resume tag decoding with additional bytes from this iterator.
-    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome>;
-}
-
-impl<I> IteratorExtTag for I
-where
-    I: Iterator<Item = u8>,
-{
-    fn read_tag(&mut self) -> Result<Option<Tag>> {
-        use crate::varint::{DecodeOutcome, IteratorExtVarint};
-
-        match self.read_varint_partial()? {
-            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
-            DecodeOutcome::Empty => Ok(None),
-            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
-        }
-    }
-
-    fn read_tag_partial(&mut self) -> Result<Outcome> {
-        use crate::varint::{DecodeOutcome, IteratorExtVarint};
-
-        match self.read_varint_partial()? {
-            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
-            DecodeOutcome::Empty => Ok(Outcome::Empty),
-            DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
-        }
-    }
-
-    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome> {
-        use crate::varint::{DecodeOutcome, IteratorExtVarint};
-
-        match self.read_varint_resume(state)? {
-            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
-            DecodeOutcome::Empty => Ok(Outcome::Empty),
-            DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
-        }
-    }
-}
-
-/// Extension trait for reading tag from byte iterators that yield `Result<u8, E>`.
-///
-/// This trait provides a convenient method to read tag directly from
-/// any iterator that yields `Result<u8, E>`, allowing proper error propagation
-/// from I/O operations.
-///
-/// # Example
-/// ```
-/// use ::std::io::{Cursor, Read};
-/// use ::protobuf_core::TryIteratorExtTag;
-///
-/// let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
-/// let mut reader = Cursor::new(data);
-/// let mut iter = reader.bytes(); // Iterator<Item = Result<u8, io::Error>>
-/// let tag = iter.read_tag().unwrap().unwrap();
-/// assert_eq!(tag.field_number.as_u32(), 1);
-/// ```
-pub trait TryIteratorExtTag {
-    /// Read a tag from this iterator.
-    fn read_tag(&mut self) -> Result<Option<Tag>>;
-
-    /// Read a tag from this iterator, supporting incomplete input.
-    fn read_tag_partial(&mut self) -> Result<Outcome>;
-
-    /// Resume tag decoding with additional bytes from this iterator.
-    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome>;
-}
-
-impl<I, E> TryIteratorExtTag for I
-where
-    I: Iterator<Item = ::std::result::Result<u8, E>>,
-    E: Into<ProtobufError>,
-{
-    fn read_tag(&mut self) -> Result<Option<Tag>> {
-        use crate::varint::{DecodeOutcome, TryIteratorExtVarint};
-
-        match self.read_varint_partial()? {
-            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
-            DecodeOutcome::Empty => Ok(None),
-            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
-        }
-    }
-
-    fn read_tag_partial(&mut self) -> Result<Outcome> {
-        use crate::varint::{DecodeOutcome, TryIteratorExtVarint};
-
-        match self.read_varint_partial()? {
-            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
-            DecodeOutcome::Empty => Ok(Outcome::Empty),
-            DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
-        }
-    }
-
-    fn read_tag_resume(&mut self, state: DecodeState) -> Result<Outcome> {
-        use crate::varint::{DecodeOutcome, TryIteratorExtVarint};
-
-        match self.read_varint_resume(state)? {
-            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Outcome::Complete),
-            DecodeOutcome::Empty => Ok(Outcome::Empty),
-            DecodeOutcome::Incomplete(s) => Ok(Outcome::Incomplete(s)),
-        }
-    }
-}
-
 /// Extension trait for reading tags from Read instances.
 ///
-/// This trait provides a convenient method to read tags directly from
-/// any type that implements `std::io::Read`.
+/// Reads until the reader's EOF (or an existing [`std::io::Take`] bound).
+/// Methods do not take a separate byte-budget argument; they forward to
+/// [`ReadExtVarint`].
+///
+/// [`ReadExtVarint`]: crate::varint::ReadExtVarint
 ///
 /// # Example
 /// ```
@@ -224,7 +103,7 @@ where
 /// assert_eq!(tag.field_number.as_u32(), 1);
 /// ```
 pub trait ReadExtTag {
-    /// Read a tag from this reader.
+    /// Read a tag from this reader until EOF or a complete value.
     fn read_tag(&mut self) -> Result<Option<Tag>>;
 
     /// Read a tag from this reader, supporting incomplete input.
@@ -394,144 +273,6 @@ mod tests {
     }
 
     // ============================================================================
-    // IteratorExtTag tests
-    // ============================================================================
-
-    #[test]
-    fn test_iterator_ext_tag_trait() {
-        use super::IteratorExtTag;
-
-        let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
-        let mut iter = bytes.into_iter();
-        let tag = iter.read_tag().unwrap().unwrap();
-        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
-        assert_eq!(tag.wire_type, WireType::Varint);
-    }
-
-    #[test]
-    fn test_iterator_ext_tag_empty() {
-        use super::IteratorExtTag;
-
-        let tag = IteratorExtTag::read_tag(&mut ::std::iter::empty()).unwrap();
-        assert_eq!(tag, None);
-    }
-
-    #[test]
-    fn test_iterator_ext_tag_partial_complete() {
-        use super::{IteratorExtTag, Outcome};
-
-        let bytes = vec![0x08]; // tag 1:0 (field 1, wire type 0)
-        let mut iter = bytes.into_iter();
-        let outcome = iter.read_tag_partial().unwrap();
-        assert!(matches!(outcome, Outcome::Complete(t) if t.field_number.as_u32() == 1));
-    }
-
-    #[test]
-    fn test_iterator_ext_tag_partial_empty() {
-        use super::{IteratorExtTag, Outcome};
-
-        let outcome = IteratorExtTag::read_tag_partial(&mut ::std::iter::empty()).unwrap();
-        assert!(matches!(outcome, Outcome::Empty));
-    }
-
-    #[test]
-    fn test_iterator_ext_tag_partial_resume() {
-        use super::{IteratorExtTag, Outcome};
-
-        // Split tag 0x08 across two chunks: first byte is continuation (0x80), second completes
-        // Actually 0x08 is a complete 1-byte tag. For incomplete, we need a multi-byte varint.
-        // Tag (field 1, wire 0) = 8 = 0x08 - single byte.
-        // For a 2-byte varint: 0x80 0x01 = 128 (field 16, wire 0).
-        let first_chunk: Vec<u8> = vec![0x80]; // incomplete - continuation bit set
-        let second_chunk: Vec<u8> = vec![0x01]; // completes to 128
-
-        let mut iter = first_chunk.into_iter();
-        let outcome = iter.read_tag_partial().unwrap();
-        let state = match outcome {
-            Outcome::Incomplete(s) => s,
-            _ => panic!("expected Incomplete, got {:?}", outcome),
-        };
-
-        let mut iter2 = second_chunk.into_iter();
-        let outcome2 = iter2.read_tag_resume(state).unwrap();
-        match outcome2 {
-            Outcome::Complete(tag) => {
-                assert_eq!(tag.field_number.as_u32(), 16);
-                assert_eq!(tag.wire_type, WireType::Varint);
-            }
-            _ => panic!("expected Complete, got {:?}", outcome2),
-        }
-    }
-
-    #[test]
-    fn test_iterator_ext_tag_u32_overflow() {
-        use super::IteratorExtTag;
-
-        // Test case where the varint value exceeds u32::MAX
-        // This should trigger VarintDowncastOutOfRange error
-        // u32::MAX = 4,294,967,295 (0xFFFFFFFF)
-        // Use 0x100000000 (4,294,967,296) which exceeds u32::MAX
-        let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x10]; // Value: 0x100000000 (exceeds u32::MAX)
-        let mut iter = bytes.into_iter();
-        let result = iter.read_tag();
-
-        assert!(result.is_err());
-        if let Err(ProtobufError::VarintDowncastOutOfRange { value, target_type }) = result {
-            assert_eq!(value, 0x100000000);
-            assert_eq!(target_type, "u32");
-        } else {
-            panic!("Expected VarintDowncastOutOfRange error");
-        }
-    }
-
-    // ============================================================================
-    // TryIteratorExtTag tests
-    // ============================================================================
-
-    #[test]
-    fn test_try_iterator_ext_tag() {
-        use super::TryIteratorExtTag;
-        use ::std::io::{Cursor, Read};
-
-        let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
-        let reader = Cursor::new(data);
-        let mut iter = reader.bytes();
-        let tag = iter.read_tag().unwrap().unwrap();
-        assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
-        assert_eq!(tag.wire_type, WireType::Varint);
-    }
-
-    #[test]
-    fn test_try_iterator_ext_tag_empty() {
-        use super::TryIteratorExtTag;
-        use ::std::io::{Cursor, Read};
-
-        let data = vec![];
-        let reader = Cursor::new(data);
-        let mut iter = reader.bytes();
-        let tag = iter.read_tag().unwrap();
-        assert_eq!(tag, None);
-    }
-
-    #[test]
-    fn test_try_iterator_ext_tag_error() {
-        use super::TryIteratorExtTag;
-        use ::std::io::ErrorKind;
-
-        // Create an iterator that returns an error
-        let error = ::std::io::Error::new(ErrorKind::UnexpectedEof, "test error");
-        let mut iter = ::std::iter::once(Err(error));
-        let result = iter.read_tag();
-
-        assert!(result.is_err());
-        if let Err(ProtobufError::IoError(io_err)) = result {
-            assert_eq!(io_err.kind(), ErrorKind::UnexpectedEof);
-        } else {
-            panic!("Expected IoError");
-        }
-    }
-
-    // ============================================================================
     // ReadExtTag tests
     // ============================================================================
 
@@ -556,6 +297,26 @@ mod tests {
         let mut reader = Cursor::new(data);
         let tag = reader.read_tag().unwrap();
         assert_eq!(tag, None);
+    }
+
+    #[test]
+    fn test_read_ext_tag_u32_overflow() {
+        use super::ReadExtTag;
+        use ::std::io::Cursor;
+
+        // u32::MAX = 4,294,967,295 (0xFFFFFFFF)
+        // Use 0x100000000 (4,294,967,296) which exceeds u32::MAX
+        let bytes = vec![0x80, 0x80, 0x80, 0x80, 0x10]; // Value: 0x100000000
+        let mut reader = Cursor::new(bytes);
+        let result = reader.read_tag();
+
+        assert!(result.is_err());
+        if let Err(ProtobufError::VarintDowncastOutOfRange { value, target_type }) = result {
+            assert_eq!(value, 0x100000000);
+            assert_eq!(target_type, "u32");
+        } else {
+            panic!("Expected VarintDowncastOutOfRange error");
+        }
     }
 
     #[test]
@@ -606,5 +367,17 @@ mod tests {
             }
             other => panic!("expected Complete, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_read_ext_tag_short_reader_incomplete() {
+        use super::{Outcome, ReadExtTag};
+        use ::std::io::{Cursor, Read};
+
+        // 2-byte tag encoding; Take of 1 yields Incomplete.
+        let mut reader = Cursor::new(vec![0x80u8, 0x01]);
+        let outcome = reader.by_ref().take(1).read_tag_partial().unwrap();
+        assert!(matches!(outcome, Outcome::Incomplete(_)));
+        assert_eq!(reader.position(), 1);
     }
 }
