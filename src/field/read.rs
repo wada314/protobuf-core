@@ -249,29 +249,30 @@ where
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.inner.next()? {
-            Err(e) => Some(Err(e)),
-            Ok(field) => match field.value {
-                FieldValue::SGroup => {
-                    self.depth += 1;
+        let result = self.inner.next()?;
+        let Ok(field) = result else {
+            return Some(result);
+        };
+        match field.value {
+            FieldValue::SGroup => {
+                self.depth += 1;
+                Some(Ok(field))
+            }
+            FieldValue::EGroup => {
+                if self.depth > 0 {
+                    self.depth -= 1;
                     Some(Ok(field))
+                } else if field.field_number == self.field_number {
+                    // Matching end of the tracked group: consume, do not yield.
+                    None
+                } else {
+                    Some(Err(ProtobufError::MismatchedEndGroup {
+                        expected: self.field_number,
+                        got: field.field_number,
+                    }))
                 }
-                FieldValue::EGroup => {
-                    if self.depth > 0 {
-                        self.depth -= 1;
-                        Some(Ok(field))
-                    } else if field.field_number == self.field_number {
-                        // Matching end of the tracked group: consume, do not yield.
-                        None
-                    } else {
-                        Some(Err(ProtobufError::MismatchedEndGroup {
-                            expected: self.field_number,
-                            got: field.field_number,
-                        }))
-                    }
-                }
-                _ => Some(Ok(field)),
-            },
+            }
+            _ => Some(Ok(field)),
         }
     }
 }
