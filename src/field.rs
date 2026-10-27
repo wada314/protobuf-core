@@ -50,9 +50,9 @@ pub use self::write::WriteExtProtobuf;
 /// does not include the group body. After an `SGroup`, discard the body with
 /// [`skip_until`](crate::FieldIterFromSlice::skip_until) +
 /// [`until_group_ends`](crate::until_group_ends), preserve it with
-/// [`take_until`](crate::FieldIterFromSlice::take_until) /
-/// [`copy_until`](crate::FieldIterFromSlice::copy_until) (same predicate), or
-/// read nested fields until a matching `EGroup` before the next top-level field.
+/// [`take_until`](crate::FieldIterFromSlice::take_until) (slice) or
+/// [`copy_until`](crate::FieldIterFromRead::copy_until) (Read), or read nested
+/// fields until a matching `EGroup` before the next top-level field.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
     /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`)
