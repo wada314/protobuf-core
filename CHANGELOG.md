@@ -18,7 +18,7 @@ Additive public API for unknown-field group preserve. Callers that only skip gro
 
 ### Internal
 
-- `WireCursor` stays fragment-level (`remaining` / `read_varint_with_raw` / fixed / `skip_bytes` / `copy_bytes`, plus small defaults `read_varint` / `read_tag` / `skip_field`). Multi-field skip/copy are module helpers (`wire_skip_until` / `wire_copy_field` / `wire_copy_until`), not trait methods. `read_varint_with_raw` uses a joint lifetime over `&mut self` and `[u8; MAX_VARINT_BYTES]` (slice borrows input; Read fills the buffer).
+- `WireCursor` is Iterator-like: required fragments (`remaining` / `read_varint_with_raw` / fixed / `skip_bytes` / `copy_bytes`) plus default compose methods (`read_varint` / `read_tag` / `skip_field` / `skip_until` / `copy_field` / `copy_until`). `read_varint_with_raw` uses a joint lifetime over `&mut self` and `[u8; MAX_VARINT_BYTES]` (slice borrows input; Read fills the buffer).
 
 ## [0.6.0]
 

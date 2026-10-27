@@ -275,9 +275,9 @@ where
 
 /// Byte-level cursor over protobuf wire data.
 ///
-/// Required methods are atomic fragments only. Multi-field skip / copy live as
-/// module-private helpers ([`wire_skip_until`], [`wire_copy_until`]) so this
-/// trait stays small.
+/// Like [`Iterator`]: a small set of required fragments, plus default methods
+/// that compose them (`skip_field`, `skip_until`, `copy_field`, `copy_until`,
+/// …). Implementors only override the I/O primitives.
 ///
 /// Soft end-of-input is signaled by [`remaining`](Self::remaining) `== 0`
 /// (field iterators stop there). Mid-field emptiness is
@@ -354,87 +354,81 @@ pub(crate) trait WireCursor {
         }
         Ok(tag)
     }
-}
 
-/// Skip fields until `pred` returns `Ok(true)`.
-///
-/// Each iteration runs [`WireCursor::skip_field`] (Len payloads discarded
-/// without allocating) and passes the field's [`Tag`] to `pred`. EOF before
-/// `pred` succeeds is [`ProtobufError::UnexpectedEof`].
-#[inline]
-fn wire_skip_until<C, F>(cursor: &mut C, mut pred: F) -> Result<()>
-where
-    C: WireCursor + ?Sized,
-    F: FnMut(Tag) -> Result<bool>,
-{
-    loop {
-        if cursor.remaining() == 0 {
-            return Err(ProtobufError::UnexpectedEof);
-        }
-        let tag = cursor.skip_field()?;
-        if pred(tag)? {
-            return Ok(());
+    /// Skip fields until `pred` returns `Ok(true)`.
+    ///
+    /// Each iteration runs [`skip_field`](Self::skip_field) (Len payloads
+    /// discarded without allocating) and passes the field's [`Tag`] to `pred`.
+    /// EOF before `pred` succeeds is [`ProtobufError::UnexpectedEof`].
+    #[inline]
+    fn skip_until<F>(&mut self, mut pred: F) -> Result<()>
+    where
+        F: FnMut(Tag) -> Result<bool>,
+    {
+        loop {
+            if self.remaining() == 0 {
+                return Err(ProtobufError::UnexpectedEof);
+            }
+            let tag = self.skip_field()?;
+            if pred(tag)? {
+                return Ok(());
+            }
         }
     }
-}
 
-/// Copy one complete field's wire bytes to `out`.
-///
-/// Returns `(tag, bytes_written)`. Tag / length / value varints are teed
-/// exactly (including non-canonical encodings). Fixed-width and Len payloads
-/// use [`WireCursor::copy_bytes`]. Groups copy the tag only. On error, `out`
-/// may hold a partial field.
-#[inline]
-fn wire_copy_field<C, W>(cursor: &mut C, out: &mut W) -> Result<(Tag, usize)>
-where
-    C: WireCursor + ?Sized,
-    W: Write,
-{
-    let mut written = 0usize;
-    let mut raw = [0u8; MAX_VARINT_BYTES];
-    let (encoded, bytes) = cursor.read_varint_with_raw(&mut raw)?;
-    out.write_all(bytes)?;
-    written += bytes.len();
-    let tag = Tag::from_encoded(encoded)?;
-    match tag.wire_type {
-        WireType::Varint => {
-            let (_, bytes) = cursor.read_varint_with_raw(&mut raw)?;
-            out.write_all(bytes)?;
-            written += bytes.len();
+    /// Copy one complete field's wire bytes to `out`.
+    ///
+    /// Returns `(tag, bytes_written)`. Tag / length / value varints are teed
+    /// exactly (including non-canonical encodings). Fixed-width and Len
+    /// payloads use [`copy_bytes`](Self::copy_bytes). Groups copy the tag
+    /// only. On error, `out` may hold a partial field.
+    #[inline]
+    fn copy_field<W: Write>(&mut self, out: &mut W) -> Result<(Tag, usize)> {
+        let mut written = 0usize;
+        let mut raw = [0u8; MAX_VARINT_BYTES];
+        let (encoded, bytes) = self.read_varint_with_raw(&mut raw)?;
+        out.write_all(bytes)?;
+        written += bytes.len();
+        let tag = Tag::from_encoded(encoded)?;
+        match tag.wire_type {
+            WireType::Varint => {
+                let (_, bytes) = self.read_varint_with_raw(&mut raw)?;
+                out.write_all(bytes)?;
+                written += bytes.len();
+            }
+            WireType::Int32 => written += self.copy_bytes(4, out)?,
+            WireType::Int64 => written += self.copy_bytes(8, out)?,
+            WireType::Len => {
+                let (length, bytes) = self.read_varint_with_raw(&mut raw)?;
+                out.write_all(bytes)?;
+                written += bytes.len();
+                written += self.copy_bytes(length.try_to_uint32()? as usize, out)?;
+            }
+            WireType::SGroup | WireType::EGroup => {}
         }
-        WireType::Int32 => written += cursor.copy_bytes(4, out)?,
-        WireType::Int64 => written += cursor.copy_bytes(8, out)?,
-        WireType::Len => {
-            let (length, bytes) = cursor.read_varint_with_raw(&mut raw)?;
-            out.write_all(bytes)?;
-            written += bytes.len();
-            written += cursor.copy_bytes(length.try_to_uint32()? as usize, out)?;
-        }
-        WireType::SGroup | WireType::EGroup => {}
+        Ok((tag, written))
     }
-    Ok((tag, written))
-}
 
-/// Copy fields to `out` until `pred` returns `Ok(true)`.
-///
-/// Same stop semantics as [`wire_skip_until`]. Returns bytes written. On error,
-/// `out` may already contain a partial copy.
-#[inline]
-fn wire_copy_until<C, F, W>(cursor: &mut C, mut pred: F, out: &mut W) -> Result<usize>
-where
-    C: WireCursor + ?Sized,
-    F: FnMut(Tag) -> Result<bool>,
-    W: Write,
-{
-    let mut written = 0usize;
-    loop {
-        if cursor.remaining() == 0 {
-            return Err(ProtobufError::UnexpectedEof);
-        }
-        let (tag, n) = wire_copy_field(cursor, out)?;
-        written += n;
-        if pred(tag)? {
-            return Ok(written);
+    /// Copy fields to `out` until `pred` returns `Ok(true)`.
+    ///
+    /// Same stop semantics as [`skip_until`](Self::skip_until). Returns bytes
+    /// written. On error, `out` may already contain a partial copy.
+    #[inline]
+    fn copy_until<F, W>(&mut self, mut pred: F, out: &mut W) -> Result<usize>
+    where
+        F: FnMut(Tag) -> Result<bool>,
+        W: Write,
+    {
+        let mut written = 0usize;
+        loop {
+            if self.remaining() == 0 {
+                return Err(ProtobufError::UnexpectedEof);
+            }
+            let (tag, n) = self.copy_field(out)?;
+            written += n;
+            if pred(tag)? {
+                return Ok(written);
+            }
         }
     }
 }
@@ -649,7 +643,7 @@ impl<R, F> FieldIterFromRead<R, F> {
         R: Read,
         P: FnMut(Tag) -> Result<bool>,
     {
-        wire_skip_until(&mut ReadCursor(&mut self.reader), pred)
+        ReadCursor(&mut self.reader).skip_until(pred)
     }
 
     /// Iterate fields until the matching end-group for `field_number`.
@@ -684,7 +678,7 @@ impl<R, F> FieldIterFromRead<R, F> {
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
-        wire_copy_until(&mut ReadCursor(&mut self.reader), pred, out)
+        ReadCursor(&mut self.reader).copy_until(pred, out)
     }
 }
 
@@ -912,12 +906,10 @@ impl<'a> FieldIterFromSlice<'a> {
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        wire_skip_until(
-            &mut SliceReader {
-                slice: &mut self.slice,
-            },
-            pred,
-        )
+        SliceReader {
+            slice: &mut self.slice,
+        }
+        .skip_until(pred)
     }
 
     /// Advance past fields until `pred` returns `Ok(true)`, returning the exact
@@ -1896,10 +1888,7 @@ mod group_preserve {
 
 #[cfg(test)]
 mod group_skip {
-    use super::{
-        AsRefExtProtobuf, ReadExtProtobuf, SliceReader, WireCursor, until_group_ends,
-        wire_skip_until,
-    };
+    use super::{AsRefExtProtobuf, ReadExtProtobuf, SliceReader, WireCursor, until_group_ends};
     use crate::field_number::FieldNumber;
     use crate::wire_format::WireType;
     use crate::{FieldValue, ProtobufError};
@@ -2095,7 +2084,9 @@ mod group_skip {
         assert_eq!(start.field_number.as_u32(), 1);
         assert_eq!(start.wire_type, WireType::SGroup);
 
-        wire_skip_until(&mut cursor, until_group_ends(start.field_number)).unwrap();
+        cursor
+            .skip_until(until_group_ends(start.field_number))
+            .unwrap();
 
         let after = cursor.skip_field().unwrap();
         assert_eq!(after.field_number.as_u32(), 3);
@@ -2112,7 +2103,9 @@ mod group_skip {
 
         let start = cursor.skip_field().unwrap();
         assert_eq!(start.wire_type, WireType::SGroup);
-        wire_skip_until(&mut cursor, until_group_ends(start.field_number)).unwrap();
+        cursor
+            .skip_until(until_group_ends(start.field_number))
+            .unwrap();
         assert_eq!(cursor.remaining(), 0);
         assert!(slice.is_empty());
     }
