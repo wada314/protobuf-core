@@ -222,6 +222,31 @@ pub trait ReadExtVarint {
         Self: Read;
 }
 
+/// Copies each yielded byte into `buf` while decoding (for [`ReadExtVarint::read_varint_with_raw`]).
+struct RawTee<'a, R> {
+    bytes: ::std::io::Bytes<&'a mut R>,
+    buf: &'a mut [u8],
+    n: &'a mut usize,
+}
+
+impl<R: Read> Iterator for RawTee<'_, R> {
+    type Item = ::std::io::Result<u8>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.bytes.next()? {
+            Ok(b) => {
+                if *self.n < self.buf.len() {
+                    self.buf[*self.n] = b;
+                    *self.n += 1;
+                }
+                Some(Ok(b))
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
 impl<R> ReadExtVarint for R
 where
     R: Read,
@@ -246,22 +271,16 @@ where
         &'a mut self,
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<Option<(Varint, &'a [u8])>> {
-        let mut state = DecodeState::new();
         let mut n = 0usize;
-        for byte in self.by_ref().bytes() {
-            let byte = byte?;
-            buf[n] = byte;
-            n += 1;
-            match state.feed(::std::iter::once(Ok::<u8, ProtobufError>(byte)))? {
-                DecodeOutcome::Complete(v) => return Ok(Some((v, &buf[..n]))),
-                DecodeOutcome::Incomplete(s) => state = s,
-                DecodeOutcome::Empty => return Ok(None),
-            }
-        }
-        if n == 0 {
-            Ok(None)
-        } else {
-            Err(ProtobufError::UnexpectedEof)
+        let outcome = DecodeState::new().feed(RawTee {
+            bytes: self.by_ref().bytes(),
+            buf: &mut buf[..],
+            n: &mut n,
+        })?;
+        match outcome {
+            DecodeOutcome::Complete(v) => Ok(Some((v, &buf[..n]))),
+            DecodeOutcome::Empty => Ok(None),
+            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
         }
     }
 }
