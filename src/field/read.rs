@@ -1744,10 +1744,11 @@ mod group_preserve {
         assert!(matches!(start.value, FieldValue::SGroup));
 
         let mut out = Vec::new();
-        fields
+        let written = fields
             .copy_until(until_group_ends(start.field_number), &mut out)
             .unwrap();
         assert_eq!(out, vec![0x10, 0x96, 0x01, 0x0C]);
+        assert_eq!(written, out.len());
 
         let after = fields.next().unwrap().unwrap();
         assert_eq!(after.field_number.as_u32(), 3);
@@ -1755,6 +1756,29 @@ mod group_preserve {
             panic!("expected varint");
         };
         assert_eq!(v.to_uint64(), 7);
+    }
+
+    #[test]
+    fn read_copy_until_empty_group_body() {
+        let bytes = [0x0B, 0x0C, 0x08, 0x01];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+
+        let mut out = Vec::new();
+        let written = fields
+            .copy_until(until_group_ends(start.field_number), &mut out)
+            .unwrap();
+        assert_eq!(out, vec![0x0C]);
+        assert_eq!(written, 1);
+
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 1);
+        let FieldValue::Varint(v) = after.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 1);
     }
 
     #[test]
@@ -1770,10 +1794,11 @@ mod group_preserve {
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         let mut out = Vec::new();
-        fields
+        let written = fields
             .copy_until(until_group_ends(start.field_number), &mut out)
             .unwrap();
         assert_eq!(out, vec![0x13, 0x12, 0x02, b'x', b'y', 0x14, 0x0C]);
+        assert_eq!(written, out.len());
         assert!(fields.next().is_none());
     }
 
@@ -1794,6 +1819,23 @@ mod group_preserve {
         ));
         // Partial write includes the mismatched end-group tag that failed pred.
         assert_eq!(out, vec![0x14]);
+    }
+
+    #[test]
+    fn read_copy_until_truncated_group_is_unexpected_eof() {
+        let bytes = [0x0B, 0x08, 0x01];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+
+        let mut out = Vec::new();
+        let err = fields
+            .copy_until(until_group_ends(start.field_number), &mut out)
+            .unwrap_err();
+        assert!(matches!(err, ProtobufError::UnexpectedEof));
+        // Copied the incomplete body's varint field before EOF waiting for EGroup.
+        assert_eq!(out, vec![0x08, 0x01]);
     }
 
     #[test]
@@ -1860,13 +1902,14 @@ mod group_preserve {
         let mut read_fields = Cursor::new(group_only.to_vec()).read_protobuf_fields(len);
         let start = read_fields.next().unwrap().unwrap();
         let mut from_read = Vec::new();
-        from_read.write_protobuf_field(&start).unwrap();
-        read_fields
+        let start_len = from_read.write_protobuf_field(&start).unwrap();
+        let body_written = read_fields
             .copy_until(until_group_ends(start.field_number), &mut from_read)
             .unwrap();
 
         assert_eq!(from_slice, group_only);
         assert_eq!(from_read, from_slice);
+        assert_eq!(start_len + body_written, from_read.len());
     }
 
     #[test]
@@ -1883,10 +1926,11 @@ mod group_preserve {
         let start = fields.next().unwrap().unwrap();
         assert!(matches!(start.value, FieldValue::SGroup));
         let mut out = Vec::new();
-        fields
+        let written = fields
             .copy_until(until_group_ends(start.field_number), &mut out)
             .unwrap();
         assert_eq!(out, vec![0x12, 0x81, 0x00, b'x', 0x0C]);
+        assert_eq!(written, out.len());
     }
 }
 
