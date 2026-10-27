@@ -167,8 +167,9 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 /// mismatched end tag is reported only for the **tracked** (outermost) group
 /// when `depth == 0`.
 ///
-/// Contrast with [`until_group_ends`], which uses a full field-number stack and
-/// is intended for skip / preserve without interpreting nested fields.
+/// Contrast with [`until_group_ends`] (skip / preserve **predicate**, full
+/// field-number stack). Names differ on purpose: [`GroupBody`] / `group_body`
+/// parse fields; `until_group_ends` does not.
 ///
 /// The matching outermost [`FieldValue::EGroup`] is **consumed and not yielded**.
 /// If the underlying iterator ends before that tag, this adapter ends with
