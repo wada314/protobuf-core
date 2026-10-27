@@ -48,10 +48,10 @@ where
 // Common parsing infrastructure
 // ============================================================================
 
-/// Predicate for [`FieldIterFromSlice::skip_until`] /
-/// [`FieldIterFromRead::skip_until`] / [`FieldIterFromSlice::take_until`] /
-/// [`FieldIterFromRead::copy_until`]: stop after the matching end-group,
-/// including nested groups.
+/// Stop predicate for protobuf **group** skip / preserve helpers
+/// ([`FieldIterFromSlice::skip_until`] / [`FieldIterFromRead::skip_until`] /
+/// [`FieldIterFromSlice::take_until`] / [`FieldIterFromRead::copy_until`]):
+/// returns `Ok(true)` after the matching end-group, including nested groups.
 ///
 /// Call after the start-group tag for `field_number` has already been consumed.
 /// Open groups are tracked with an explicit stack (LIFO field numbers) captured
@@ -357,9 +357,10 @@ pub(crate) trait WireCursor {
 
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// Each iteration runs [`skip_field`](Self::skip_field) (Len payloads
-    /// discarded without allocating) and passes the field's [`Tag`] to `pred`.
-    /// EOF before `pred` succeeds is [`ProtobufError::UnexpectedEof`].
+    /// Primary caller is group handling via [`until_group_ends`]. Each
+    /// iteration runs [`skip_field`](Self::skip_field) (Len payloads discarded
+    /// without allocating) and passes the field's [`Tag`] to `pred`. EOF
+    /// before `pred` succeeds is [`ProtobufError::UnexpectedEof`].
     #[inline]
     fn skip_until<F>(&mut self, mut pred: F) -> Result<()>
     where
@@ -408,8 +409,9 @@ pub(crate) trait WireCursor {
 
     /// Copy fields to `out` until `pred` returns `Ok(true)`.
     ///
-    /// Same stop semantics as [`skip_until`](Self::skip_until). Returns bytes
-    /// written. On error, `out` may already contain a partial copy.
+    /// Primary caller is group preserve via [`until_group_ends`]. Same stop
+    /// semantics as [`skip_until`](Self::skip_until). Returns bytes written.
+    /// On error, `out` may already contain a partial copy.
     #[inline]
     fn copy_until<F, W>(&mut self, mut pred: F, out: &mut W) -> Result<usize>
     where
@@ -638,10 +640,13 @@ pub struct FieldIterFromRead<R, F = fn(usize) -> Result<Vec<u8>>> {
 impl<R, F> FieldIterFromRead<R, F> {
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// Length-delimited payloads are discarded without allocating. The byte
-    /// budget is the remaining capacity of the inner [`Take`]. For a group
-    /// body after [`FieldValue::SGroup`], use [`until_group_ends`] (see
+    /// Intended mainly for protobuf **group** handling: after an
+    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
+    /// discard the body through the matching end tag (see
     /// [`FieldIterFromSlice::skip_until`] for a runnable example).
+    ///
+    /// Length-delimited payloads are discarded without allocating. The byte
+    /// budget is the remaining capacity of the inner [`Take`].
     pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
     where
         R: Read,
@@ -652,8 +657,9 @@ impl<R, F> FieldIterFromRead<R, F> {
 
     /// Iterate fields until the matching end-group for `field_number`.
     ///
-    /// Call after the start-group tag was consumed. See [`GroupBody`] for
-    /// nesting rules (depth only; nested field numbers are the caller's job).
+    /// Intended for parsing a protobuf **group** body after the start-group
+    /// tag was consumed. See [`GroupBody`] for nesting rules (depth only;
+    /// nested field numbers are the caller's job).
     #[inline]
     pub fn group_body(&mut self, field_number: FieldNumber) -> GroupBody<&mut Self> {
         GroupBody {
@@ -665,17 +671,15 @@ impl<R, F> FieldIterFromRead<R, F> {
 
     /// Copy fields to `out` until `pred` returns `Ok(true)`.
     ///
+    /// Intended mainly for protobuf **group** preserve on a stream: after an
+    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
+    /// tee the body and matching end tag (start tag already consumed — write
+    /// it yourself first if the preserve blob needs it). For zero-copy
+    /// preserve from a slice, use [`FieldIterFromSlice::take_until`] instead.
+    ///
     /// Same stop semantics as [`skip_until`](Self::skip_until). Writes exact
     /// wire bytes (including non-canonical varints). Returns the number of
-    /// bytes written.
-    ///
-    /// After [`FieldValue::SGroup`], pair with [`until_group_ends`] to preserve
-    /// the group body and matching end tag (start tag already consumed — write
-    /// it yourself first if the preserve blob needs it). On error, `out` may
-    /// already contain a partial copy.
-    ///
-    /// For zero-copy preserve from a slice, use
-    /// [`FieldIterFromSlice::take_until`] instead.
+    /// bytes written. On error, `out` may already contain a partial copy.
     pub fn copy_until<P, W>(&mut self, pred: P, out: &mut W) -> Result<usize>
     where
         R: Read,
@@ -888,8 +892,10 @@ pub struct FieldIterFromSlice<'a> {
 impl<'a> FieldIterFromSlice<'a> {
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// Length-delimited payloads are discarded without allocating. After an
-    /// [`FieldValue::SGroup`], pair this with [`until_group_ends`]:
+    /// Intended mainly for protobuf **group** handling: after an
+    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
+    /// discard the body through the matching end tag. Length-delimited
+    /// payloads are discarded without allocating.
     ///
     /// ```
     /// use ::protobuf_core::{AsRefExtProtobuf, FieldValue, until_group_ends};
@@ -919,9 +925,11 @@ impl<'a> FieldIterFromSlice<'a> {
     /// Advance past fields until `pred` returns `Ok(true)`, returning the exact
     /// wire-byte span that was consumed (zero-copy).
     ///
-    /// Same stop / nesting semantics as [`skip_until`](Self::skip_until). After
-    /// [`FieldValue::SGroup`], pair with [`until_group_ends`] to borrow the
-    /// group body through the matching end tag (start tag already consumed).
+    /// Intended mainly for protobuf **group** preserve: after an
+    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
+    /// borrow the body through the matching end tag (start tag already
+    /// consumed). Same stop / nesting semantics as
+    /// [`skip_until`](Self::skip_until).
     ///
     /// On error the cursor may already have advanced through some fields; there
     /// is no partial span return.
@@ -949,8 +957,9 @@ impl<'a> FieldIterFromSlice<'a> {
 
     /// Iterate fields until the matching end-group for `field_number`.
     ///
-    /// Call after the start-group tag was consumed. See [`GroupBody`] for
-    /// nesting rules (depth only; nested field numbers are the caller's job).
+    /// Intended for parsing a protobuf **group** body after the start-group
+    /// tag was consumed. See [`GroupBody`] for nesting rules (depth only;
+    /// nested field numbers are the caller's job).
     #[inline]
     pub fn group_body(&mut self, field_number: FieldNumber) -> GroupBody<&mut Self> {
         GroupBody {
