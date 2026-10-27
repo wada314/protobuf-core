@@ -61,28 +61,26 @@ where
 /// examples.
 pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<bool> {
     let mut stack = vec![field_number];
-    move |tag| match tag.wire_type {
-        WireType::SGroup => {
+    move |tag| match (tag.wire_type, stack.last().copied()) {
+        (WireType::SGroup, _) => {
             stack.push(tag.field_number);
             Ok(false)
         }
-        WireType::EGroup => {
-            let Some(&expected) = stack.last() else {
-                // Pred misuse: called after the tracked group already closed.
-                debug_assert!(
-                    false,
-                    "until_group_ends predicate called after the tracked group closed"
-                );
-                return Err(ProtobufError::UnexpectedEof);
-            };
-            if tag.field_number != expected {
-                return Err(ProtobufError::MismatchedEndGroup {
-                    expected,
-                    got: tag.field_number,
-                });
-            }
+        (WireType::EGroup, Some(expected)) if expected == tag.field_number => {
             stack.pop();
             Ok(stack.is_empty())
+        }
+        (WireType::EGroup, Some(expected)) => Err(ProtobufError::MismatchedEndGroup {
+            expected,
+            got: tag.field_number,
+        }),
+        (WireType::EGroup, None) => {
+            // Pred misuse: called after the tracked group already closed.
+            debug_assert!(
+                false,
+                "until_group_ends predicate called after the tracked group closed"
+            );
+            Err(ProtobufError::UnexpectedEof)
         }
         _ => Ok(false),
     }
