@@ -13,7 +13,9 @@ mod read;
 
 // Read helpers for `read_varints` (re-exported at the crate root).
 #[allow(unused_imports)]
-pub use read::{DecodeOutcome, DecodeState, ReadExtVarint, VarintIterFromRead};
+pub use read::{
+    DecodeOutcome, DecodeState, ReadExtVarint, VarintIterFromRead, read_varint_with_raw_from_slice,
+};
 /// A deserialized varint value.
 ///
 /// This type represents the decoded 8-byte value from serialized bytes

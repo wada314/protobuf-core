@@ -137,6 +137,7 @@ pub use self::field_number::FieldNumber;
 pub use self::tag::{Outcome as TagOutcome, ReadExtTag, Tag};
 pub use self::varint::{
     DecodeOutcome, DecodeState, ReadExtVarint, Varint, VarintIterFromRead, WriteExtVarint,
+    read_varint_with_raw_from_slice,
 };
 pub use self::wire_format::{
     FIELD_NUMBER_SHIFT, FIXED32_BYTES, FIXED64_BYTES, MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT,

@@ -772,15 +772,8 @@ impl WireCursor for SliceReader<'_, '_> {
         &'a mut self,
         _buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
-        use crate::varint::ReadExtVarint;
-        let before = *self.slice;
-        let value = self
-            .slice
-            .read_varint()?
-            .ok_or(ProtobufError::UnexpectedEof)?;
-        let n = before.len() - self.slice.len();
-        debug_assert!(n <= MAX_VARINT_BYTES);
-        Ok((value, &before[..n]))
+        crate::varint::read_varint_with_raw_from_slice(self.slice)?
+            .ok_or(ProtobufError::UnexpectedEof)
     }
 
     #[inline]
