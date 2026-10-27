@@ -222,31 +222,6 @@ pub trait ReadExtVarint {
         Self: Read;
 }
 
-/// Copies each yielded byte into `buf` while decoding (for [`ReadExtVarint::read_varint_with_raw`]).
-struct RawTee<'a, R> {
-    bytes: ::std::io::Bytes<&'a mut R>,
-    buf: &'a mut [u8],
-    n: &'a mut usize,
-}
-
-impl<R: Read> Iterator for RawTee<'_, R> {
-    type Item = ::std::io::Result<u8>;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.bytes.next()? {
-            Ok(b) => {
-                if *self.n < self.buf.len() {
-                    self.buf[*self.n] = b;
-                    *self.n += 1;
-                }
-                Some(Ok(b))
-            }
-            Err(e) => Some(Err(e)),
-        }
-    }
-}
-
 impl<R> ReadExtVarint for R
 where
     R: Read,
@@ -272,11 +247,13 @@ where
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<Option<(Varint, &'a [u8])>> {
         let mut n = 0usize;
-        let outcome = DecodeState::new().feed(RawTee {
-            bytes: self.by_ref().bytes(),
-            buf: &mut buf[..],
-            n: &mut n,
-        })?;
+        let outcome = DecodeState::new().feed(self.by_ref().bytes().map(|r| {
+            r.map(|b| {
+                buf[n] = b;
+                n += 1;
+                b
+            })
+        }))?;
         match outcome {
             DecodeOutcome::Complete(v) => Ok(Some((v, &buf[..n]))),
             DecodeOutcome::Empty => Ok(None),
