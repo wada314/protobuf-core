@@ -160,7 +160,9 @@ pub(crate) trait WireCursor {
     fn skip_bytes(&mut self, length: usize) -> Result<()>;
 
     /// Copy exactly `length` bytes to `out` (dual of [`skip_bytes`](Self::skip_bytes)).
-    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<()>;
+    ///
+    /// Returns `length` on success.
+    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<usize>;
 
     /// Read a tag (field number + wire type).
     ///
@@ -219,36 +221,41 @@ where
     }
 }
 
-/// Copy one complete field's wire bytes to `out` and return its tag.
+/// Copy one complete field's wire bytes to `out`.
 ///
-/// Tag / length / value varints are teed exactly (including non-canonical
-/// encodings). Fixed-width and Len payloads use [`WireCursor::copy_bytes`].
-/// Groups copy the tag only. On error, `out` may hold a partial field.
+/// Returns `(tag, bytes_written)`. Tag / length / value varints are teed
+/// exactly (including non-canonical encodings). Fixed-width and Len payloads
+/// use [`WireCursor::copy_bytes`]. Groups copy the tag only. On error, `out`
+/// may hold a partial field.
 #[inline]
-fn wire_copy_field<C, W>(cursor: &mut C, out: &mut W) -> Result<Tag>
+fn wire_copy_field<C, W>(cursor: &mut C, out: &mut W) -> Result<(Tag, usize)>
 where
     C: WireCursor + ?Sized,
     W: Write,
 {
+    let mut written = 0usize;
     let mut raw = [0u8; MAX_VARINT_BYTES];
     let (encoded, bytes) = cursor.read_varint_with_raw(&mut raw)?;
     out.write_all(bytes)?;
+    written += bytes.len();
     let tag = Tag::from_encoded(encoded)?;
     match tag.wire_type {
         WireType::Varint => {
             let (_, bytes) = cursor.read_varint_with_raw(&mut raw)?;
             out.write_all(bytes)?;
+            written += bytes.len();
         }
-        WireType::Int32 => cursor.copy_bytes(4, out)?,
-        WireType::Int64 => cursor.copy_bytes(8, out)?,
+        WireType::Int32 => written += cursor.copy_bytes(4, out)?,
+        WireType::Int64 => written += cursor.copy_bytes(8, out)?,
         WireType::Len => {
             let (length, bytes) = cursor.read_varint_with_raw(&mut raw)?;
             out.write_all(bytes)?;
-            cursor.copy_bytes(length.try_to_uint32()? as usize, out)?;
+            written += bytes.len();
+            written += cursor.copy_bytes(length.try_to_uint32()? as usize, out)?;
         }
         WireType::SGroup | WireType::EGroup => {}
     }
-    Ok(tag)
+    Ok((tag, written))
 }
 
 /// Copy fields to `out` until `pred` returns `Ok(true)`.
@@ -267,39 +274,11 @@ where
         if cursor.remaining() == 0 {
             return Err(ProtobufError::UnexpectedEof);
         }
-        let mut counter = WriteCounter {
-            inner: out,
-            written: 0,
-        };
-        let tag = wire_copy_field(cursor, &mut counter)?;
-        written += counter.written;
+        let (tag, n) = wire_copy_field(cursor, out)?;
+        written += n;
         if pred(tag)? {
             return Ok(written);
         }
-    }
-}
-
-/// Counts bytes written while forwarding to an inner [`Write`].
-struct WriteCounter<'a, W> {
-    inner: &'a mut W,
-    written: usize,
-}
-
-impl<W: Write> Write for WriteCounter<'_, W> {
-    fn write(&mut self, buf: &[u8]) -> ::std::io::Result<usize> {
-        let n = self.inner.write(buf)?;
-        self.written += n;
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> ::std::io::Result<()> {
-        self.inner.flush()
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> ::std::io::Result<()> {
-        self.inner.write_all(buf)?;
-        self.written += buf.len();
-        Ok(())
     }
 }
 
@@ -390,15 +369,16 @@ where
     }
 
     #[inline]
-    fn copy_bytes<W: Write>(&mut self, mut length: usize, out: &mut W) -> Result<()> {
+    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<usize> {
+        let mut remaining = length;
         let mut buf = [0u8; 256];
-        while length > 0 {
-            let n = length.min(buf.len());
+        while remaining > 0 {
+            let n = remaining.min(buf.len());
             self.0.read_exact(&mut buf[..n])?;
             out.write_all(&buf[..n])?;
-            length -= n;
+            remaining -= n;
         }
-        Ok(())
+        Ok(length)
     }
 }
 
@@ -471,7 +451,7 @@ where
     }
 
     #[inline]
-    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<()> {
+    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<usize> {
         ReadCursor(self.0).copy_bytes(length, out)
     }
 }
