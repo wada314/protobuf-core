@@ -690,14 +690,14 @@ impl WireCursor for SliceReader<'_, '_> {
     }
 
     #[inline]
-    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<()> {
+    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<usize> {
         let (payload, remaining) = self
             .slice
             .split_at_checked(length)
             .ok_or(ProtobufError::UnexpectedEof)?;
         out.write_all(payload)?;
         *self.slice = remaining;
-        Ok(())
+        Ok(length)
     }
 }
 
