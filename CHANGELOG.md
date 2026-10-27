@@ -11,6 +11,7 @@ Additive public API for unknown-field group preserve. Callers that only skip gro
 
 ### Added
 
+- `ReadExtVarint::read_varint_with_raw` — decodes a varint while copying its exact wire bytes into a caller-provided `[u8; MAX_VARINT_BYTES]` (including non-canonical encodings).
 - `FieldIterFromSlice::take_until(pred)` — after an `SGroup` tag was consumed, returns a zero-copy `&[u8]` span of the group body through the matching `EGroup` (use with `until_group_ends`). Exact wire bytes.
 - `FieldIterFromRead::copy_until(pred, out)` — same stop semantics as `skip_until` for streaming input; tees exact wire bytes to `out` (including non-canonical varints).
 - `GroupBody` / `group_body(field_number)` on field iterators — adapter that yields body fields until the matching outermost `EGroup` (consumed, not yielded). Nesting uses a depth counter only; **nested end-group field numbers are not validated** (caller should nest another `group_body` when seeing an inner `SGroup`). Distinct from `until_group_ends`, which keeps a full field-number stack for skip/preserve. Premature end of input before that `EGroup` is `UnexpectedEof`. After the first `None` or a yielded `Err`, further `next` is unspecified (may read past the group); use `Iterator::fuse` for sticky `None`.
@@ -18,7 +19,7 @@ Additive public API for unknown-field group preserve. Callers that only skip gro
 
 ### Internal
 
-- `WireCursor` is Iterator-like: required fragments (`remaining` / `read_varint_with_raw` / fixed / `skip_bytes` / `copy_bytes`) plus default compose methods (`read_varint` / `read_tag` / `skip_field` / `skip_until` / `copy_field` / `copy_until`). `read_varint_with_raw` uses a joint lifetime over `&mut self` and `[u8; MAX_VARINT_BYTES]` (slice borrows input; Read fills the buffer).
+- `WireCursor` is Iterator-like: required fragments (`remaining` / `read_varint_with_raw` / fixed / `skip_bytes` / `copy_bytes`) plus default compose methods (`read_varint` / `read_tag` / `skip_field` / `skip_until` / `copy_field` / `copy_until`). Read-side `read_varint_with_raw` delegates to `ReadExtVarint::read_varint_with_raw`; the slice cursor still borrows the input.
 
 ## [0.6.0]
 

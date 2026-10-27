@@ -474,7 +474,10 @@ where
         &'a mut self,
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
-        read_varint_with_raw_from_take(self.0, buf)
+        use crate::varint::ReadExtVarint;
+        self.0
+            .read_varint_with_raw(buf)?
+            .ok_or(ProtobufError::UnexpectedEof)
     }
 
     #[inline]
@@ -509,33 +512,6 @@ where
     }
 }
 
-/// Fill `buf` from a [`Take`] while decoding one varint; return a subslice of `buf`.
-///
-/// Same byte-at-a-time style as [`crate::varint::ReadExtVarint`]: pull from
-/// [`Read::bytes`], copy into the caller-provided stack buffer, then feed the
-/// decoder so exact (possibly non-canonical) wire bytes are preserved.
-#[inline]
-#[allow(clippy::unbuffered_bytes)] // Varint needs byte-at-a-time; callers should BufReader if needed.
-fn read_varint_with_raw_from_take<'a, R: Read>(
-    take: &'a mut Take<R>,
-    buf: &'a mut [u8; MAX_VARINT_BYTES],
-) -> Result<(Varint, &'a [u8])> {
-    use crate::varint::{DecodeOutcome, DecodeState};
-    let mut state = DecodeState::new();
-    let mut n = 0usize;
-    for byte in take.bytes() {
-        let byte = byte?;
-        buf[n] = byte;
-        n += 1;
-        match state.feed(::std::iter::once(Ok::<u8, ProtobufError>(byte)))? {
-            DecodeOutcome::Complete(v) => return Ok((v, &buf[..n])),
-            DecodeOutcome::Incomplete(s) => state = s,
-            DecodeOutcome::Empty => return Err(ProtobufError::UnexpectedEof),
-        }
-    }
-    Err(ProtobufError::UnexpectedEof)
-}
-
 // ============================================================================
 // ReadExtProtobuf
 // ============================================================================
@@ -557,7 +533,10 @@ where
         &'a mut self,
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
-        read_varint_with_raw_from_take(self.0, buf)
+        use crate::varint::ReadExtVarint;
+        self.0
+            .read_varint_with_raw(buf)?
+            .ok_or(ProtobufError::UnexpectedEof)
     }
 
     #[inline]

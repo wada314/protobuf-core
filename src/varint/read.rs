@@ -196,6 +196,30 @@ pub trait ReadExtVarint {
     fn read_varints(&mut self) -> VarintIterFromRead<&mut Self>
     where
         Self: Read;
+
+    /// Read a varint and copy its exact wire bytes into `buf`.
+    ///
+    /// Returns `Ok(Some((varint, raw)))` where `raw` is `&buf[..n]` for the
+    /// consumed length (including non-canonical encodings), `Ok(None)` on empty
+    /// input, and `Err` when the input is incomplete or invalid.
+    ///
+    /// # Example
+    /// ```
+    /// use ::std::io::Cursor;
+    /// use ::protobuf_core::{ReadExtVarint, MAX_VARINT_BYTES};
+    ///
+    /// let mut reader = Cursor::new(vec![0x96, 0x01, 0x08]);
+    /// let mut buf = [0u8; MAX_VARINT_BYTES];
+    /// let (varint, raw) = reader.read_varint_with_raw(&mut buf).unwrap().unwrap();
+    /// assert_eq!(varint.to_uint64(), 150);
+    /// assert_eq!(raw, &[0x96, 0x01]);
+    /// ```
+    fn read_varint_with_raw<'a>(
+        &'a mut self,
+        buf: &'a mut [u8; MAX_VARINT_BYTES],
+    ) -> Result<Option<(Varint, &'a [u8])>>
+    where
+        Self: Read;
 }
 
 impl<R> ReadExtVarint for R
@@ -215,6 +239,30 @@ where
     #[allow(clippy::unbuffered_bytes)] // Varint parsing requires byte-by-byte reading; caller should use BufReader for efficiency
     fn read_varints(&mut self) -> VarintIterFromRead<&mut Self> {
         VarintIterFromRead { reader: self }
+    }
+
+    #[allow(clippy::unbuffered_bytes)] // Varint parsing requires byte-by-byte reading; caller should use BufReader for efficiency
+    fn read_varint_with_raw<'a>(
+        &'a mut self,
+        buf: &'a mut [u8; MAX_VARINT_BYTES],
+    ) -> Result<Option<(Varint, &'a [u8])>> {
+        let mut state = DecodeState::new();
+        let mut n = 0usize;
+        for byte in self.by_ref().bytes() {
+            let byte = byte?;
+            buf[n] = byte;
+            n += 1;
+            match state.feed(::std::iter::once(Ok::<u8, ProtobufError>(byte)))? {
+                DecodeOutcome::Complete(v) => return Ok(Some((v, &buf[..n]))),
+                DecodeOutcome::Incomplete(s) => state = s,
+                DecodeOutcome::Empty => return Ok(None),
+            }
+        }
+        if n == 0 {
+            Ok(None)
+        } else {
+            Err(ProtobufError::UnexpectedEof)
+        }
     }
 }
 
@@ -237,6 +285,43 @@ mod tests {
             _ => panic!("expected Complete"),
         };
         assert_eq!(varint.to_uint64(), 150);
+    }
+
+    #[test]
+    fn test_read_varint_with_raw_preserves_noncanonical_bytes() {
+        use crate::wire_format::MAX_VARINT_BYTES;
+        use ::std::io::Cursor;
+
+        // Overlong encoding of 1: 0x81 0x00
+        let mut reader = Cursor::new(vec![0x81, 0x00, 0x08]);
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        let (varint, raw) = reader.read_varint_with_raw(&mut buf).unwrap().unwrap();
+        assert_eq!(varint.to_uint64(), 1);
+        assert_eq!(raw, &[0x81, 0x00]);
+        assert_eq!(reader.read_varint().unwrap().unwrap().to_uint64(), 8);
+    }
+
+    #[test]
+    fn test_read_varint_with_raw_empty_is_none() {
+        use crate::wire_format::MAX_VARINT_BYTES;
+        use ::std::io::Cursor;
+
+        let mut reader = Cursor::new(Vec::<u8>::new());
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        assert!(reader.read_varint_with_raw(&mut buf).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_read_varint_with_raw_incomplete_is_unexpected_eof() {
+        use crate::wire_format::MAX_VARINT_BYTES;
+        use ::std::io::Cursor;
+
+        let mut reader = Cursor::new(vec![0x80]);
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        assert!(matches!(
+            reader.read_varint_with_raw(&mut buf),
+            Err(ProtobufError::UnexpectedEof)
+        ));
     }
 
     #[test]
