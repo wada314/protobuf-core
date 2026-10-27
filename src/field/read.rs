@@ -105,8 +105,10 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 ///
 /// Like a normal [`Iterator`], **nothing is guaranteed after the first
 /// `None`**. A later `next` may pull again from the underlying iterator and
-/// yield fields **past** the group. If you need sticky `None`, wrap with
-/// [`Iterator::fuse`] (for example `fields.group_body(n).fuse()`).
+/// yield fields **past** the group, or hit soft EOF and yield
+/// [`UnexpectedEof`](ProtobufError::UnexpectedEof) again. If you need sticky
+/// `None`, wrap with [`Iterator::fuse`] (for example
+/// `fields.group_body(n).fuse()`).
 ///
 /// After a yielded [`Err`], further `next` calls are likewise unspecified
 /// (the cursor may already have advanced). Typical `Result`-item consumers
@@ -168,8 +170,6 @@ pub struct GroupBody<I> {
     field_number: FieldNumber,
     /// How many nested groups are open *inside* the tracked group.
     depth: usize,
-    /// Set after the matching outermost end-group was consumed.
-    closed: bool,
 }
 
 impl<I> GroupBody<I> {
@@ -213,7 +213,6 @@ where
             inner: self,
             field_number,
             depth: 0,
-            closed: false,
         }
     }
 }
@@ -225,17 +224,12 @@ where
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Soft EOF before a matching end-group is truncated input. A clean
+        // finish returns `None` when the matching EGroup is observed below —
+        // that path never sees `inner` return `None`.
         let Some(result) = self.inner.next() else {
-            return if self.closed {
-                None
-            } else {
-                Some(Err(ProtobufError::UnexpectedEof))
-            };
+            return Some(Err(ProtobufError::UnexpectedEof));
         };
-        if self.closed {
-            // Past a successful end-group: unfused pulls keep forwarding.
-            return Some(result);
-        }
         let Ok(field) = result else {
             return Some(result);
         };
@@ -249,10 +243,7 @@ where
                 Some(Ok(field))
             }
             // Matching end of the tracked group: consume, do not yield.
-            FieldValue::EGroup if field.field_number == self.field_number => {
-                self.closed = true;
-                None
-            }
+            FieldValue::EGroup if field.field_number == self.field_number => None,
             FieldValue::EGroup => Some(Err(ProtobufError::MismatchedEndGroup {
                 expected: self.field_number,
                 got: field.field_number,
@@ -655,7 +646,6 @@ impl<R, F> FieldIterFromRead<R, F> {
             inner: self,
             field_number,
             depth: 0,
-            closed: false,
         }
     }
 
@@ -961,7 +951,6 @@ impl<'a> FieldIterFromSlice<'a> {
             inner: self,
             field_number,
             depth: 0,
-            closed: false,
         }
     }
 }
