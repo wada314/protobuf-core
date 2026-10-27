@@ -385,24 +385,21 @@ pub(crate) trait WireCursor {
     #[inline]
     fn copy_field<W: Write>(&mut self, out: &mut W) -> Result<(Tag, usize)> {
         let mut written = 0usize;
-        let mut raw = [0u8; MAX_VARINT_BYTES];
-        let (encoded, bytes) = self.read_varint_with_raw(&mut raw)?;
-        out.write_all(bytes)?;
-        written += bytes.len();
-        let tag = Tag::from_encoded(encoded)?;
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        let (tag_varint, tag_raw) = self.read_varint_with_raw(&mut buf)?;
+        written += write_all_len(out, tag_raw)?;
+        let tag = Tag::from_encoded(tag_varint)?;
         match tag.wire_type {
             WireType::Varint => {
-                let (_, bytes) = self.read_varint_with_raw(&mut raw)?;
-                out.write_all(bytes)?;
-                written += bytes.len();
+                let (_, value_raw) = self.read_varint_with_raw(&mut buf)?;
+                written += write_all_len(out, value_raw)?;
             }
             WireType::Int32 => written += self.copy_bytes(4, out)?,
             WireType::Int64 => written += self.copy_bytes(8, out)?,
             WireType::Len => {
-                let (length, bytes) = self.read_varint_with_raw(&mut raw)?;
-                out.write_all(bytes)?;
-                written += bytes.len();
-                written += self.copy_bytes(length.try_to_uint32()? as usize, out)?;
+                let (len_varint, len_raw) = self.read_varint_with_raw(&mut buf)?;
+                written += write_all_len(out, len_raw)?;
+                written += self.copy_bytes(len_varint.try_to_uint32()? as usize, out)?;
             }
             WireType::SGroup | WireType::EGroup => {}
         }
@@ -431,6 +428,13 @@ pub(crate) trait WireCursor {
             }
         }
     }
+}
+
+/// `write_all` then return how many bytes were written (`buf.len()` on success).
+#[inline]
+fn write_all_len<W: Write>(out: &mut W, buf: &[u8]) -> Result<usize> {
+    out.write_all(buf)?;
+    Ok(buf.len())
 }
 
 /// [`WireCursor`] that can materialize a byte buffer into `L`.
