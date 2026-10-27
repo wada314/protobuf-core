@@ -54,8 +54,8 @@ where
 /// Pass this to [`FieldIterFromSlice::skip_until`] /
 /// [`FieldIterFromRead::skip_until`] / [`FieldIterFromSlice::take_until`] /
 /// [`FieldIterFromRead::copy_until`] after the start-group tag for
-/// `field_number` has already been consumed. Open groups are tracked with an
-/// explicit stack with field numbers inside the returned closure.
+/// `field_number` has already been consumed. Nested groups are tracked with
+/// an explicit field-number stack inside the returned closure.
 ///
 /// This is only the stop condition — see those methods for discard / preserve
 /// examples.
@@ -113,10 +113,10 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 ///
 /// # Nesting model (depth only)
 ///
-/// In contrast to [until_group_ends()], this adapter remembers only the outermost group's field number. Nested
-/// [`FieldValue::SGroup`] / [`FieldValue::EGroup`] only adjust an integer
-/// **depth**; inner end-group field numbers are not checked against their
-/// start tags.
+/// In contrast to [`until_group_ends`], this adapter remembers only the
+/// outermost group's field number. Nested [`FieldValue::SGroup`] /
+/// [`FieldValue::EGroup`] only adjust an integer **depth**; inner end-group
+/// field numbers are not checked against their start tags.
 ///
 /// That means the caller is responsible for validating nested group field
 /// numbers if that matters. Apply the same adapter again when an inner
@@ -270,7 +270,7 @@ pub(crate) trait WireCursor {
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])>;
 
-    /// Read a varint.
+    /// Read a varint (discards the raw wire bytes).
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`] (caller must check
     /// [`remaining`](Self::remaining) first for soft end).
@@ -303,7 +303,8 @@ pub(crate) trait WireCursor {
     ///
     /// Dual of [`BufWireCursor::parse_field`]: the payload is discarded instead
     /// of materialized. For [`WireType::SGroup`] / [`WireType::EGroup`], only
-    /// that field is consumed; the group body fields are left for the caller.
+    /// the tag is consumed; a start-group's following body fields are left for
+    /// the caller.
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`].
     #[inline]
