@@ -48,44 +48,17 @@ where
 // Common parsing infrastructure
 // ============================================================================
 
-/// Stop predicate for protobuf **group** skip / preserve helpers
-/// ([`FieldIterFromSlice::skip_until`] / [`FieldIterFromRead::skip_until`] /
-/// [`FieldIterFromSlice::take_until`] / [`FieldIterFromRead::copy_until`]):
-/// returns `Ok(true)` after the matching end-group, including nested groups.
+/// Predicate for protobuf **group** skip / preserve: returns `Ok(true)` when
+/// the matching end-group tag is reached (including nested groups).
 ///
-/// Call after the start-group tag for `field_number` has already been consumed.
-/// Open groups are tracked with an explicit stack (LIFO field numbers) captured
-/// inside the returned closure.
+/// Pass this to [`FieldIterFromSlice::skip_until`] /
+/// [`FieldIterFromRead::skip_until`] / [`FieldIterFromSlice::take_until`] /
+/// [`FieldIterFromRead::copy_until`] after the start-group tag for
+/// `field_number` has already been consumed. Open groups are tracked with an
+/// explicit stack (LIFO field numbers) inside the returned closure.
 ///
-/// Discard the body:
-///
-/// ```
-/// use ::protobuf_core::{AsRefExtProtobuf, FieldValue, until_group_ends};
-///
-/// let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
-/// let mut fields = bytes.as_slice().read_protobuf_fields();
-/// let start = fields.next().unwrap().unwrap();
-/// assert!(matches!(start.value, FieldValue::SGroup));
-/// fields.skip_until(until_group_ends(start.field_number)).unwrap();
-/// ```
-///
-/// Preserve the body (and matching end tag) for an unknown-field store — the
-/// start tag is already consumed, so write it yourself first if needed:
-///
-/// ```
-/// use ::protobuf_core::{AsRefExtProtobuf, FieldValue, WriteExtProtobuf, until_group_ends};
-///
-/// let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
-/// let mut fields = bytes.as_slice().read_protobuf_fields();
-/// let start = fields.next().unwrap().unwrap();
-/// assert!(matches!(start.value, FieldValue::SGroup));
-///
-/// let mut preserved = Vec::new();
-/// preserved.write_protobuf_field(&start).unwrap();
-/// let body = fields.take_until(until_group_ends(start.field_number)).unwrap();
-/// preserved.extend_from_slice(body);
-/// assert_eq!(preserved, &bytes[..bytes.len() - 2]); // without trailing field 3
-/// ```
+/// This is only the stop condition — see those methods for discard / preserve
+/// examples.
 pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<bool> {
     let mut stack = vec![field_number];
     move |tag| match tag.wire_type {
@@ -952,15 +925,20 @@ impl<'a> FieldIterFromSlice<'a> {
     /// is no partial span return.
     ///
     /// ```
-    /// use ::protobuf_core::{AsRefExtProtobuf, FieldValue, until_group_ends};
+    /// use ::protobuf_core::{AsRefExtProtobuf, FieldValue, WriteExtProtobuf, until_group_ends};
     ///
     /// let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
     /// let mut fields = bytes.as_slice().read_protobuf_fields();
     /// let start = fields.next().unwrap().unwrap();
     /// assert!(matches!(start.value, FieldValue::SGroup));
     ///
+    /// // Start tag is already consumed — write it yourself for an unknown-field blob.
+    /// let mut preserved = Vec::new();
+    /// preserved.write_protobuf_field(&start).unwrap();
     /// let body = fields.take_until(until_group_ends(start.field_number)).unwrap();
+    /// preserved.extend_from_slice(body);
     /// assert_eq!(body, &[0x10, 0x01, 0x0C]);
+    /// assert_eq!(preserved, &bytes[..bytes.len() - 2]); // without trailing field 3
     /// ```
     pub fn take_until<P>(&mut self, pred: P) -> Result<&'a [u8]>
     where
