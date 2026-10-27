@@ -127,20 +127,22 @@ pub(crate) trait WireCursor {
     /// Bytes still allowed in this cursor's bound (`Take::limit` / slice length).
     fn remaining(&self) -> usize;
 
-    /// Read a varint, writing its exact wire bytes into `buf`.
+    /// Read a varint and return its exact wire bytes.
     ///
-    /// Returns the decoded value and a subslice of `buf` with length in
+    /// The returned slice borrows for the joint lifetime of `self` and `buf`:
+    /// it may point into the cursor's input (slice path, no copy) or into
+    /// `buf` (Read path fills `buf` while decoding). Length is in
     /// `1..=MAX_VARINT_BYTES`. Empty input is [`ProtobufError::UnexpectedEof`]
     /// (caller must check [`remaining`](Self::remaining) first for soft end).
     fn read_varint_with_raw<'a>(
-        &mut self,
+        &'a mut self,
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])>;
 
     /// Read a varint (discards the raw wire bytes).
     ///
-    /// Inlined so that when only the [`Varint`] is used, the raw copy into the
-    /// stack buffer can be optimized away.
+    /// Inlined so decode-only call sites do not keep the raw borrow / buffer
+    /// work alive longer than needed.
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`] (caller must check
     /// [`remaining`](Self::remaining) first for soft end).
@@ -374,21 +376,10 @@ where
 
     #[inline]
     fn read_varint_with_raw<'a>(
-        &mut self,
+        &'a mut self,
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
-        use crate::varint::{DecodeOutcome, DecodeState};
-        let mut state = DecodeState::new();
-        let mut n = 0usize;
-        loop {
-            read_exact_eof(self.0, &mut buf[n..=n])?;
-            n += 1;
-            match state.feed(::std::iter::once(Ok::<u8, ProtobufError>(buf[n - 1])))? {
-                DecodeOutcome::Complete(v) => return Ok((v, &buf[..n])),
-                DecodeOutcome::Incomplete(s) => state = s,
-                DecodeOutcome::Empty => return Err(ProtobufError::UnexpectedEof),
-            }
-        }
+        read_varint_with_raw_from_take(self.0, buf)
     }
 
     #[inline]
@@ -436,6 +427,26 @@ fn read_exact_eof(reader: &mut impl Read, buf: &mut [u8]) -> Result<()> {
     }
 }
 
+/// Fill `buf` from a [`Take`] while decoding one varint; return a subslice of `buf`.
+#[inline]
+fn read_varint_with_raw_from_take<'a, R: Read>(
+    take: &'a mut Take<R>,
+    buf: &'a mut [u8; MAX_VARINT_BYTES],
+) -> Result<(Varint, &'a [u8])> {
+    use crate::varint::{DecodeOutcome, DecodeState};
+    let mut state = DecodeState::new();
+    let mut n = 0usize;
+    loop {
+        read_exact_eof(take, &mut buf[n..=n])?;
+        n += 1;
+        match state.feed(::std::iter::once(Ok::<u8, ProtobufError>(buf[n - 1])))? {
+            DecodeOutcome::Complete(v) => return Ok((v, &buf[..n])),
+            DecodeOutcome::Incomplete(s) => state = s,
+            DecodeOutcome::Empty => return Err(ProtobufError::UnexpectedEof),
+        }
+    }
+}
+
 // ============================================================================
 // ReadExtProtobuf
 // ============================================================================
@@ -454,10 +465,10 @@ where
 
     #[inline]
     fn read_varint_with_raw<'a>(
-        &mut self,
+        &'a mut self,
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
-        ReadCursor(self.0).read_varint_with_raw(buf)
+        read_varint_with_raw_from_take(self.0, buf)
     }
 
     #[inline]
@@ -671,13 +682,12 @@ impl WireCursor for SliceReader<'_, '_> {
         self.slice.len()
     }
 
-    /// Copies the consumed wire bytes into `buf` so the returned slice is
-    /// independent of advancing `self.slice`. Inlined together with
-    /// [`WireCursor::read_varint`] so a decode-only call can drop that copy.
+    /// Returns a borrow into the input buffer (ignores `buf`; no copy).
+    /// The joint lifetime with `buf` still applies so this matches the trait.
     #[inline]
     fn read_varint_with_raw<'a>(
-        &mut self,
-        buf: &'a mut [u8; MAX_VARINT_BYTES],
+        &'a mut self,
+        _buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
         use crate::varint::ReadExtVarint;
         let before = *self.slice;
@@ -687,8 +697,7 @@ impl WireCursor for SliceReader<'_, '_> {
             .ok_or(ProtobufError::UnexpectedEof)?;
         let n = before.len() - self.slice.len();
         debug_assert!(n <= MAX_VARINT_BYTES);
-        buf[..n].copy_from_slice(&before[..n]);
-        Ok((value, &buf[..n]))
+        Ok((value, &before[..n]))
     }
 
     #[inline]

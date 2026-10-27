@@ -17,7 +17,7 @@ Additive public API for unknown-field group preserve. Callers that only skip gro
 
 ### Internal
 
-- `WireCursor` gains required `read_varint_with_raw` / `copy_bytes` and default `read_varint` / `copy_field` / `copy_until`. Varint copy tees raw wire bytes into a caller-provided `[u8; MAX_VARINT_BYTES]` rather than re-encoding.
+- `WireCursor` gains required `read_varint_with_raw` / `copy_bytes` and default `read_varint` / `copy_field` / `copy_until`. `read_varint_with_raw` returns exact wire bytes with a joint lifetime over `&mut self` and a caller `[u8; MAX_VARINT_BYTES]`: the slice path borrows the input (no copy); the Read path fills the buffer.
 
 ## [0.6.0]
 
