@@ -117,8 +117,8 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 
 /// Field-iterator adapter that stops at the matching end-group tag.
 ///
-/// Returned by [`FieldIterFromSlice::until_end_group`] /
-/// [`FieldIterFromRead::until_end_group`]. Call after the start-group tag for
+/// Returned by [`FieldIterFromSlice::group_body`] /
+/// [`FieldIterFromRead::group_body`]. Call after the start-group tag for
 /// `field_number` has already been consumed.
 ///
 /// # Nesting model (depth only)
@@ -131,7 +131,7 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 /// That means **the caller is responsible** for validating nested group field
 /// numbers if that matters. Apply the same adapter again when an inner
 /// [`FieldValue::SGroup`] is seen (nested borrows via
-/// [`UntilEndGroup::until_end_group`]):
+/// [`GroupBody::group_body`]):
 ///
 /// ```
 /// use ::protobuf_core::{AsRefExtProtobuf, FieldValue};
@@ -147,14 +147,14 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 /// let start = fields.next().unwrap().unwrap();
 /// assert!(matches!(start.value, FieldValue::SGroup));
 ///
-/// let mut outer = fields.until_end_group(start.field_number);
+/// let mut outer = fields.group_body(start.field_number);
 /// let inner_start = outer.next().unwrap().unwrap();
 /// assert!(matches!(inner_start.value, FieldValue::SGroup));
 /// assert_eq!(inner_start.field_number.as_u32(), 2);
 ///
 /// {
 ///     // Nested adapter checks the inner group's end field number.
-///     let mut inner = outer.until_end_group(inner_start.field_number);
+///     let mut inner = outer.group_body(inner_start.field_number);
 ///     let v = inner.next().unwrap().unwrap();
 ///     assert_eq!(v.field_number.as_u32(), 3);
 ///     assert!(inner.next().is_none()); // consumed inner EGroup
@@ -175,7 +175,7 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 /// `None` as well; callers that require a well-formed group should treat a
 /// finished adapter that never saw the end tag as an error when appropriate.
 #[derive(Debug)]
-pub struct UntilEndGroup<I> {
+pub struct GroupBody<I> {
     inner: I,
     field_number: FieldNumber,
     /// How many nested groups are open *inside* the tracked group.
@@ -183,7 +183,7 @@ pub struct UntilEndGroup<I> {
     done: bool,
 }
 
-impl<I> UntilEndGroup<I> {
+impl<I> GroupBody<I> {
     /// Field number of the tracked (outermost) start-group.
     #[inline]
     pub fn field_number(&self) -> FieldNumber {
@@ -217,17 +217,17 @@ impl<I> UntilEndGroup<I> {
     }
 }
 
-impl<I> UntilEndGroup<I>
+impl<I> GroupBody<I>
 where
     I: Iterator,
 {
-    /// Continue with another [`UntilEndGroup`] over nested fields from this
+    /// Continue with another [`GroupBody`] over nested fields from this
     /// adapter (same depth rules for the nested field number).
     ///
     /// Typically called after observing [`FieldValue::SGroup`] from `self`.
     #[inline]
-    pub fn until_end_group(&mut self, field_number: FieldNumber) -> UntilEndGroup<&mut Self> {
-        UntilEndGroup {
+    pub fn group_body(&mut self, field_number: FieldNumber) -> GroupBody<&mut Self> {
+        GroupBody {
             inner: self,
             field_number,
             depth: 0,
@@ -236,7 +236,7 @@ where
     }
 }
 
-impl<I, L> Iterator for UntilEndGroup<I>
+impl<I, L> Iterator for GroupBody<I>
 where
     I: Iterator<Item = Result<Field<L>>>,
 {
@@ -656,11 +656,11 @@ impl<R, F> FieldIterFromRead<R, F> {
 
     /// Iterate fields until the matching end-group for `field_number`.
     ///
-    /// Call after the start-group tag was consumed. See [`UntilEndGroup`] for
+    /// Call after the start-group tag was consumed. See [`GroupBody`] for
     /// nesting rules (depth only; nested field numbers are the caller's job).
     #[inline]
-    pub fn until_end_group(&mut self, field_number: FieldNumber) -> UntilEndGroup<&mut Self> {
-        UntilEndGroup {
+    pub fn group_body(&mut self, field_number: FieldNumber) -> GroupBody<&mut Self> {
+        GroupBody {
             inner: self,
             field_number,
             depth: 0,
@@ -956,11 +956,11 @@ impl<'a> FieldIterFromSlice<'a> {
 
     /// Iterate fields until the matching end-group for `field_number`.
     ///
-    /// Call after the start-group tag was consumed. See [`UntilEndGroup`] for
+    /// Call after the start-group tag was consumed. See [`GroupBody`] for
     /// nesting rules (depth only; nested field numbers are the caller's job).
     #[inline]
-    pub fn until_end_group(&mut self, field_number: FieldNumber) -> UntilEndGroup<&mut Self> {
-        UntilEndGroup {
+    pub fn group_body(&mut self, field_number: FieldNumber) -> GroupBody<&mut Self> {
+        GroupBody {
             inner: self,
             field_number,
             depth: 0,
@@ -1469,7 +1469,7 @@ mod tests {
 
 #[cfg(test)]
 #[cfg(test)]
-mod until_end_group_adapter {
+mod group_body_adapter {
     use super::{AsRefExtProtobuf, ReadExtProtobuf};
     use crate::field_number::FieldNumber;
     use crate::{FieldValue, ProtobufError};
@@ -1490,7 +1490,7 @@ mod until_end_group_adapter {
         let bytes = [0x0B, 0x0C, 0x08, 0x01];
         let mut fields = slice_fields(&bytes);
         let n = expect_sgroup(&mut fields);
-        assert!(fields.until_end_group(n).next().is_none());
+        assert!(fields.group_body(n).next().is_none());
         let after = fields.next().unwrap().unwrap();
         assert_eq!(after.field_number.as_u32(), 1);
         let FieldValue::Varint(v) = after.value else {
@@ -1504,10 +1504,7 @@ mod until_end_group_adapter {
         let bytes = [0x0B, 0x10, 0x96, 0x01, 0x0C, 0x18, 0x07];
         let mut fields = slice_fields(&bytes);
         let n = expect_sgroup(&mut fields);
-        let body: Vec<_> = fields
-            .until_end_group(n)
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
+        let body: Vec<_> = fields.group_body(n).collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(body.len(), 1);
         assert_eq!(body[0].field_number.as_u32(), 2);
         let after = fields.next().unwrap().unwrap();
@@ -1526,11 +1523,11 @@ mod until_end_group_adapter {
         ];
         let mut fields = slice_fields(&bytes);
         let outer_n = expect_sgroup(&mut fields);
-        let mut outer = fields.until_end_group(outer_n);
+        let mut outer = fields.group_body(outer_n);
         let inner_start = outer.next().unwrap().unwrap();
         assert!(matches!(inner_start.value, FieldValue::SGroup));
         {
-            let mut inner = outer.until_end_group(inner_start.field_number);
+            let mut inner = outer.group_body(inner_start.field_number);
             let v = inner.next().unwrap().unwrap();
             assert_eq!(v.field_number.as_u32(), 3);
             assert!(inner.next().is_none());
@@ -1548,10 +1545,7 @@ mod until_end_group_adapter {
         let bytes = [0x0B, 0x0B, 0x10, 0x01, 0x0C, 0x0C];
         let mut fields = slice_fields(&bytes);
         let n = expect_sgroup(&mut fields);
-        let body: Vec<_> = fields
-            .until_end_group(n)
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
+        let body: Vec<_> = fields.group_body(n).collect::<Result<Vec<_>, _>>().unwrap();
         // Inner SGroup + varint + inner EGroup yielded; outer EGroup consumed.
         assert_eq!(body.len(), 3);
         assert!(matches!(body[0].value, FieldValue::SGroup));
@@ -1565,7 +1559,7 @@ mod until_end_group_adapter {
         let bytes = [0x0B, 0x14];
         let mut fields = slice_fields(&bytes);
         let n = expect_sgroup(&mut fields);
-        let err = fields.until_end_group(n).next().unwrap().unwrap_err();
+        let err = fields.group_body(n).next().unwrap().unwrap_err();
         assert!(
             matches!(
                 err,
@@ -1584,10 +1578,7 @@ mod until_end_group_adapter {
         let bytes = [0x0B, 0x13, 0x0C];
         let mut fields = slice_fields(&bytes);
         let n = expect_sgroup(&mut fields);
-        let body: Vec<_> = fields
-            .until_end_group(n)
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
+        let body: Vec<_> = fields.group_body(n).collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(body.len(), 2);
         assert!(matches!(body[0].value, FieldValue::SGroup));
         assert!(matches!(body[1].value, FieldValue::EGroup));
@@ -1603,7 +1594,7 @@ mod until_end_group_adapter {
         let start = fields.next().unwrap().unwrap();
         assert!(matches!(start.value, FieldValue::SGroup));
         let body: Vec<_> = fields
-            .until_end_group(start.field_number)
+            .group_body(start.field_number)
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(body.len(), 1);

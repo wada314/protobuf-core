@@ -30,7 +30,7 @@ pub(crate) mod read;
 pub(crate) mod write;
 
 pub use self::read::{
-    AsRefExtProtobuf, FieldIterFromRead, FieldIterFromSlice, ReadExtProtobuf, UntilEndGroup,
+    AsRefExtProtobuf, FieldIterFromRead, FieldIterFromSlice, GroupBody, ReadExtProtobuf,
     until_group_ends,
 };
 pub use self::write::WriteExtProtobuf;
@@ -53,8 +53,8 @@ pub use self::write::WriteExtProtobuf;
 /// [`until_group_ends`](crate::until_group_ends), preserve it with
 /// [`take_until`](crate::FieldIterFromSlice::take_until) (slice) or
 /// [`copy_until`](crate::FieldIterFromRead::copy_until) (Read), parse the body
-/// with [`until_end_group`](crate::FieldIterFromSlice::until_end_group) /
-/// [`UntilEndGroup`], or read nested fields until a matching `EGroup` before
+/// with [`group_body`](crate::FieldIterFromSlice::group_body) /
+/// [`GroupBody`], or read nested fields until a matching `EGroup` before
 /// the next top-level field.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
