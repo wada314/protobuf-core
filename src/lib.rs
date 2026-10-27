@@ -94,10 +94,10 @@
 //!   byte budget `len` (bounded via [`std::io::Take`])
 //!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] where `L: AsMut<[u8]>`
 //!
-//! Field iterators expose `skip_until`, slice `take_until`, and Read
-//! `copy_until`. After an [`FieldValue::SGroup`], pair those with
-//! [`until_group_ends`] to discard or preserve the group body (start tag
-//! already consumed).
+//! Field iterators expose `skip_until`, slice `take_until`, Read `copy_until`,
+//! and [`until_end_group`](FieldIterFromSlice::until_end_group) /
+//! [`UntilEndGroup`] for parsing a group body. After an [`FieldValue::SGroup`],
+//! pair skip/preserve with [`until_group_ends`] (start tag already consumed).
 //!
 //! Byte iterators are not supported; use a slice or a `Read` with `len`.
 //!
@@ -131,7 +131,7 @@ pub(crate) mod wire_format;
 
 pub use self::field::{
     AsRefExtProtobuf, Field, FieldIterFromRead, FieldIterFromSlice, FieldValue, ReadExtProtobuf,
-    WriteExtProtobuf, until_group_ends,
+    UntilEndGroup, WriteExtProtobuf, until_group_ends,
 };
 pub use self::field_number::FieldNumber;
 pub use self::tag::{Outcome as TagOutcome, ReadExtTag, Tag};
