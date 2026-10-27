@@ -123,12 +123,12 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 ///
 /// # Termination
 ///
-/// [`Iterator::next`] returns `None` when:
-///
-/// - the matching outermost [`FieldValue::EGroup`] is seen (that tag is
-///   **consumed and not yielded**), or
-/// - the underlying field iterator returns `None` first (no end-group yet —
-///   callers that require a well-formed group should treat that as an error).
+/// [`Iterator::next`] returns `None` only after the matching outermost
+/// [`FieldValue::EGroup`] is seen (that tag is **consumed and not yielded**).
+/// If the underlying field iterator returns `None` before that end tag, this
+/// adapter yields [`ProtobufError::UnexpectedEof`] (same truncated-group
+/// contract as [`until_group_ends`] / `skip_until` / `take_until` /
+/// `copy_until`).
 ///
 /// Like a normal [`Iterator`], **nothing is guaranteed after the first
 /// `None`**. A later `next` may pull again from the underlying iterator and
@@ -195,6 +195,8 @@ pub struct GroupBody<I> {
     field_number: FieldNumber,
     /// How many nested groups are open *inside* the tracked group.
     depth: usize,
+    /// Set after the matching outermost end-group was consumed.
+    closed: bool,
 }
 
 impl<I> GroupBody<I> {
@@ -238,6 +240,7 @@ where
             inner: self,
             field_number,
             depth: 0,
+            closed: false,
         }
     }
 }
@@ -249,7 +252,17 @@ where
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let result = self.inner.next()?;
+        let Some(result) = self.inner.next() else {
+            return if self.closed {
+                None
+            } else {
+                Some(Err(ProtobufError::UnexpectedEof))
+            };
+        };
+        if self.closed {
+            // Past a successful end-group: unfused pulls keep forwarding.
+            return Some(result);
+        }
         let Ok(field) = result else {
             return Some(result);
         };
@@ -263,7 +276,10 @@ where
                 Some(Ok(field))
             }
             // Matching end of the tracked group: consume, do not yield.
-            FieldValue::EGroup if field.field_number == self.field_number => None,
+            FieldValue::EGroup if field.field_number == self.field_number => {
+                self.closed = true;
+                None
+            }
             FieldValue::EGroup => Some(Err(ProtobufError::MismatchedEndGroup {
                 expected: self.field_number,
                 got: field.field_number,
@@ -666,6 +682,7 @@ impl<R, F> FieldIterFromRead<R, F> {
             inner: self,
             field_number,
             depth: 0,
+            closed: false,
         }
     }
 
@@ -966,6 +983,7 @@ impl<'a> FieldIterFromSlice<'a> {
             inner: self,
             field_number,
             depth: 0,
+            closed: false,
         }
     }
 }
@@ -1597,16 +1615,34 @@ mod group_body_adapter {
     fn outer_adapter_does_not_verify_mismatched_inner_end_number() {
         // SGroup(1) SGroup(2) EGroup(1): at depth>0 the EGroup is treated as a
         // nested end (depth--) without checking field number 1 vs 2, and is
-        // yielded. The outer matching end never appears → adapter just ends.
+        // yielded. The outer matching end never appears → UnexpectedEof.
         let bytes = [0x0B, 0x13, 0x0C];
         let mut fields = slice_fields(&bytes);
         let n = expect_sgroup(&mut fields);
-        let body: Vec<_> = fields.group_body(n).collect::<Result<Vec<_>, _>>().unwrap();
-        assert_eq!(body.len(), 2);
-        assert!(matches!(body[0].value, FieldValue::SGroup));
-        assert!(matches!(body[1].value, FieldValue::EGroup));
-        assert_eq!(body[1].field_number.as_u32(), 1);
-        assert!(fields.next().is_none());
+        let mut body = fields.group_body(n);
+        assert!(matches!(
+            body.next().unwrap().unwrap().value,
+            FieldValue::SGroup
+        ));
+        let eg = body.next().unwrap().unwrap();
+        assert!(matches!(eg.value, FieldValue::EGroup));
+        assert_eq!(eg.field_number.as_u32(), 1);
+        assert!(matches!(
+            body.next().unwrap().unwrap_err(),
+            ProtobufError::UnexpectedEof
+        ));
+    }
+
+    #[test]
+    fn truncated_group_body_is_unexpected_eof() {
+        let bytes = [0x0B, 0x08, 0x01];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let err = fields
+            .group_body(n)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap_err();
+        assert!(matches!(err, ProtobufError::UnexpectedEof));
     }
 
     #[test]
