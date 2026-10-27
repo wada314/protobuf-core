@@ -12,12 +12,12 @@ Additive public API for unknown-field group preserve. Callers that only skip gro
 ### Added
 
 - `FieldIterFromSlice::take_until(pred)` — after an `SGroup` tag was consumed, returns a zero-copy `&[u8]` span of the group body through the matching `EGroup` (use with `until_group_ends`). Exact wire bytes.
-- `FieldIterFromSlice::copy_until(pred, out)` / `FieldIterFromRead::copy_until(pred, out)` — same stop semantics as `skip_until`, writing preserved wire bytes to `out`. The slice path copies the `take_until` span; the `Read` path re-encodes tag and length-prefix varints canonically and copies fixed / Len payloads verbatim.
+- `FieldIterFromSlice::copy_until(pred, out)` / `FieldIterFromRead::copy_until(pred, out)` — same stop semantics as `skip_until`, writing exact wire bytes to `out` (including non-canonical varints). The slice path copies the `take_until` span; the `Read` path tees varints via `read_varint_with_raw` and copies fixed / Len payloads verbatim.
 - Contract mirrors `until_group_ends`: the start-group tag is already consumed (caller writes it to a preserve blob if needed); the helper advances past the matching end-group. Nested groups use the same stack rules. On predicate / decode error, the input cursor may have advanced; `Read` `copy_until` may leave a partial write in `out`.
 
 ### Internal
 
-- `WireCursor` gains required `copy_bytes` and default `copy_field` / `copy_until`.
+- `WireCursor` gains required `read_varint_with_raw` / `copy_bytes` and default `read_varint` / `copy_field` / `copy_until`. Varint copy tees raw wire bytes into a caller-provided `[u8; MAX_VARINT_BYTES]` rather than re-encoding.
 
 ## [0.6.0]
 

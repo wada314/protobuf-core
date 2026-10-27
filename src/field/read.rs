@@ -11,8 +11,8 @@
 use crate::field::{Field, FieldValue};
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
-use crate::varint::{Varint, WriteExtVarint};
-use crate::wire_format::WireType;
+use crate::varint::Varint;
+use crate::wire_format::{MAX_VARINT_BYTES, WireType};
 use crate::{ProtobufError, Result};
 use ::std::convert::{AsMut, AsRef};
 use ::std::io::{Read, Take, Write};
@@ -116,7 +116,7 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 
 /// Byte-level cursor over protobuf wire data.
 ///
-/// Required methods are atomic fragments (`remaining` / `read_varint` /
+/// Required methods are atomic fragments (`remaining` / `read_varint_with_raw` /
 /// `read_fixed` / `skip_bytes` / `copy_bytes`). Default methods compose those
 /// into tags, one-field skip/copy, and conditional multi-field skip/copy.
 ///
@@ -127,11 +127,28 @@ pub(crate) trait WireCursor {
     /// Bytes still allowed in this cursor's bound (`Take::limit` / slice length).
     fn remaining(&self) -> usize;
 
-    /// Read a varint.
+    /// Read a varint, writing its exact wire bytes into `buf`.
+    ///
+    /// Returns the decoded value and a subslice of `buf` with length in
+    /// `1..=MAX_VARINT_BYTES`. Empty input is [`ProtobufError::UnexpectedEof`]
+    /// (caller must check [`remaining`](Self::remaining) first for soft end).
+    fn read_varint_with_raw<'a>(
+        &mut self,
+        buf: &'a mut [u8; MAX_VARINT_BYTES],
+    ) -> Result<(Varint, &'a [u8])>;
+
+    /// Read a varint (discards the raw wire bytes).
+    ///
+    /// Inlined so that when only the [`Varint`] is used, the raw copy into the
+    /// stack buffer can be optimized away.
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`] (caller must check
     /// [`remaining`](Self::remaining) first for soft end).
-    fn read_varint(&mut self) -> Result<Varint>;
+    #[inline(always)]
+    fn read_varint(&mut self) -> Result<Varint> {
+        let mut raw = [0u8; MAX_VARINT_BYTES];
+        Ok(self.read_varint_with_raw(&mut raw)?.0)
+    }
 
     /// Read exactly `N` bytes (fixed-width wire types).
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]>;
@@ -146,6 +163,7 @@ pub(crate) trait WireCursor {
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`]. Invalid field numbers
     /// and wire types surface as [`ProtobufError`].
+    #[inline(always)]
     fn read_tag(&mut self) -> Result<Tag> {
         Tag::from_encoded(self.read_varint()?)
     }
@@ -157,6 +175,7 @@ pub(crate) trait WireCursor {
     /// the tag is consumed; the start-group body is left for the caller.
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`].
+    #[inline]
     fn skip_field(&mut self) -> Result<Tag> {
         let tag = self.read_tag()?;
         match tag.wire_type {
@@ -176,32 +195,30 @@ pub(crate) trait WireCursor {
 
     /// Copy one complete field's wire bytes to `out` and return its tag.
     ///
-    /// Dual of [`skip_field`](Self::skip_field). Tag and length-prefix varints
-    /// are re-encoded canonically after decode; fixed-width and Len payloads are
-    /// copied verbatim. For groups, only the tag is copied (same tag-only
-    /// contract as [`skip_field`](Self::skip_field)).
+    /// Dual of [`skip_field`](Self::skip_field). Tag, length-prefix, and value
+    /// varints are teed from the input (exact wire bytes, including
+    /// non-canonical encodings); fixed-width and Len payloads are copied
+    /// verbatim. For groups, only the tag is copied (same tag-only contract as
+    /// [`skip_field`](Self::skip_field)).
     ///
     /// On error after some bytes were written, `out` may hold a partial field.
     /// Empty input is [`ProtobufError::UnexpectedEof`].
+    #[inline]
     fn copy_field<W: Write>(&mut self, out: &mut W) -> Result<Tag> {
-        let tag = self.read_tag()?;
-        out.write_varint(&tag.to_encoded())?;
+        let mut raw = [0u8; MAX_VARINT_BYTES];
+        let (encoded, bytes) = self.read_varint_with_raw(&mut raw)?;
+        out.write_all(bytes)?;
+        let tag = Tag::from_encoded(encoded)?;
         match tag.wire_type {
             WireType::Varint => {
-                let value = self.read_varint()?;
-                out.write_varint(&value)?;
+                let (_, bytes) = self.read_varint_with_raw(&mut raw)?;
+                out.write_all(bytes)?;
             }
-            WireType::Int32 => {
-                let bytes = self.read_fixed::<4>()?;
-                out.write_all(&bytes)?;
-            }
-            WireType::Int64 => {
-                let bytes = self.read_fixed::<8>()?;
-                out.write_all(&bytes)?;
-            }
+            WireType::Int32 => self.copy_bytes(4, out)?,
+            WireType::Int64 => self.copy_bytes(8, out)?,
             WireType::Len => {
-                let length = self.read_varint()?;
-                out.write_varint(&length)?;
+                let (length, bytes) = self.read_varint_with_raw(&mut raw)?;
+                out.write_all(bytes)?;
                 self.copy_bytes(length.try_to_uint32()? as usize, out)?;
             }
             WireType::SGroup | WireType::EGroup => {}
@@ -350,21 +367,38 @@ impl<R> WireCursor for ReadCursor<'_, R>
 where
     R: Read,
 {
+    #[inline]
     fn remaining(&self) -> usize {
         usize::try_from(self.0.limit()).unwrap_or(usize::MAX)
     }
 
-    fn read_varint(&mut self) -> Result<Varint> {
-        use crate::varint::ReadExtVarint;
-        self.0.read_varint()?.ok_or(ProtobufError::UnexpectedEof)
+    #[inline]
+    fn read_varint_with_raw<'a>(
+        &mut self,
+        buf: &'a mut [u8; MAX_VARINT_BYTES],
+    ) -> Result<(Varint, &'a [u8])> {
+        use crate::varint::{DecodeOutcome, DecodeState};
+        let mut state = DecodeState::new();
+        let mut n = 0usize;
+        loop {
+            read_exact_eof(self.0, &mut buf[n..=n])?;
+            n += 1;
+            match state.feed(::std::iter::once(Ok::<u8, ProtobufError>(buf[n - 1])))? {
+                DecodeOutcome::Complete(v) => return Ok((v, &buf[..n])),
+                DecodeOutcome::Incomplete(s) => state = s,
+                DecodeOutcome::Empty => return Err(ProtobufError::UnexpectedEof),
+            }
+        }
     }
 
+    #[inline]
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         let mut bytes = [0u8; N];
         self.0.read_exact(&mut bytes)?;
         Ok(bytes)
     }
 
+    #[inline]
     fn skip_bytes(&mut self, mut length: usize) -> Result<()> {
         let mut buf = [0u8; 256];
         while length > 0 {
@@ -375,6 +409,7 @@ where
         Ok(())
     }
 
+    #[inline]
     fn copy_bytes<W: Write>(&mut self, mut length: usize, out: &mut W) -> Result<()> {
         let mut buf = [0u8; 256];
         while length > 0 {
@@ -384,6 +419,20 @@ where
             length -= n;
         }
         Ok(())
+    }
+}
+
+/// [`Read::read_exact`] for varint bytes: EOF → [`ProtobufError::UnexpectedEof`]
+/// (matches the former `read_varint` empty/`None` path). Fixed / Len truncation
+/// still uses plain `read_exact` → [`ProtobufError::IoError`].
+#[inline]
+fn read_exact_eof(reader: &mut impl Read, buf: &mut [u8]) -> Result<()> {
+    match reader.read_exact(buf) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == ::std::io::ErrorKind::UnexpectedEof => {
+            Err(ProtobufError::UnexpectedEof)
+        }
+        Err(e) => Err(ProtobufError::IoError(e)),
     }
 }
 
@@ -398,22 +447,30 @@ impl<R, F> WireCursor for ReadReader<'_, R, F>
 where
     R: Read,
 {
+    #[inline]
     fn remaining(&self) -> usize {
         usize::try_from(self.0.limit()).unwrap_or(usize::MAX)
     }
 
-    fn read_varint(&mut self) -> Result<Varint> {
-        ReadCursor(self.0).read_varint()
+    #[inline]
+    fn read_varint_with_raw<'a>(
+        &mut self,
+        buf: &'a mut [u8; MAX_VARINT_BYTES],
+    ) -> Result<(Varint, &'a [u8])> {
+        ReadCursor(self.0).read_varint_with_raw(buf)
     }
 
+    #[inline]
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         ReadCursor(self.0).read_fixed()
     }
 
+    #[inline]
     fn skip_bytes(&mut self, length: usize) -> Result<()> {
         ReadCursor(self.0).skip_bytes(length)
     }
 
+    #[inline]
     fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<()> {
         ReadCursor(self.0).copy_bytes(length, out)
     }
@@ -460,9 +517,9 @@ impl<R, F> FieldIterFromRead<R, F> {
 
     /// Copy fields to `out` until `pred` returns `Ok(true)`.
     ///
-    /// Same stop semantics as [`skip_until`](Self::skip_until). Tag and
-    /// length-prefix varints are re-encoded canonically; fixed-width and Len
-    /// payloads are copied verbatim. Returns the number of bytes written.
+    /// Same stop semantics as [`skip_until`](Self::skip_until). Writes exact
+    /// wire bytes (including non-canonical varints). Returns the number of
+    /// bytes written.
     ///
     /// After [`FieldValue::SGroup`], pair with [`until_group_ends`] to preserve
     /// the group body and matching end tag (start tag already consumed — write
@@ -609,17 +666,32 @@ pub(crate) struct SliceReader<'a, 'b> {
 }
 
 impl WireCursor for SliceReader<'_, '_> {
+    #[inline]
     fn remaining(&self) -> usize {
         self.slice.len()
     }
 
-    fn read_varint(&mut self) -> Result<Varint> {
+    /// Copies the consumed wire bytes into `buf` so the returned slice is
+    /// independent of advancing `self.slice`. Inlined together with
+    /// [`WireCursor::read_varint`] so a decode-only call can drop that copy.
+    #[inline]
+    fn read_varint_with_raw<'a>(
+        &mut self,
+        buf: &'a mut [u8; MAX_VARINT_BYTES],
+    ) -> Result<(Varint, &'a [u8])> {
         use crate::varint::ReadExtVarint;
-        self.slice
+        let before = *self.slice;
+        let value = self
+            .slice
             .read_varint()?
-            .ok_or(ProtobufError::UnexpectedEof)
+            .ok_or(ProtobufError::UnexpectedEof)?;
+        let n = before.len() - self.slice.len();
+        debug_assert!(n <= MAX_VARINT_BYTES);
+        buf[..n].copy_from_slice(&before[..n]);
+        Ok((value, &buf[..n]))
     }
 
+    #[inline]
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         let (bytes, remaining) = self
             .slice
@@ -629,6 +701,7 @@ impl WireCursor for SliceReader<'_, '_> {
         Ok(*bytes)
     }
 
+    #[inline]
     fn skip_bytes(&mut self, length: usize) -> Result<()> {
         let (_, remaining) = self
             .slice
@@ -638,6 +711,7 @@ impl WireCursor for SliceReader<'_, '_> {
         Ok(())
     }
 
+    #[inline]
     fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<()> {
         let (payload, remaining) = self
             .slice
@@ -1505,6 +1579,26 @@ mod group_preserve {
 
         assert_eq!(from_slice, group_only);
         assert_eq!(from_read, from_slice);
+    }
+
+    #[test]
+    fn read_copy_until_preserves_noncanonical_varints() {
+        // Overlong length prefix (1 encoded as 0x81 0x00) must not be
+        // re-canonicalized to 0x01 when copying through Read.
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x12, 0x81, 0x00, b'x', // 2 Len, non-canonical length=1, payload 'x'
+            0x0C, // 1 EGroup
+        ];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+        let mut out = Vec::new();
+        fields
+            .copy_until(until_group_ends(start.field_number), &mut out)
+            .unwrap();
+        assert_eq!(out, vec![0x12, 0x81, 0x00, b'x', 0x0C]);
     }
 }
 
