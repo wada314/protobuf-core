@@ -49,13 +49,13 @@ where
 // ============================================================================
 
 /// Predicate for protobuf **group** skip / preserve: returns `Ok(true)` when
-/// the matching end-group tag is reached (including nested groups).
+/// the matching end-group tag is reached.
 ///
 /// Pass this to [`FieldIterFromSlice::skip_until`] /
 /// [`FieldIterFromRead::skip_until`] / [`FieldIterFromSlice::take_until`] /
 /// [`FieldIterFromRead::copy_until`] after the start-group tag for
 /// `field_number` has already been consumed. Open groups are tracked with an
-/// explicit stack (LIFO field numbers) inside the returned closure.
+/// explicit stack with field numbers inside the returned closure.
 ///
 /// This is only the stop condition — see those methods for discard / preserve
 /// examples.
@@ -97,9 +97,7 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 /// [`Iterator::next`] returns `None` only after the matching outermost
 /// [`FieldValue::EGroup`] is seen (that tag is **consumed and not yielded**).
 /// If the underlying field iterator returns `None` before that end tag, this
-/// adapter yields [`ProtobufError::UnexpectedEof`] (same truncated-group
-/// contract as [`until_group_ends`] / `skip_until` / `take_until` /
-/// `copy_until`).
+/// adapter yields [`ProtobufError::UnexpectedEof`].
 ///
 /// Like a normal [`Iterator`], **nothing is guaranteed after the first
 /// `None`**. A later `next` may pull again from the underlying iterator and
@@ -115,12 +113,12 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 ///
 /// # Nesting model (depth only)
 ///
-/// This adapter remembers **only the outermost** group's field number. Nested
+/// In contrast to [until_group_ends()], this adapter remembers only the outermost group's field number. Nested
 /// [`FieldValue::SGroup`] / [`FieldValue::EGroup`] only adjust an integer
-/// **depth**; inner end-group field numbers are **not** checked against their
+/// **depth**; inner end-group field numbers are not checked against their
 /// start tags.
 ///
-/// That means **the caller is responsible** for validating nested group field
+/// That means the caller is responsible for validating nested group field
 /// numbers if that matters. Apply the same adapter again when an inner
 /// [`FieldValue::SGroup`] is seen (nested borrows via
 /// [`GroupBody::group_body`]):
@@ -156,12 +154,8 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 ///
 /// If you ignore inner `SGroup` values and keep polling the outer adapter, an
 /// inner `EGroup` only decreases depth — its field number is not verified. A
-/// mismatched end tag is reported only for the **tracked** (outermost) group
+/// mismatched end tag is reported only for the tracked (outermost) group
 /// when `depth == 0`.
-///
-/// Contrast with [`until_group_ends`] (skip / preserve **predicate**, full
-/// field-number stack). Names differ on purpose: [`GroupBody`] / `group_body`
-/// parse fields; `until_group_ends` does not.
 #[derive(Debug)]
 pub struct GroupBody<I> {
     inner: I,
@@ -276,10 +270,7 @@ pub(crate) trait WireCursor {
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])>;
 
-    /// Read a varint (discards the raw wire bytes).
-    ///
-    /// Inlined so decode-only call sites do not keep the raw borrow / buffer
-    /// work alive longer than needed.
+    /// Read a varint.
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`] (caller must check
     /// [`remaining`](Self::remaining) first for soft end).
@@ -312,7 +303,7 @@ pub(crate) trait WireCursor {
     ///
     /// Dual of [`BufWireCursor::parse_field`]: the payload is discarded instead
     /// of materialized. For [`WireType::SGroup`] / [`WireType::EGroup`], only
-    /// the tag is consumed; the start-group body is left for the caller.
+    /// that field is consumed; the group body fields are left for the caller.
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`].
     #[inline]
