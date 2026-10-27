@@ -121,6 +121,25 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 /// [`FieldIterFromRead::group_body`]. Call after the start-group tag for
 /// `field_number` has already been consumed.
 ///
+/// # Termination
+///
+/// [`Iterator::next`] returns `None` when:
+///
+/// - the matching outermost [`FieldValue::EGroup`] is seen (that tag is
+///   **consumed and not yielded**), or
+/// - the underlying field iterator returns `None` first (no end-group yet —
+///   callers that require a well-formed group should treat that as an error).
+///
+/// Like a normal [`Iterator`], **nothing is guaranteed after the first
+/// `None`**. A later `next` may pull again from the underlying iterator and
+/// yield fields **past** the group. If you need sticky `None`, wrap with
+/// [`Iterator::fuse`] (for example `fields.group_body(n).fuse()`).
+///
+/// After a yielded [`Err`], further `next` calls are likewise unspecified
+/// (the cursor may already have advanced). Typical `Result`-item consumers
+/// stop at the first error (`?`, `collect::<Result<_, _>>()`,
+/// `try_for_each`, …); this adapter does not fuse on `Err`.
+///
 /// # Nesting model (depth only)
 ///
 /// This adapter remembers **only the outermost** group's field number. Nested
@@ -170,18 +189,12 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 /// Contrast with [`until_group_ends`] (skip / preserve **predicate**, full
 /// field-number stack). Names differ on purpose: [`GroupBody`] / `group_body`
 /// parse fields; `until_group_ends` does not.
-///
-/// The matching outermost [`FieldValue::EGroup`] is **consumed and not yielded**.
-/// If the underlying iterator ends before that tag, this adapter ends with
-/// `None` as well; callers that require a well-formed group should treat a
-/// finished adapter that never saw the end tag as an error when appropriate.
 #[derive(Debug)]
 pub struct GroupBody<I> {
     inner: I,
     field_number: FieldNumber,
     /// How many nested groups are open *inside* the tracked group.
     depth: usize,
-    done: bool,
 }
 
 impl<I> GroupBody<I> {
@@ -189,13 +202,6 @@ impl<I> GroupBody<I> {
     #[inline]
     pub fn field_number(&self) -> FieldNumber {
         self.field_number
-    }
-
-    /// Returns `true` after the matching end-group was consumed (or a mismatch
-    /// stopped the adapter).
-    #[inline]
-    pub fn is_done(&self) -> bool {
-        self.done
     }
 
     /// Unwrap the underlying field iterator. After a successful full parse the
@@ -232,7 +238,6 @@ where
             inner: self,
             field_number,
             depth: 0,
-            done: false,
         }
     }
 }
@@ -244,9 +249,6 @@ where
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
         match self.inner.next()? {
             Err(e) => Some(Err(e)),
             Ok(field) => match field.value {
@@ -260,10 +262,8 @@ where
                         Some(Ok(field))
                     } else if field.field_number == self.field_number {
                         // Matching end of the tracked group: consume, do not yield.
-                        self.done = true;
                         None
                     } else {
-                        self.done = true;
                         Some(Err(ProtobufError::MismatchedEndGroup {
                             expected: self.field_number,
                             got: field.field_number,
@@ -665,7 +665,6 @@ impl<R, F> FieldIterFromRead<R, F> {
             inner: self,
             field_number,
             depth: 0,
-            done: false,
         }
     }
 
@@ -965,7 +964,6 @@ impl<'a> FieldIterFromSlice<'a> {
             inner: self,
             field_number,
             depth: 0,
-            done: false,
         }
     }
 }
@@ -1501,6 +1499,30 @@ mod group_body_adapter {
     }
 
     #[test]
+    fn after_none_further_next_may_read_past_group() {
+        let bytes = [0x0B, 0x0C, 0x08, 0x01];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let mut body = fields.group_body(n);
+        assert!(body.next().is_none());
+        // Not fused: another next pulls the field after the group.
+        let after = body.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 1);
+    }
+
+    #[test]
+    fn fuse_keeps_none_after_group_ends() {
+        let bytes = [0x0B, 0x0C, 0x08, 0x01];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let mut body = fields.group_body(n).fuse();
+        assert!(body.next().is_none());
+        assert!(body.next().is_none());
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 1);
+    }
+
+    #[test]
     fn yields_body_fields_and_consumes_end() {
         let bytes = [0x0B, 0x10, 0x96, 0x01, 0x0C, 0x18, 0x07];
         let mut fields = slice_fields(&bytes);
@@ -1532,10 +1554,8 @@ mod group_body_adapter {
             let v = inner.next().unwrap().unwrap();
             assert_eq!(v.field_number.as_u32(), 3);
             assert!(inner.next().is_none());
-            assert!(inner.is_done());
         }
         assert!(outer.next().is_none());
-        assert!(outer.is_done());
         let after = fields.next().unwrap().unwrap();
         assert_eq!(after.field_number.as_u32(), 4);
     }
