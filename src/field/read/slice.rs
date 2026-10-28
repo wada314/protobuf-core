@@ -218,3 +218,235 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
 }
 
 impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> + ?Sized {}
+
+#[cfg(test)]
+mod tests {
+    use crate::field::FieldValue;
+
+    #[test]
+    fn test_as_ref_ext_read_varint_field() {
+        use super::AsRefExtProtobuf;
+
+        let reader = &[0x08, 0x96, 0x01][..]; // field 1: 150
+
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        match &fields[0].value {
+            FieldValue::Varint(varint) => {
+                assert_eq!(varint.to_uint64(), 150);
+            }
+            _ => panic!("Expected Varint field"),
+        }
+    }
+
+    #[test]
+    fn test_as_ref_ext_read_len_field() {
+        use super::AsRefExtProtobuf;
+
+        let reader = &[0x12, 0x03, 0x48, 0x65, 0x6c][..]; // field 2: "Hel"
+
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+
+        let field = &fields[0];
+        assert_eq!(field.field_number.as_u32(), 2);
+        match &field.value {
+            FieldValue::Len(data) => {
+                assert_eq!(&data[..], b"Hel");
+            }
+            _ => panic!("Expected Len field"),
+        }
+    }
+
+    #[test]
+    fn test_as_ref_ext_read_i32_field() {
+        use super::AsRefExtProtobuf;
+
+        let reader = &[0x15, 0x78, 0x56, 0x34, 0x12][..]; // field 2: 0x12345678 (Fixed32)
+
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+
+        let field = &fields[0];
+        assert_eq!(field.field_number.as_u32(), 2);
+        match &field.value {
+            FieldValue::I32(bytes) => {
+                assert_eq!(*bytes, [0x78, 0x56, 0x34, 0x12]);
+            }
+            _ => panic!("Expected I32 field"),
+        }
+    }
+
+    #[test]
+    fn test_as_ref_ext_read_i64_field() {
+        use super::AsRefExtProtobuf;
+
+        let reader = &[0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12][..]; // field 3: 0x1234567890ABCDEF (Fixed64)
+
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+
+        let field = &fields[0];
+        assert_eq!(field.field_number.as_u32(), 3);
+        match &field.value {
+            FieldValue::I64(bytes) => {
+                assert_eq!(*bytes, [0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]);
+            }
+            _ => panic!("Expected I64 field"),
+        }
+    }
+
+    #[test]
+    fn test_as_ref_ext_read_multiple_fields() {
+        use super::AsRefExtProtobuf;
+
+        let reader = &[
+            0x08, 0x96, 0x01, // field 1: 150
+            0x12, 0x03, 0x48, 0x65, 0x6c, // field 2: "Hel"
+        ][..];
+
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 2);
+
+        // Check first field
+        let field = &fields[0];
+        assert_eq!(field.field_number.as_u32(), 1);
+        match &field.value {
+            FieldValue::Varint(varint) => {
+                assert_eq!(varint.to_uint64(), 150);
+            }
+            _ => panic!("Expected Varint field"),
+        }
+
+        // Check second field
+        let field = &fields[1];
+        assert_eq!(field.field_number.as_u32(), 2);
+        match &field.value {
+            FieldValue::Len(data) => {
+                assert_eq!(&data[..], b"Hel");
+            }
+            _ => panic!("Expected Len field"),
+        }
+    }
+
+    #[test]
+    fn test_as_ref_ext_read_empty_stream() {
+        use super::AsRefExtProtobuf;
+
+        let reader = &[][..];
+
+        let fields: Vec<_> = reader
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 0);
+    }
+
+    #[test]
+    fn test_as_ref_ext_works_with_unsized_type() {
+        use super::AsRefExtProtobuf;
+
+        // This test verifies that ?Sized bound allows the trait to work with unsized types
+        // Without ?Sized, this would fail to compile because [u8] is unsized
+        fn accepts_unsized<T: AsRefExtProtobuf + ?Sized>(x: &T) {
+            let _ = x.read_protobuf_fields();
+        }
+
+        let data = [0x08, 0x96, 0x01]; // field 1: 150
+        accepts_unsized(&data[..]); // &[u8] - unsized type slice
+
+        // Also test with direct unsized slice
+        let slice: &[u8] = &[0x08, 0x96, 0x01];
+        let fields: Vec<_> = slice
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+    }
+
+    // ============================================================================
+    // ReadExtProtobuf tests (owned data from Read)
+    // ============================================================================
+
+    #[test]
+    fn test_as_ref_ext_algorithm_edges() {
+        use super::AsRefExtProtobuf;
+        use crate::ProtobufError;
+
+        let multi_byte_tag = &[0x80, 0x01, 0x01][..];
+        let fields: Vec<_> = multi_byte_tag
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields[0].field_number.as_u32(), 16);
+        match &fields[0].value {
+            FieldValue::Varint(varint) => assert_eq!(varint.to_uint64(), 1),
+            other => panic!("expected varint, got {other:?}"),
+        }
+
+        let empty_len = &[0x0A, 0x00][..];
+        let fields: Vec<_> = empty_len
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        match &fields[0].value {
+            FieldValue::Len(data) => assert!(data.is_empty()),
+            other => panic!("expected empty len, got {other:?}"),
+        }
+
+        let truncated_i32 = [0x0D, 0x01, 0x02, 0x03][..]
+            .read_protobuf_fields()
+            .next()
+            .unwrap();
+        assert!(matches!(truncated_i32, Err(ProtobufError::UnexpectedEof)));
+
+        let truncated_i64 = [0x09, 0, 0, 0, 0, 0, 0, 0][..]
+            .read_protobuf_fields()
+            .next()
+            .unwrap();
+        assert!(matches!(truncated_i64, Err(ProtobufError::UnexpectedEof)));
+
+        let truncated_len = [0x0A, 0x05, b'a', b'b'][..]
+            .read_protobuf_fields()
+            .next()
+            .unwrap();
+        assert!(matches!(truncated_len, Err(ProtobufError::UnexpectedEof)));
+
+        let length_past_u32 = [0x0A, 0x80, 0x80, 0x80, 0x80, 0x10][..]
+            .read_protobuf_fields()
+            .next()
+            .unwrap();
+        assert!(matches!(
+            length_past_u32,
+            Err(ProtobufError::VarintDowncastOutOfRange {
+                value: 0x1_0000_0000,
+                target_type: "u32",
+            })
+        ));
+
+        // Wire types 3 and 4 are group tags; field readers return them as values.
+        for (byte, expected) in [(0x0Bu8, FieldValue::SGroup), (0x0C, FieldValue::EGroup)] {
+            let bytes = [byte];
+            let field = bytes[..].read_protobuf_fields().next().unwrap().unwrap();
+            assert_eq!(field.field_number.as_u32(), 1);
+            assert_eq!(field.value, expected);
+        }
+    }
+}

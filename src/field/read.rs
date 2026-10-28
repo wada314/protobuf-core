@@ -14,9 +14,6 @@ mod limited;
 mod slice;
 pub(crate) mod wire;
 
-#[cfg(test)]
-mod tests;
-
 pub use self::group::{GroupBody, until_group_ends};
 pub use self::limited::{FieldIterFromRead, Limited, OnLen, ReadExtProtobuf, VecLenPayload};
 pub use self::slice::{AsRefExtProtobuf, FieldIterFromSlice};

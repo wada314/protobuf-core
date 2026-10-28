@@ -420,3 +420,509 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::field::FieldValue;
+
+    #[test]
+    fn test_read_ext_read_varint_field() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        let data = vec![0x08, 0x96, 0x01]; // field 1: 150
+        let len = data.len();
+        let reader = Cursor::new(data);
+        let fields: Vec<_> = reader
+            .read_protobuf_fields(len)
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        match &fields[0].value {
+            FieldValue::Varint(varint) => {
+                assert_eq!(varint.to_uint64(), 150);
+            }
+            _ => panic!("Expected Varint field"),
+        }
+    }
+
+    #[test]
+    fn test_read_ext_read_multiple_fields() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        let data = vec![
+            0x08, 0x96, 0x01, // field 1: 150
+            0x12, 0x03, 0x48, 0x65, 0x6c, // field 2: "Hel"
+        ];
+        let len = data.len();
+        let reader = Cursor::new(data);
+        let fields: Vec<_> = reader
+            .read_protobuf_fields(len)
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 2);
+
+        // Check first field
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        match &fields[0].value {
+            FieldValue::Varint(varint) => {
+                assert_eq!(varint.to_uint64(), 150);
+            }
+            _ => panic!("Expected Varint field"),
+        }
+
+        // Check second field
+        assert_eq!(fields[1].field_number.as_u32(), 2);
+        match &fields[1].value {
+            FieldValue::Len(data) => {
+                assert_eq!(&data[..], b"Hel");
+            }
+            _ => panic!("Expected Len field"),
+        }
+    }
+
+    #[test]
+    fn test_read_ext_read_i32_field() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        let data = vec![0x15, 0x78, 0x56, 0x34, 0x12]; // field 2: 0x12345678 (Fixed32)
+        let len = data.len();
+        let reader = Cursor::new(data);
+        let fields: Vec<_> = reader
+            .read_protobuf_fields(len)
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 2);
+        match &fields[0].value {
+            FieldValue::I32(bytes) => {
+                assert_eq!(*bytes, [0x78, 0x56, 0x34, 0x12]);
+            }
+            _ => panic!("Expected I32 field"),
+        }
+    }
+
+    #[test]
+    fn test_read_ext_read_len_field() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        let data = vec![0x12, 0x03, 0x48, 0x65, 0x6c]; // field 2: "Hel"
+        let len = data.len();
+        let reader = Cursor::new(data);
+        let fields: Vec<_> = reader
+            .read_protobuf_fields(len)
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 2);
+        match &fields[0].value {
+            FieldValue::Len(data) => {
+                assert_eq!(&data[..], b"Hel");
+            }
+            _ => panic!("Expected Len field"),
+        }
+    }
+
+    #[test]
+    fn test_read_ext_read_i64_field() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        let data = vec![0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]; // field 3: 0x1234567890ABCDEF (Fixed64)
+        let len = data.len();
+        let reader = Cursor::new(data);
+        let fields: Vec<_> = reader
+            .read_protobuf_fields(len)
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 3);
+        match &fields[0].value {
+            FieldValue::I64(bytes) => {
+                assert_eq!(*bytes, [0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]);
+            }
+            _ => panic!("Expected I64 field"),
+        }
+    }
+
+    #[test]
+    fn test_read_ext_read_empty_stream() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        let data = vec![];
+        let reader = Cursor::new(data);
+        let fields: Vec<_> = reader
+            .read_protobuf_fields(0)
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 0);
+    }
+
+    #[test]
+    fn test_read_ext_respects_len_budget() {
+        use super::ReadExtProtobuf;
+        use ::std::io::{Cursor, Read};
+
+        // Two fields; budget covers only the first.
+        let data = vec![
+            0x08, 0x96, 0x01, // field 1: 150
+            0x12, 0x03, 0x48, 0x65, 0x6c, // field 2: "Hel"
+        ];
+        let mut reader = Cursor::new(data);
+        let fields: Vec<_> = reader
+            .by_ref()
+            .read_protobuf_fields(3)
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        // Remaining bytes after the budget are still on the cursor.
+        assert_eq!(reader.position(), 3);
+        let rest = reader.into_inner();
+        assert_eq!(&rest[3..], &[0x12, 0x03, 0x48, 0x65, 0x6c]);
+    }
+
+    #[test]
+    fn test_read_ext_oversized_budget_is_unexpected_eof() {
+        use super::ReadExtProtobuf;
+        use crate::ProtobufError;
+        use ::std::io::Cursor;
+
+        // One complete field (3 bytes), but the budget claims more than the
+        // underlying reader can supply. After the field is consumed, the local
+        // budget still has remaining capacity while the cursor is at EOF, so
+        // the next poll is UnexpectedEof (not a soft end).
+        let data = vec![0x08, 0x96, 0x01]; // field 1: 150
+        let result: ::std::result::Result<Vec<_>, _> =
+            Cursor::new(data).read_protobuf_fields(100).collect();
+        assert!(
+            matches!(result, Err(ProtobufError::UnexpectedEof)),
+            "got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_read_ext_truncated_fixed_and_len() {
+        use super::ReadExtProtobuf;
+        use crate::ProtobufError;
+        use ::std::io::Cursor;
+
+        // Mid-field truncation with budget == input.len(): the local remaining
+        // count catches the shortfall before the underlying Read EOFs.
+        for input in [
+            &[0x0D, 0x01, 0x02, 0x03][..],    // truncated i32
+            &[0x09, 0, 0, 0, 0, 0, 0, 0][..], // truncated i64
+            &[0x0A, 0x05, b'a', b'b'][..],    // truncated len
+        ] {
+            let error = Cursor::new(input)
+                .read_protobuf_fields(input.len())
+                .next()
+                .unwrap()
+                .unwrap_err();
+            assert!(
+                matches!(error, ProtobufError::UnexpectedEof),
+                "input={input:?} got {error:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod len_payload {
+    use super::{Limited, ReadExtProtobuf};
+    use crate::varint::Varint;
+    use crate::{Field, FieldNumber, FieldValue, ProtobufError};
+    use ::std::io::{Cursor, Read};
+
+    const LARGE_LEN: usize = 8200;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Bytes(Vec<u8>);
+
+    fn read_bytes_payload<R: Read>(
+        _n: FieldNumber,
+        body: &mut Limited<'_, R>,
+    ) -> crate::Result<Bytes> {
+        let mut data = vec![0; body.remaining()];
+        body.read_exact(&mut data)?;
+        Ok(Bytes(data))
+    }
+
+    fn len_message(payload: &[u8]) -> Vec<u8> {
+        let mut out = vec![0x0A];
+        let (encoded, count) = Varint::from_uint64(payload.len() as u64).encode();
+        out.extend_from_slice(&encoded[..count]);
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn payload(len: usize) -> Vec<u8> {
+        (0..len).map(|index| index as u8).collect()
+    }
+
+    fn assert_bytes(field_bytes: &[u8], expected: &[u8]) {
+        let owned = field_bytes.to_vec();
+        let len = owned.len();
+        let from_read = Cursor::new(owned)
+            .read_protobuf_fields_with(len, read_bytes_payload)
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(Bytes(data)) = from_read.value else {
+            panic!("expected len");
+        };
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn closure_fills_empty_small_and_large_payloads() {
+        assert_bytes(&len_message(b""), b"");
+        assert_bytes(&len_message(b"Hel"), b"Hel");
+        let big = payload(LARGE_LEN);
+        assert_bytes(&len_message(&big), &big);
+    }
+
+    #[test]
+    fn short_payload_is_an_error_on_read() {
+        let input = [0x0A, 0x05, b'a', b'b'];
+        // Length prefix claims 5 bytes but the message budget only has 2 left.
+        let error = Cursor::new(input)
+            .read_protobuf_fields_with(input.len(), read_bytes_payload)
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(error, ProtobufError::UnexpectedEof));
+    }
+
+    fn assert_box(message: &[u8], expected: &[u8]) {
+        let from_read = Cursor::new(message.to_vec())
+            .read_protobuf_fields_with(message.len(), |_n, body: &mut Limited<'_, _>| {
+                let mut buf = vec![0u8; body.remaining()];
+                body.read_exact(&mut buf)?;
+                Ok(buf.into_boxed_slice())
+            })
+            .next()
+            .unwrap()
+            .unwrap();
+        let FieldValue::Len(data) = from_read.value else {
+            panic!("expected len");
+        };
+        assert_eq!(&data[..], expected);
+    }
+
+    #[test]
+    fn box_closure_reads_payload_on_read() {
+        assert_box(&len_message(b""), b"");
+        assert_box(&len_message(b"Hel"), b"Hel");
+        let big = payload(LARGE_LEN);
+        assert_box(&len_message(&big), &big);
+    }
+
+    #[derive(Debug)]
+    struct Tagged {
+        id: u64,
+        data: Vec<u8>,
+    }
+
+    fn two_len_fields() -> Vec<u8> {
+        let mut message = len_message(b"Hel");
+        message.extend_from_slice(&len_message(b"lo!"));
+        message
+    }
+
+    fn assert_tagged(fields: &[Field<Tagged>], id: u64) {
+        assert_eq!(fields.len(), 2);
+        let FieldValue::Len(first) = &fields[0].value else {
+            panic!("expected len");
+        };
+        let FieldValue::Len(second) = &fields[1].value else {
+            panic!("expected len");
+        };
+        assert_eq!(first.data, b"Hel");
+        assert_eq!(second.data, b"lo!");
+        assert_eq!(first.id, id);
+        assert_eq!(second.id, id);
+    }
+
+    #[test]
+    fn closure_captures_state_for_each_length_field() {
+        let message = two_len_fields();
+        let id = 7u64;
+        let len = message.len();
+
+        let from_read = Cursor::new(message)
+            .read_protobuf_fields_with(len, |_n, body: &mut Limited<'_, _>| {
+                let mut data = vec![0; body.remaining()];
+                body.read_exact(&mut data)?;
+                Ok(Tagged { id, data })
+            })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_tagged(&from_read, id);
+    }
+
+    #[test]
+    fn closure_runs_only_for_length_fields() {
+        let mixed = [0x08, 0x96, 0x01, 0x12, 0x03, b'H', b'e', b'l'];
+        let mut calls = 0usize;
+        let fields = Cursor::new(mixed)
+            .read_protobuf_fields_with(mixed.len(), |_n, body: &mut Limited<'_, _>| {
+                calls += 1;
+                read_bytes_payload(_n, body)
+            })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(calls, 1);
+        assert!(matches!(fields[0].value, FieldValue::Varint(_)));
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        let FieldValue::Len(Bytes(data)) = &fields[1].value else {
+            panic!("expected len");
+        };
+        assert_eq!(data, b"Hel");
+        assert_eq!(fields[1].field_number.as_u32(), 2);
+    }
+
+    #[test]
+    fn closure_error_fails_the_field() {
+        let input = [0x0A, 0x03, b'H', b'e', b'l'];
+        let error = Cursor::new(input)
+            .read_protobuf_fields_with(
+                input.len(),
+                |_n, _body: &mut Limited<'_, _>| -> crate::Result<Vec<u8>> {
+                    Err(ProtobufError::UnexpectedEof)
+                },
+            )
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(error, ProtobufError::UnexpectedEof));
+    }
+
+    #[derive(Debug)]
+    struct Spare {
+        data: Vec<u8>,
+    }
+
+    fn assert_spare(fields: &[Field<Spare>]) {
+        assert_eq!(fields.len(), 2);
+        let FieldValue::Len(buf) = &fields[0].value else {
+            panic!("expected len");
+        };
+        assert_eq!(&buf.data[..3], b"Hel");
+        assert_eq!(&buf.data[3..], &[0xAB; 4]);
+        let FieldValue::Varint(varint) = &fields[1].value else {
+            panic!("expected varint");
+        };
+        assert_eq!(varint.to_uint64(), 1);
+        assert_eq!(fields[1].field_number.as_u32(), 2);
+    }
+
+    #[test]
+    fn longer_buffer_keeps_the_next_field_and_the_suffix() {
+        let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
+
+        let from_read = Cursor::new(message)
+            .read_protobuf_fields_with(message.len(), |_n, body: &mut Limited<'_, _>| {
+                let len = body.remaining();
+                let mut data = vec![0xAB; len + 4];
+                body.read_exact(&mut data[..len])?;
+                Ok(Spare { data })
+            })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_spare(&from_read);
+    }
+
+    #[test]
+    fn unread_body_bytes_are_skipped() {
+        // Handler reads only the first byte; the rest of the Len body must be
+        // drained so the following varint field is still visible.
+        let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
+        let fields = Cursor::new(message)
+            .read_protobuf_fields_with(message.len(), |_n, body: &mut Limited<'_, _>| {
+                let mut one = [0u8; 1];
+                body.read_exact(&mut one)?;
+                Ok(one[0])
+            })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(fields.len(), 2);
+        assert!(matches!(fields[0].value, FieldValue::Len(b'H')));
+        let FieldValue::Varint(v) = &fields[1].value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 1);
+    }
+
+    #[derive(Debug, Default, PartialEq)]
+    struct Child {
+        id: u64,
+        name: Vec<u8>,
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum LenValue {
+        Bytes(Vec<u8>),
+        Child(Child),
+    }
+
+    #[test]
+    fn nested_message_via_on_len() {
+        // field 1 string "Hi"; field 2 message { id=7, name="ok" }
+        let wire: &[u8] = &[
+            0x0A, 0x02, b'H', b'i', //
+            0x12, 0x06, //
+            0x08, 0x07, //
+            0x1A, 0x02, b'o', b'k',
+        ];
+
+        fn decode_len<R: Read>(
+            field_number: FieldNumber,
+            body: &mut Limited<'_, R>,
+        ) -> crate::Result<LenValue> {
+            match field_number.as_u32() {
+                2 => {
+                    let mut child = Child::default();
+                    let mut raw = |inner_n: FieldNumber, inner: &mut Limited<'_, R>| {
+                        let mut bytes = vec![0u8; inner.remaining()];
+                        inner.read_exact(&mut bytes)?;
+                        let _ = inner_n;
+                        Ok(LenValue::Bytes(bytes))
+                    };
+                    for field in body.read_protobuf_fields(&mut raw)? {
+                        match (field.field_number.as_u32(), field.value) {
+                            (1, FieldValue::Varint(v)) => child.id = v.to_uint64(),
+                            (3, FieldValue::Len(LenValue::Bytes(name))) => child.name = name,
+                            _ => {}
+                        }
+                    }
+                    Ok(LenValue::Child(child))
+                }
+                _ => {
+                    let mut bytes = vec![0u8; body.remaining()];
+                    body.read_exact(&mut bytes)?;
+                    Ok(LenValue::Bytes(bytes))
+                }
+            }
+        }
+
+        let fields = Cursor::new(wire)
+            .read_protobuf_fields_with(wire.len(), decode_len)
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(fields.len(), 2);
+        assert!(matches!(
+            &fields[0].value,
+            FieldValue::Len(LenValue::Bytes(b)) if b == b"Hi"
+        ));
+        assert!(matches!(
+            &fields[1].value,
+            FieldValue::Len(LenValue::Child(Child { id: 7, name })) if name == b"ok"
+        ));
+    }
+}
