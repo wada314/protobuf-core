@@ -262,36 +262,6 @@ where
     }
 }
 
-/// Decode a varint from a byte slice and borrow its exact wire bytes (no copy).
-///
-/// Zero-copy counterpart of [`ReadExtVarint::read_varint_with_raw`]: `raw` points
-/// into the original input rather than a caller buffer. Advances `slice` past
-/// the consumed bytes. Returns `Ok(None)` when `slice` is empty.
-///
-/// # Example
-/// ```
-/// use ::protobuf_core::read_varint_with_raw_from_slice;
-///
-/// let mut slice: &[u8] = &[0x96, 0x01, 0x08];
-/// let (varint, raw) = read_varint_with_raw_from_slice(&mut slice).unwrap().unwrap();
-/// assert_eq!(varint.to_uint64(), 150);
-/// assert_eq!(raw, &[0x96, 0x01]);
-/// assert_eq!(slice, &[0x08]);
-/// ```
-pub fn read_varint_with_raw_from_slice<'a>(
-    slice: &mut &'a [u8],
-) -> Result<Option<(Varint, &'a [u8])>> {
-    let before = *slice;
-    match slice.read_varint()? {
-        Some(v) => {
-            let n = before.len() - slice.len();
-            debug_assert!(n <= MAX_VARINT_BYTES);
-            Ok(Some((v, &before[..n])))
-        }
-        None => Ok(None),
-    }
-}
-
 // ============================================================================
 // Tests
 // ============================================================================
@@ -328,15 +298,14 @@ mod tests {
     }
 
     #[test]
-    fn test_read_varint_with_raw_from_slice_borrows_input() {
+    fn test_read_varint_with_raw_on_slice_via_read_ext() {
+        use crate::wire_format::MAX_VARINT_BYTES;
+
         let mut slice: &[u8] = &[0x81, 0x00, 0x08];
-        let input = slice;
-        let (varint, raw) = super::read_varint_with_raw_from_slice(&mut slice)
-            .unwrap()
-            .unwrap();
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        let (varint, raw) = slice.read_varint_with_raw(&mut buf).unwrap().unwrap();
         assert_eq!(varint.to_uint64(), 1);
-        assert_eq!(raw, &input[..2]);
-        assert!(::std::ptr::eq(raw.as_ptr(), input.as_ptr()));
+        assert_eq!(raw, &[0x81, 0x00]);
         assert_eq!(slice, &[0x08]);
     }
 

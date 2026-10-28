@@ -765,14 +765,14 @@ impl WireCursor for SliceReader<'_, '_> {
         self.slice.len()
     }
 
-    /// Returns a borrow into the input buffer (ignores `buf`; no copy).
-    /// The joint lifetime with `buf` still applies so this matches the trait.
     #[inline]
     fn read_varint_with_raw<'a>(
         &'a mut self,
-        _buf: &'a mut [u8; MAX_VARINT_BYTES],
+        buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
-        crate::varint::read_varint_with_raw_from_slice(self.slice)?
+        use crate::varint::ReadExtVarint;
+        self.slice
+            .read_varint_with_raw(buf)?
             .ok_or(ProtobufError::UnexpectedEof)
     }
 
