@@ -57,6 +57,55 @@ impl<R: Read> Take32<R> {
     fn get_mut(&mut self) -> &mut R {
         self.inner.get_mut()
     }
+
+    /// `Ok(())` if `n <= limit()`, else [`ProtobufError::UnexpectedEof`].
+    #[inline]
+    fn ensure_within_limit(&self, n: u32) -> Result<()> {
+        if n > self.limit() {
+            Err(ProtobufError::UnexpectedEof)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Read `n` bytes from the underlying reader without changing [`limit`](Self::limit).
+    ///
+    /// Used for Len-body I/O that bypasses this `Take32` (handler / unread
+    /// drain). Pair with [`finish_len_body`](Self::finish_len_body) so the
+    /// budget is corrected afterward.
+    #[inline]
+    fn drain_inner(&mut self, mut n: u32) -> Result<()> {
+        let mut buf = [0u8; 256];
+        while n > 0 {
+            let chunk = n.min(buf.len() as u32) as usize;
+            Read::read_exact(self.get_mut(), &mut buf[..chunk])?;
+            n -= chunk as u32;
+        }
+        Ok(())
+    }
+
+    /// After a Len body of `length` was (partially) read via [`get_mut`](Self::get_mut),
+    /// drain `length - consumed` and subtract `length` from the budget.
+    ///
+    /// `consumed` must be `<= length`. Caller must have checked
+    /// `length <= self.limit()` (e.g. via [`ensure_within_limit`](Self::ensure_within_limit))
+    /// before reading the body.
+    #[inline]
+    fn finish_len_body(&mut self, length: u32, consumed: u32) -> Result<()> {
+        if consumed > length {
+            return Err(ProtobufError::UnexpectedEof);
+        }
+        let unread = length - consumed;
+        if unread > 0 {
+            self.drain_inner(unread)?;
+        }
+        debug_assert!(
+            length <= self.limit(),
+            "finish_len_body called without ensure_within_limit"
+        );
+        self.set_limit(self.limit() - length);
+        Ok(())
+    }
 }
 
 impl<R: Read> Read for Take32<R> {
@@ -89,30 +138,13 @@ fn copy_len_to_vec<R: Read + ?Sized>(
     Ok((buf, len))
 }
 
-/// Read `n` bytes from the underlying reader without changing [`Take32::limit`].
-///
-/// Used to skip the unread tail of a Len body after the handler returns. The
-/// outer [`Take32`] budget is adjusted afterward with [`Take32::set_limit`].
-#[inline]
-fn drain_inner<R: Read>(take: &mut Take32<R>, mut n: u32) -> Result<()> {
-    let mut buf = [0u8; 256];
-    while n > 0 {
-        let chunk = n.min(buf.len() as u32) as usize;
-        Read::read_exact(take.get_mut(), &mut buf[..chunk])?;
-        n -= chunk as u32;
-    }
-    Ok(())
-}
-
 /// Parse one protobuf field from `take`.
 ///
 /// When the field is length-delimited, `handler` runs once for that Len body
 /// with `&mut R` and the payload `length` (`u32` from the length prefix). It
-/// returns `(payload, consumed)`; `consumed` is trusted and any remainder is
-/// drained from the underlying reader. Only then is the outer [`Take32`] limit
-/// reduced by the full payload `length` (body I/O bypasses the `Take32`, so the
-/// budget must be corrected after the body is finished). Other wire types do
-/// not call `handler`.
+/// returns `(payload, consumed)`; `consumed` is trusted.
+/// [`Take32::finish_len_body`] drains any remainder and corrects the outer
+/// budget. Other wire types do not call `handler`.
 fn parse_protobuf_field_with<R, L, F>(take: &mut Take32<R>, handler: &mut F) -> Result<Field<L>>
 where
     R: Read,
@@ -125,18 +157,9 @@ where
         WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(take)?),
         WireType::Len => {
             let length = WireCursor::read_varint(take)?.try_to_uint32()?;
-            if length > take.limit() {
-                return Err(ProtobufError::UnexpectedEof);
-            }
+            take.ensure_within_limit(length)?;
             let (payload, consumed) = handler(tag.field_number, take.get_mut(), length)?;
-            if consumed > length {
-                return Err(ProtobufError::UnexpectedEof);
-            }
-            let unread = length - consumed;
-            if unread > 0 {
-                drain_inner(take, unread)?;
-            }
-            take.set_limit(take.limit() - length);
+            take.finish_len_body(length, consumed)?;
             FieldValue::Len(payload)
         }
         WireType::SGroup => FieldValue::SGroup,
