@@ -27,35 +27,31 @@ use ::std::io::{Read, Take, Write};
 /// `u32`) or [`Take32::set_limit`] (also `u32`); do not wrap an arbitrary
 /// [`Take`] with a wider limit. Protobuf message budgets also stay
 /// `<= MAX_MESSAGE_SIZE` at [`ReadExtProtobuf`] entrances (`debug_assert`).
-struct Take32<R> {
-    inner: Take<R>,
-}
+struct Take32<R>(Take<R>);
 
 impl<R: Read> Take32<R> {
     #[inline]
     fn new(reader: R, len: u32) -> Self {
-        Self {
-            inner: reader.take(u64::from(len)),
-        }
+        Self(reader.take(u64::from(len)))
     }
 
     #[inline]
     fn limit(&self) -> u32 {
         debug_assert!(
-            self.inner.limit() <= u64::from(u32::MAX),
+            self.0.limit() <= u64::from(u32::MAX),
             "Take32 limit exceeds u32::MAX"
         );
-        self.inner.limit() as u32
+        self.0.limit() as u32
     }
 
     #[inline]
     fn set_limit(&mut self, lim: u32) {
-        self.inner.set_limit(u64::from(lim));
+        self.0.set_limit(u64::from(lim));
     }
 
     #[inline]
     fn get_mut(&mut self) -> &mut R {
-        self.inner.get_mut()
+        self.0.get_mut()
     }
 
     /// Read `n` bytes from the underlying reader without changing [`limit`](Self::limit).
@@ -78,7 +74,7 @@ impl<R: Read> Take32<R> {
 impl<R: Read> Read for Take32<R> {
     #[inline]
     fn read(&mut self, buf: &mut [u8]) -> ::std::io::Result<usize> {
-        self.inner.read(buf)
+        self.0.read(buf)
     }
 }
 
