@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Breaking** relative to published `0.6.0`, plus additive group preserve / parse helpers. Version bump left for a separate release PR (bump before the next crates.io publish).
+
+Breaking for any caller of the removed varint/tag partial-resume API, or of `read_varint` / `read_tag` as `Result<Option<_>>` (including skip-only code that matched on `None`). Empty complete reads are now `UnexpectedEof`; soft end is a `remaining` / length-bound check (or `read_varints`).
+
+### Added
+
+- `ReadExtVarint::read_varint_with_raw` — decodes a varint while copying its exact wire bytes into a caller-provided `[u8; MAX_VARINT_BYTES]` (including non-canonical encodings). Complete-read stack is `with_raw` → `read_varint`. `read_varints` soft-stops on empty input via a private `try_read_varint_with_raw` (`Ok(None)`); truncated mid-varint is `UnexpectedEof`.
+- `FieldIterFromSlice::take_until(pred)` — after an `SGroup` tag was consumed, returns a zero-copy `&[u8]` span of the group body through the matching `EGroup` (use with `until_group_ends`). Exact wire bytes.
+- `FieldIterFromRead::copy_until(pred, out)` — same stop semantics as `skip_until` for streaming input; tees exact wire bytes to `out` (including non-canonical varints).
+- `GroupBody` / `group_body(field_number)` on field iterators — adapter that yields body fields until the matching outermost `EGroup` (consumed, not yielded). Nesting uses a depth counter only; **nested end-group field numbers are not validated** (caller should nest another `group_body` when seeing an inner `SGroup`). Distinct from `until_group_ends`, which keeps a full field-number stack for skip/preserve. Premature end of input before that `EGroup` is `UnexpectedEof`. After the first `None` or a yielded `Err`, further `next` is unspecified (may read past the group); use `Iterator::fuse` for sticky `None`.
+- Contract for skip/preserve mirrors `until_group_ends`: the start-group tag is already consumed (caller writes it to a preserve blob if needed); the helper advances past the matching end-group. Nested groups use the same stack rules. On predicate / decode error, the input cursor may have advanced; `Read` `copy_until` may leave a partial write in `out`.
+
+### Changed
+
+- `ReadExtVarint::read_varint` / `read_varint_with_raw` and `ReadExtTag::read_tag` return `Result<…>` without `Option`. Empty input is `UnexpectedEof` (same as truncated); soft end is a caller `remaining` / length-bound check. `read_varints` soft-stops on empty.
+
+### Removed
+
+- Varint/tag partial-resume API: `DecodeState`, `DecodeOutcome`, `TagOutcome` / `Outcome`, `read_varint_partial` / `read_varint_resume`, `read_tag_partial` / `read_tag_resume`. Chunked callers buffer ≤ `MAX_VARINT_BYTES` (or until a terminator) and use complete reads — same model as fixed-width wire types.
+
+### Internal
+
+- `WireCursor` is Iterator-like: required fragments (`remaining` / `read_varint_with_raw` / fixed / `skip_bytes` / `copy_bytes`) plus default compose methods (`read_varint` / `read_tag` / `skip_field` / `skip_until` / `copy_field` / `copy_until`). Read cursors delegate `read_varint_with_raw` to `ReadExtVarint` (raw in `buf`); `SliceReader` reuses that decode but returns the same-length subslice of the input (zero-copy raw).
+
 ## [0.6.0]
 
 Breaking relative to 0.5.0. Exhaustive matches on `FieldValue` and `ProtobufError` must update. Call sites that used byte-iterator field/varint/tag traits must move to a slice or `Read`. Field `Read` APIs take an explicit message budget `len`; varint/tag `Read` methods do not.

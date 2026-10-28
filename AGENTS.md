@@ -18,8 +18,8 @@ cargo clippy --all-targets
 
 ## Constraints (do not reverse these)
 
-- **Sync only.** No async public API, no `StreamExt*` traits. Callers buffer bytes and use sync parse (including tag/varint `*_partial` / `*_resume`).
-- **No field-level partial/resume** (`read_field_partial`). Compose from tag + varint primitives if needed.
+- **Sync only.** No async public API, no `StreamExt*` traits. Callers buffer bytes and use sync parse. There is no tag/varint `*_partial` / `*_resume`; a varint is at most 10 bytes, so chunked callers buffer until a terminator or `MAX_VARINT_BYTES` then call the complete-read APIs (same model as fixed-width wire types).
+- **No field-level partial/resume** (`read_field_partial`).
 - **No full message types.** Keep the surface to constants, `Varint`, `Tag`, `Field` / `FieldValue`, and extension traits.
 - **Do not confuse Rust types with protobuf types.** Name conversions after the protobuf type (`from_sint32`, `to_uint64`), not the Rust integer.
 - Minimize dependencies. `thiserror` is the expected exception.
@@ -42,6 +42,6 @@ cargo clippy --all-targets
 
 Deferred on purpose. Do not treat them as conformant behavior, and do not sneak a fix into a patch release if it changes public types or error variants.
 
-- **Groups.** `WireType::SGroup` (3) and `WireType::EGroup` (4) are real wire types. Field readers return `FieldValue::SGroup` / `FieldValue::EGroup` (tag only; the body is not bundled into the start value). After `SGroup`, discard the body with `skip_until` + `until_group_ends` (explicit open-group stack), or read nested fields until `EGroup`. Writers emit the tag alone for those variants. Internally: `WireCursor` required methods are fragment-level (`remaining` / varint / fixed / `skip_bytes`); default methods compose `read_tag` / `skip_field` / `skip_until` (no `Option` — empty is `UnexpectedEof`; soft end is `remaining() == 0`). `BufWireCursor<L>` adds `read_bytes` and default `parse_field`. There is still no unknown-field preserve helper that copies a whole group span. Do not treat skipping as automatically done by `parse_field`.
+- **Groups / `parse_field`.** Skip (`skip_until` + `until_group_ends`), preserve (`take_until` / `copy_until`), and parse (`group_body` / `GroupBody`) helpers are shipped. What remains deferred: `parse_field` / `BufWireCursor` do **not** automatically skip or preserve a group body after an `SGroup` tag — callers must use those helpers (or walk fields by hand). Do not treat skipping or preserving as done by `parse_field`.
 - **Size constants are not enforced.** `MAX_MESSAGE_SIZE` and `MAX_STRING_SIZE` are public and unused by field readers. Streaming readers pass the length prefix to the payload closure. A slice read returns `UnexpectedEof` when the buffer is shorter than that prefix. Do not document the constants as a parse limit until a reader checks them.
 - **`Varint::try_to_sint32` error payload.** On failure, `ProtobufError::VarintDowncastOutOfRange.value` is the ZigZag-decoded `i64` cast with `as u64`, not the raw varint. `try_to_uint32` and `try_to_int32` report the raw varint. Keep that difference in mind before changing the `value` field; callers may already match on it.

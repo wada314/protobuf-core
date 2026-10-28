@@ -12,10 +12,10 @@ use crate::field::{Field, FieldValue};
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
-use crate::wire_format::WireType;
+use crate::wire_format::{MAX_VARINT_BYTES, WireType};
 use crate::{ProtobufError, Result};
 use ::std::convert::{AsMut, AsRef};
-use ::std::io::{Read, Take};
+use ::std::io::{Read, Take, Write};
 
 /// `Vec<u8>` payload of `len` initialized bytes.
 ///
@@ -48,56 +48,205 @@ where
 // Common parsing infrastructure
 // ============================================================================
 
-/// Predicate for [`skip_until`](WireCursor::skip_until): stop after the matching
-/// end-group, including nested groups.
+/// Predicate for protobuf **group** skip / preserve: returns `Ok(true)` when
+/// the matching end-group tag is reached.
 ///
-/// Call after the start-group tag for `field_number` has already been consumed.
-/// Open groups are tracked with an explicit stack (LIFO field numbers) captured
-/// inside the returned closure.
+/// Pass this to [`FieldIterFromSlice::skip_until`] /
+/// [`FieldIterFromRead::skip_until`] / [`FieldIterFromSlice::take_until`] /
+/// [`FieldIterFromRead::copy_until`] after the start-group tag for
+/// `field_number` has already been consumed. Nested groups are tracked with
+/// an explicit field-number stack inside the returned closure.
 ///
-/// ```
-/// use ::protobuf_core::{AsRefExtProtobuf, FieldValue, until_group_ends};
-///
-/// let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
-/// let mut fields = bytes.as_slice().read_protobuf_fields();
-/// let start = fields.next().unwrap().unwrap();
-/// assert!(matches!(start.value, FieldValue::SGroup));
-/// fields.skip_until(until_group_ends(start.field_number)).unwrap();
-/// ```
+/// This is only the stop condition — see those methods for discard / preserve
+/// examples.
 pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<bool> {
     let mut stack = vec![field_number];
-    move |tag| match tag.wire_type {
-        WireType::SGroup => {
+    move |tag| match (tag.wire_type, stack.last()) {
+        (WireType::SGroup, _) => {
             stack.push(tag.field_number);
             Ok(false)
         }
-        WireType::EGroup => {
-            let Some(&expected) = stack.last() else {
-                // Pred misuse: called after the tracked group already closed.
-                debug_assert!(
-                    false,
-                    "until_group_ends predicate called after the tracked group closed"
-                );
-                return Err(ProtobufError::UnexpectedEof);
-            };
-            if tag.field_number != expected {
-                return Err(ProtobufError::MismatchedEndGroup {
-                    expected,
-                    got: tag.field_number,
-                });
-            }
+        (WireType::EGroup, Some(&expected)) if expected == tag.field_number => {
             stack.pop();
             Ok(stack.is_empty())
+        }
+        (WireType::EGroup, Some(&expected)) => Err(ProtobufError::MismatchedEndGroup {
+            expected,
+            got: tag.field_number,
+        }),
+        (WireType::EGroup, None) => {
+            // `skip_until` / `take_until` / `copy_until` stop when this pred
+            // returns `Ok(true)` (stack empty). Calling it again is misuse.
+            unreachable!("until_group_ends predicate called after the tracked group closed")
         }
         _ => Ok(false),
     }
 }
 
+/// Field-iterator adapter that stops at the matching end-group tag.
+///
+/// Returned by [`FieldIterFromSlice::group_body`] /
+/// [`FieldIterFromRead::group_body`]. Call after the start-group tag for
+/// `field_number` has already been consumed.
+///
+/// # Termination
+///
+/// [`Iterator::next`] returns `None` only after the matching outermost
+/// [`FieldValue::EGroup`] is seen (that tag is **consumed and not yielded**).
+/// If the underlying field iterator returns `None` before that end tag, this
+/// adapter yields [`ProtobufError::UnexpectedEof`].
+///
+/// Like a normal [`Iterator`], **nothing is guaranteed after the first
+/// `None`**. A later `next` may pull again from the underlying iterator and
+/// yield fields **past** the group, or hit soft EOF and yield
+/// [`UnexpectedEof`](ProtobufError::UnexpectedEof) again. If you need sticky
+/// `None`, wrap with [`Iterator::fuse`] (for example
+/// `fields.group_body(n).fuse()`).
+///
+/// After a yielded [`Err`], further `next` calls are likewise unspecified
+/// (the cursor may already have advanced). Typical `Result`-item consumers
+/// stop at the first error (`?`, `collect::<Result<_, _>>()`,
+/// `try_for_each`, …); this adapter does not fuse on `Err`.
+///
+/// # Nesting model (depth only)
+///
+/// In contrast to [`until_group_ends`], this adapter remembers only the
+/// outermost group's field number. Nested [`FieldValue::SGroup`] /
+/// [`FieldValue::EGroup`] only adjust an integer **depth**; inner end-group
+/// field numbers are not checked against their start tags.
+///
+/// That means the caller is responsible for validating nested group field
+/// numbers if that matters. Apply the same adapter again when an inner
+/// [`FieldValue::SGroup`] is seen (nested borrows via
+/// [`GroupBody::group_body`]):
+///
+/// ```
+/// use ::protobuf_core::{AsRefExtProtobuf, FieldValue};
+///
+/// let bytes = [
+///     0x0B, // 1 SGroup
+///     0x13, // 2 SGroup
+///     0x18, 0x01, // 3 varint 1
+///     0x14, // 2 EGroup
+///     0x0C, // 1 EGroup
+/// ];
+/// let mut fields = bytes.as_slice().read_protobuf_fields();
+/// let start = fields.next().unwrap().unwrap();
+/// assert!(matches!(start.value, FieldValue::SGroup));
+///
+/// let mut outer = fields.group_body(start.field_number);
+/// let inner_start = outer.next().unwrap().unwrap();
+/// assert!(matches!(inner_start.value, FieldValue::SGroup));
+/// assert_eq!(inner_start.field_number.as_u32(), 2);
+///
+/// {
+///     // Nested adapter checks the inner group's end field number.
+///     let mut inner = outer.group_body(inner_start.field_number);
+///     let v = inner.next().unwrap().unwrap();
+///     assert_eq!(v.field_number.as_u32(), 3);
+///     assert!(inner.next().is_none()); // consumed inner EGroup
+/// }
+/// assert!(outer.next().is_none()); // consumed outer EGroup
+/// ```
+///
+/// If you ignore inner `SGroup` values and keep polling the outer adapter, an
+/// inner `EGroup` only decreases depth — its field number is not verified. A
+/// mismatched end tag is reported only for the tracked (outermost) group
+/// when `depth == 0`.
+#[derive(Debug)]
+pub struct GroupBody<I> {
+    inner: I,
+    field_number: FieldNumber,
+    /// How many nested groups are open *inside* the tracked group.
+    depth: usize,
+}
+
+impl<I> GroupBody<I> {
+    /// Field number of the tracked (outermost) start-group.
+    #[inline]
+    pub fn field_number(&self) -> FieldNumber {
+        self.field_number
+    }
+
+    /// Unwrap the underlying field iterator. After a successful full parse the
+    /// matching end-group has already been consumed from `inner`.
+    #[inline]
+    pub fn into_inner(self) -> I {
+        self.inner
+    }
+
+    /// Borrow the underlying field iterator.
+    #[inline]
+    pub fn inner(&self) -> &I {
+        &self.inner
+    }
+
+    /// Mutably borrow the underlying field iterator.
+    #[inline]
+    pub fn inner_mut(&mut self) -> &mut I {
+        &mut self.inner
+    }
+}
+
+impl<I> GroupBody<I>
+where
+    I: Iterator,
+{
+    /// Continue with another [`GroupBody`] over nested fields from this
+    /// adapter (same depth rules for the nested field number).
+    ///
+    /// Typically called after observing [`FieldValue::SGroup`] from `self`.
+    #[inline]
+    pub fn group_body(&mut self, field_number: FieldNumber) -> GroupBody<&mut Self> {
+        GroupBody {
+            inner: self,
+            field_number,
+            depth: 0,
+        }
+    }
+}
+
+impl<I, L> Iterator for GroupBody<I>
+where
+    I: Iterator<Item = Result<Field<L>>>,
+{
+    type Item = Result<Field<L>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Soft EOF before a matching end-group is truncated input. A clean
+        // finish returns `None` when the matching EGroup is observed below —
+        // that path never sees `inner` return `None`.
+        let Some(result) = self.inner.next() else {
+            return Some(Err(ProtobufError::UnexpectedEof));
+        };
+        let Ok(field) = result else {
+            return Some(result);
+        };
+        match field.value {
+            FieldValue::SGroup => {
+                self.depth += 1;
+                Some(Ok(field))
+            }
+            FieldValue::EGroup if self.depth > 0 => {
+                self.depth -= 1;
+                Some(Ok(field))
+            }
+            // Matching end of the tracked group: consume, do not yield.
+            FieldValue::EGroup if field.field_number == self.field_number => None,
+            FieldValue::EGroup => Some(Err(ProtobufError::MismatchedEndGroup {
+                expected: self.field_number,
+                got: field.field_number,
+            })),
+            _ => Some(Ok(field)),
+        }
+    }
+}
+
 /// Byte-level cursor over protobuf wire data.
 ///
-/// Required methods are atomic fragments (`remaining` / `read_varint` /
-/// `read_fixed` / `skip_bytes`). Default methods compose those into tags, one
-/// field skip, and conditional multi-field skip.
+/// Like [`Iterator`]: a small set of required fragments, plus default methods
+/// that compose them (`skip_field`, `skip_until`, `copy_field`, `copy_until`,
+/// …). Implementors only override the I/O primitives.
 ///
 /// Soft end-of-input is signaled by [`remaining`](Self::remaining) `== 0`
 /// (field iterators stop there). Mid-field emptiness is
@@ -106,11 +255,26 @@ pub(crate) trait WireCursor {
     /// Bytes still allowed in this cursor's bound (`Take::limit` / slice length).
     fn remaining(&self) -> usize;
 
-    /// Read a varint.
+    /// Read a varint and return its exact wire bytes.
+    ///
+    /// The returned slice borrows for the joint lifetime of `self` and `buf`.
+    /// Length is in `1..=MAX_VARINT_BYTES`. [`SliceReader`] returns a subslice of
+    /// the input (no copy); [`Read`] paths fill `buf` and return `&buf[..n]`.
+    /// Empty input is [`ProtobufError::UnexpectedEof`] (caller must check
+    /// [`remaining`](Self::remaining) first for soft end).
+    fn read_varint_with_raw<'a>(
+        &'a mut self,
+        buf: &'a mut [u8; MAX_VARINT_BYTES],
+    ) -> Result<(Varint, &'a [u8])>;
+
+    /// Read a varint (discards the raw wire bytes).
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`] (caller must check
     /// [`remaining`](Self::remaining) first for soft end).
-    fn read_varint(&mut self) -> Result<Varint>;
+    #[inline(always)]
+    fn read_varint(&mut self) -> Result<Varint> {
+        Ok(self.read_varint_with_raw(&mut [0u8; MAX_VARINT_BYTES])?.0)
+    }
 
     /// Read exactly `N` bytes (fixed-width wire types).
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]>;
@@ -118,10 +282,16 @@ pub(crate) trait WireCursor {
     /// Discard exactly `length` bytes without allocating a payload buffer.
     fn skip_bytes(&mut self, length: usize) -> Result<()>;
 
+    /// Copy exactly `length` bytes to `out` (dual of [`skip_bytes`](Self::skip_bytes)).
+    ///
+    /// Returns `length` on success.
+    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<usize>;
+
     /// Read a tag (field number + wire type).
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`]. Invalid field numbers
     /// and wire types surface as [`ProtobufError`].
+    #[inline(always)]
     fn read_tag(&mut self) -> Result<Tag> {
         Tag::from_encoded(self.read_varint()?)
     }
@@ -130,9 +300,11 @@ pub(crate) trait WireCursor {
     ///
     /// Dual of [`BufWireCursor::parse_field`]: the payload is discarded instead
     /// of materialized. For [`WireType::SGroup`] / [`WireType::EGroup`], only
-    /// the tag is consumed; the start-group body is left for the caller.
+    /// the tag is consumed; a start-group's following body fields are left for
+    /// the caller.
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`].
+    #[inline]
     fn skip_field(&mut self) -> Result<Tag> {
         let tag = self.read_tag()?;
         match tag.wire_type {
@@ -152,13 +324,11 @@ pub(crate) trait WireCursor {
 
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// Each iteration runs [`skip_field`](Self::skip_field) (so length-delimited
-    /// payloads are discarded without allocating) and passes the field's [`Tag`]
-    /// to `pred`. EOF before `pred` succeeds is [`ProtobufError::UnexpectedEof`].
-    ///
-    /// For a group body after its start tag was consumed, use
-    /// [`until_group_ends`] (see [`FieldIterFromSlice::skip_until`] for a
-    /// runnable public example).
+    /// Primary caller is group handling via [`until_group_ends`]. Each
+    /// iteration runs [`skip_field`](Self::skip_field) (Len payloads discarded
+    /// without allocating) and passes the field's [`Tag`] to `pred`. EOF
+    /// before `pred` succeeds is [`ProtobufError::UnexpectedEof`].
+    #[inline]
     fn skip_until<F>(&mut self, mut pred: F) -> Result<()>
     where
         F: FnMut(Tag) -> Result<bool>,
@@ -173,6 +343,67 @@ pub(crate) trait WireCursor {
             }
         }
     }
+
+    /// Copy one complete field's wire bytes to `out`.
+    ///
+    /// Returns `(tag, bytes_written)`. Tag / length / value varints are teed
+    /// exactly (including non-canonical encodings). Fixed-width and Len
+    /// payloads use [`copy_bytes`](Self::copy_bytes). Groups copy the tag
+    /// only. On error, `out` may hold a partial field.
+    #[inline]
+    fn copy_field<W: Write>(&mut self, out: &mut W) -> Result<(Tag, usize)> {
+        let mut written = 0usize;
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        let (tag_varint, tag_raw) = self.read_varint_with_raw(&mut buf)?;
+        written += write_all_len(out, tag_raw)?;
+        let tag = Tag::from_encoded(tag_varint)?;
+        match tag.wire_type {
+            WireType::Varint => {
+                let (_, value_raw) = self.read_varint_with_raw(&mut buf)?;
+                written += write_all_len(out, value_raw)?;
+            }
+            WireType::Int32 => written += self.copy_bytes(4, out)?,
+            WireType::Int64 => written += self.copy_bytes(8, out)?,
+            WireType::Len => {
+                let (len_varint, len_raw) = self.read_varint_with_raw(&mut buf)?;
+                written += write_all_len(out, len_raw)?;
+                written += self.copy_bytes(len_varint.try_to_uint32()? as usize, out)?;
+            }
+            WireType::SGroup | WireType::EGroup => {}
+        }
+        Ok((tag, written))
+    }
+
+    /// Copy fields to `out` until `pred` returns `Ok(true)`.
+    ///
+    /// Primary caller is group preserve via [`until_group_ends`]. Same stop
+    /// semantics as [`skip_until`](Self::skip_until). Returns bytes written.
+    /// On error, `out` may already contain a partial copy.
+    #[inline]
+    fn copy_until<F, W>(&mut self, mut pred: F, out: &mut W) -> Result<usize>
+    where
+        F: FnMut(Tag) -> Result<bool>,
+        W: Write,
+    {
+        let mut written = 0usize;
+        loop {
+            if self.remaining() == 0 {
+                return Err(ProtobufError::UnexpectedEof);
+            }
+            let (tag, n) = self.copy_field(out)?;
+            written += n;
+            if pred(tag)? {
+                return Ok(written);
+            }
+        }
+    }
+}
+
+/// `write_all` then return how many bytes were written (`buf.len()` on success).
+#[inline]
+fn write_all_len<W: Write>(out: &mut W, buf: &[u8]) -> Result<usize> {
+    out.write_all(buf)?;
+    Ok(buf.len())
 }
 
 /// [`WireCursor`] that can materialize a byte buffer into `L`.
@@ -197,7 +428,7 @@ pub(crate) trait BufWireCursor<L>: WireCursor {
     ///
     /// For [`FieldValue::SGroup`] / [`FieldValue::EGroup`], only the tag is
     /// consumed; a start-group body remains on the cursor for the caller to
-    /// read or [`skip_until`](WireCursor::skip_until) with [`until_group_ends`].
+    /// read or skip with [`until_group_ends`].
     fn parse_field(&mut self) -> Result<Field<L>> {
         let tag = self.read_tag()?;
 
@@ -230,21 +461,28 @@ impl<R> WireCursor for ReadCursor<'_, R>
 where
     R: Read,
 {
+    #[inline]
     fn remaining(&self) -> usize {
         usize::try_from(self.0.limit()).unwrap_or(usize::MAX)
     }
 
-    fn read_varint(&mut self) -> Result<Varint> {
+    #[inline]
+    fn read_varint_with_raw<'a>(
+        &'a mut self,
+        buf: &'a mut [u8; MAX_VARINT_BYTES],
+    ) -> Result<(Varint, &'a [u8])> {
         use crate::varint::ReadExtVarint;
-        self.0.read_varint()?.ok_or(ProtobufError::UnexpectedEof)
+        self.0.read_varint_with_raw(buf)
     }
 
+    #[inline]
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         let mut bytes = [0u8; N];
         self.0.read_exact(&mut bytes)?;
         Ok(bytes)
     }
 
+    #[inline]
     fn skip_bytes(&mut self, mut length: usize) -> Result<()> {
         let mut buf = [0u8; 256];
         while length > 0 {
@@ -253,6 +491,19 @@ where
             length -= n;
         }
         Ok(())
+    }
+
+    #[inline]
+    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<usize> {
+        let mut remaining = length;
+        let mut buf = [0u8; 256];
+        while remaining > 0 {
+            let n = remaining.min(buf.len());
+            self.0.read_exact(&mut buf[..n])?;
+            out.write_all(&buf[..n])?;
+            remaining -= n;
+        }
+        Ok(length)
     }
 }
 
@@ -267,20 +518,33 @@ impl<R, F> WireCursor for ReadReader<'_, R, F>
 where
     R: Read,
 {
+    #[inline]
     fn remaining(&self) -> usize {
         usize::try_from(self.0.limit()).unwrap_or(usize::MAX)
     }
 
-    fn read_varint(&mut self) -> Result<Varint> {
-        ReadCursor(self.0).read_varint()
+    #[inline]
+    fn read_varint_with_raw<'a>(
+        &'a mut self,
+        buf: &'a mut [u8; MAX_VARINT_BYTES],
+    ) -> Result<(Varint, &'a [u8])> {
+        use crate::varint::ReadExtVarint;
+        self.0.read_varint_with_raw(buf)
     }
 
+    #[inline]
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         ReadCursor(self.0).read_fixed()
     }
 
+    #[inline]
     fn skip_bytes(&mut self, length: usize) -> Result<()> {
         ReadCursor(self.0).skip_bytes(length)
+    }
+
+    #[inline]
+    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<usize> {
+        ReadCursor(self.0).copy_bytes(length, out)
     }
 }
 
@@ -311,16 +575,53 @@ pub struct FieldIterFromRead<R, F = fn(usize) -> Result<Vec<u8>>> {
 impl<R, F> FieldIterFromRead<R, F> {
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// Length-delimited payloads are discarded without allocating. The byte
-    /// budget is the remaining capacity of the inner [`Take`]. For a group
-    /// body after [`FieldValue::SGroup`], use [`until_group_ends`] (see
+    /// Intended mainly for protobuf **group** handling: after an
+    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
+    /// discard the body through the matching end tag (see
     /// [`FieldIterFromSlice::skip_until`] for a runnable example).
+    ///
+    /// Length-delimited payloads are discarded without allocating. The byte
+    /// budget is the remaining capacity of the inner [`Take`].
     pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
     where
         R: Read,
         P: FnMut(Tag) -> Result<bool>,
     {
         ReadCursor(&mut self.reader).skip_until(pred)
+    }
+
+    /// Iterate fields until the matching end-group for `field_number`.
+    ///
+    /// Intended for parsing a protobuf **group** body after the start-group
+    /// tag was consumed. See [`GroupBody`] for nesting rules (depth only;
+    /// nested field numbers are the caller's job).
+    #[inline]
+    pub fn group_body(&mut self, field_number: FieldNumber) -> GroupBody<&mut Self> {
+        GroupBody {
+            inner: self,
+            field_number,
+            depth: 0,
+        }
+    }
+
+    /// Copy fields to `out` until `pred` returns `Ok(true)`.
+    ///
+    /// Intended mainly for protobuf **group** preserve on a stream: after an
+    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
+    /// tee the body and matching end tag (start tag already consumed — write
+    /// it yourself first if the preserve blob needs it). For zero-copy
+    /// preserve from a slice, use [`FieldIterFromSlice::take_until`] instead.
+    ///
+    /// Same stop semantics as [`skip_until`](Self::skip_until). Writes exact
+    /// wire bytes (including non-canonical varints). Returns the number of
+    /// bytes written. On error, `out` may already contain a partial copy.
+    pub fn copy_until<P, W>(&mut self, pred: P, out: &mut W) -> Result<usize>
+    where
+        R: Read,
+        P: FnMut(Tag) -> Result<bool>,
+        W: Write,
+    {
+        ReadCursor(&mut self.reader).copy_until(pred, out)
     }
 }
 
@@ -452,17 +753,25 @@ pub(crate) struct SliceReader<'a, 'b> {
 }
 
 impl WireCursor for SliceReader<'_, '_> {
+    #[inline]
     fn remaining(&self) -> usize {
         self.slice.len()
     }
 
-    fn read_varint(&mut self) -> Result<Varint> {
+    #[inline]
+    fn read_varint_with_raw<'a>(
+        &'a mut self,
+        buf: &'a mut [u8; MAX_VARINT_BYTES],
+    ) -> Result<(Varint, &'a [u8])> {
         use crate::varint::ReadExtVarint;
-        self.slice
-            .read_varint()?
-            .ok_or(ProtobufError::UnexpectedEof)
+        // Decode via ReadExtVarint (tees into `buf`), then return the same-length
+        // span from the input slice so callers see zero-copy wire bytes.
+        let head = *self.slice;
+        let (varint, teed) = self.slice.read_varint_with_raw(buf)?;
+        Ok((varint, &head[..teed.len()]))
     }
 
+    #[inline]
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         let (bytes, remaining) = self
             .slice
@@ -472,6 +781,7 @@ impl WireCursor for SliceReader<'_, '_> {
         Ok(*bytes)
     }
 
+    #[inline]
     fn skip_bytes(&mut self, length: usize) -> Result<()> {
         let (_, remaining) = self
             .slice
@@ -479,6 +789,17 @@ impl WireCursor for SliceReader<'_, '_> {
             .ok_or(ProtobufError::UnexpectedEof)?;
         *self.slice = remaining;
         Ok(())
+    }
+
+    #[inline]
+    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<usize> {
+        let (payload, remaining) = self
+            .slice
+            .split_at_checked(length)
+            .ok_or(ProtobufError::UnexpectedEof)?;
+        out.write_all(payload)?;
+        *self.slice = remaining;
+        Ok(length)
     }
 }
 
@@ -501,8 +822,10 @@ pub struct FieldIterFromSlice<'a> {
 impl<'a> FieldIterFromSlice<'a> {
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
-    /// Length-delimited payloads are discarded without allocating. After an
-    /// [`FieldValue::SGroup`], pair this with [`until_group_ends`]:
+    /// Intended mainly for protobuf **group** handling: after an
+    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
+    /// discard the body through the matching end tag. Length-delimited
+    /// payloads are discarded without allocating.
     ///
     /// ```
     /// use ::protobuf_core::{AsRefExtProtobuf, FieldValue, until_group_ends};
@@ -527,6 +850,58 @@ impl<'a> FieldIterFromSlice<'a> {
             slice: &mut self.slice,
         }
         .skip_until(pred)
+    }
+
+    /// Advance past fields until `pred` returns `Ok(true)`, returning the exact
+    /// wire-byte span that was consumed (zero-copy).
+    ///
+    /// Intended mainly for protobuf **group** preserve: after an
+    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
+    /// borrow the body through the matching end tag (start tag already
+    /// consumed). Same stop / nesting semantics as
+    /// [`skip_until`](Self::skip_until).
+    ///
+    /// On error the cursor may already have advanced through some fields; there
+    /// is no partial span return.
+    ///
+    /// ```
+    /// use ::protobuf_core::{AsRefExtProtobuf, FieldValue, WriteExtProtobuf, until_group_ends};
+    ///
+    /// let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
+    /// let mut fields = bytes.as_slice().read_protobuf_fields();
+    /// let start = fields.next().unwrap().unwrap();
+    /// assert!(matches!(start.value, FieldValue::SGroup));
+    ///
+    /// // Start tag is already consumed — write it yourself for an unknown-field blob.
+    /// let mut preserved = Vec::new();
+    /// preserved.write_protobuf_field(&start).unwrap();
+    /// let body = fields.take_until(until_group_ends(start.field_number)).unwrap();
+    /// preserved.extend_from_slice(body);
+    /// assert_eq!(body, &[0x10, 0x01, 0x0C]);
+    /// assert_eq!(preserved, &bytes[..bytes.len() - 2]); // without trailing field 3
+    /// ```
+    pub fn take_until<P>(&mut self, pred: P) -> Result<&'a [u8]>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        let start = self.slice;
+        self.skip_until(pred)?;
+        let taken = start.len() - self.slice.len();
+        Ok(&start[..taken])
+    }
+
+    /// Iterate fields until the matching end-group for `field_number`.
+    ///
+    /// Intended for parsing a protobuf **group** body after the start-group
+    /// tag was consumed. See [`GroupBody`] for nesting rules (depth only;
+    /// nested field numbers are the caller's job).
+    #[inline]
+    pub fn group_body(&mut self, field_number: FieldNumber) -> GroupBody<&mut Self> {
+        GroupBody {
+            inner: self,
+            field_number,
+            depth: 0,
+        }
     }
 }
 
@@ -988,25 +1363,25 @@ mod tests {
             other => panic!("expected empty len, got {other:?}"),
         }
 
-        let truncated_i32 = (&[0x0D, 0x01, 0x02, 0x03][..])
+        let truncated_i32 = [0x0D, 0x01, 0x02, 0x03][..]
             .read_protobuf_fields()
             .next()
             .unwrap();
         assert!(matches!(truncated_i32, Err(ProtobufError::UnexpectedEof)));
 
-        let truncated_i64 = (&[0x09, 0, 0, 0, 0, 0, 0, 0][..])
+        let truncated_i64 = [0x09, 0, 0, 0, 0, 0, 0, 0][..]
             .read_protobuf_fields()
             .next()
             .unwrap();
         assert!(matches!(truncated_i64, Err(ProtobufError::UnexpectedEof)));
 
-        let truncated_len = (&[0x0A, 0x05, b'a', b'b'][..])
+        let truncated_len = [0x0A, 0x05, b'a', b'b'][..]
             .read_protobuf_fields()
             .next()
             .unwrap();
         assert!(matches!(truncated_len, Err(ProtobufError::UnexpectedEof)));
 
-        let length_past_u32 = (&[0x0A, 0x80, 0x80, 0x80, 0x80, 0x10][..])
+        let length_past_u32 = [0x0A, 0x80, 0x80, 0x80, 0x80, 0x10][..]
             .read_protobuf_fields()
             .next()
             .unwrap();
@@ -1025,6 +1400,543 @@ mod tests {
             assert_eq!(field.field_number.as_u32(), 1);
             assert_eq!(field.value, expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod group_body_adapter {
+    use super::{AsRefExtProtobuf, ReadExtProtobuf};
+    use crate::field_number::FieldNumber;
+    use crate::{FieldValue, ProtobufError};
+    use ::std::io::Cursor;
+
+    fn slice_fields(bytes: &[u8]) -> super::FieldIterFromSlice<'_> {
+        AsRefExtProtobuf::read_protobuf_fields(bytes)
+    }
+
+    fn expect_sgroup(fields: &mut super::FieldIterFromSlice<'_>) -> FieldNumber {
+        let f = fields.next().unwrap().unwrap();
+        assert!(matches!(f.value, FieldValue::SGroup));
+        f.field_number
+    }
+
+    #[test]
+    fn empty_group_yields_nothing_then_continues() {
+        let bytes = [0x0B, 0x0C, 0x08, 0x01];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        assert!(fields.group_body(n).next().is_none());
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 1);
+        let FieldValue::Varint(v) = after.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 1);
+    }
+
+    #[test]
+    fn group_body_accessors_expose_field_number_and_inner() {
+        let bytes = [0x0B, 0x0C, 0x10, 0x02];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let mut body = fields.group_body(n);
+        assert_eq!(body.field_number(), n);
+        let _ = body.inner();
+        let _ = body.inner_mut();
+        assert!(body.next().is_none()); // empty group body
+        let after = body.into_inner().next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 2);
+    }
+
+    #[test]
+    fn group_body_propagates_inner_decode_error() {
+        // SGroup then truncated fixed32 tag/payload → Err from inner parse.
+        let bytes = [0x0B, 0x0D, 0x01];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let err = fields.group_body(n).next().unwrap().unwrap_err();
+        assert!(matches!(err, ProtobufError::UnexpectedEof));
+    }
+
+    #[test]
+    fn after_none_further_next_may_read_past_group() {
+        let bytes = [0x0B, 0x0C, 0x08, 0x01];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let mut body = fields.group_body(n);
+        assert!(body.next().is_none());
+        // Not fused: another next pulls the field after the group.
+        let after = body.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 1);
+    }
+
+    #[test]
+    fn fuse_keeps_none_after_group_ends() {
+        let bytes = [0x0B, 0x0C, 0x08, 0x01];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let mut body = fields.group_body(n).fuse();
+        assert!(body.next().is_none());
+        assert!(body.next().is_none());
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 1);
+    }
+
+    #[test]
+    fn yields_body_fields_and_consumes_end() {
+        let bytes = [0x0B, 0x10, 0x96, 0x01, 0x0C, 0x18, 0x07];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let body: Vec<_> = fields.group_body(n).collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(body.len(), 1);
+        assert_eq!(body[0].field_number.as_u32(), 2);
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 3);
+    }
+
+    #[test]
+    fn nested_adapter_checks_inner_end_number() {
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x13, // 2 SGroup
+            0x18, 0x01, // 3 varint 1
+            0x14, // 2 EGroup
+            0x0C, // 1 EGroup
+            0x20, 0x02, // 4 varint 2
+        ];
+        let mut fields = slice_fields(&bytes);
+        let outer_n = expect_sgroup(&mut fields);
+        let mut outer = fields.group_body(outer_n);
+        let inner_start = outer.next().unwrap().unwrap();
+        assert!(matches!(inner_start.value, FieldValue::SGroup));
+        {
+            let mut inner = outer.group_body(inner_start.field_number);
+            let v = inner.next().unwrap().unwrap();
+            assert_eq!(v.field_number.as_u32(), 3);
+            assert!(inner.next().is_none());
+        }
+        assert!(outer.next().is_none());
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 4);
+    }
+
+    #[test]
+    fn depth_only_allows_same_number_nesting_without_inner_adapter() {
+        // SGroup(1) SGroup(1) varint EGroup(1) EGroup(1)
+        let bytes = [0x0B, 0x0B, 0x10, 0x01, 0x0C, 0x0C];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let body: Vec<_> = fields.group_body(n).collect::<Result<Vec<_>, _>>().unwrap();
+        // Inner SGroup + varint + inner EGroup yielded; outer EGroup consumed.
+        assert_eq!(body.len(), 3);
+        assert!(matches!(body[0].value, FieldValue::SGroup));
+        assert!(matches!(body[1].value, FieldValue::Varint(_)));
+        assert!(matches!(body[2].value, FieldValue::EGroup));
+        assert!(fields.next().is_none());
+    }
+
+    #[test]
+    fn mismatched_outer_end_is_error() {
+        let bytes = [0x0B, 0x14];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let err = fields.group_body(n).next().unwrap().unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ProtobufError::MismatchedEndGroup { expected, got }
+                if expected.as_u32() == 1 && got.as_u32() == 2
+            ),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn outer_adapter_does_not_verify_mismatched_inner_end_number() {
+        // SGroup(1) SGroup(2) EGroup(1): at depth>0 the EGroup is treated as a
+        // nested end (depth--) without checking field number 1 vs 2, and is
+        // yielded. The outer matching end never appears → UnexpectedEof.
+        let bytes = [0x0B, 0x13, 0x0C];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let mut body = fields.group_body(n);
+        assert!(matches!(
+            body.next().unwrap().unwrap().value,
+            FieldValue::SGroup
+        ));
+        let eg = body.next().unwrap().unwrap();
+        assert!(matches!(eg.value, FieldValue::EGroup));
+        assert_eq!(eg.field_number.as_u32(), 1);
+        assert!(matches!(
+            body.next().unwrap().unwrap_err(),
+            ProtobufError::UnexpectedEof
+        ));
+    }
+
+    #[test]
+    fn truncated_group_body_is_unexpected_eof() {
+        let bytes = [0x0B, 0x08, 0x01];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let err = fields
+            .group_body(n)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap_err();
+        assert!(matches!(err, ProtobufError::UnexpectedEof));
+    }
+
+    #[test]
+    fn works_on_read_iterator() {
+        let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+        let body: Vec<_> = fields
+            .group_body(start.field_number)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(body.len(), 1);
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 3);
+    }
+}
+
+#[cfg(test)]
+mod group_preserve {
+    use super::{AsRefExtProtobuf, ReadExtProtobuf, until_group_ends};
+    use crate::field_number::FieldNumber;
+    use crate::{FieldValue, ProtobufError, WriteExtProtobuf};
+    use ::std::io::Cursor;
+
+    fn slice_fields(bytes: &[u8]) -> super::FieldIterFromSlice<'_> {
+        AsRefExtProtobuf::read_protobuf_fields(bytes)
+    }
+
+    fn expect_sgroup(fields: &mut super::FieldIterFromSlice<'_>) -> FieldNumber {
+        let f = fields.next().unwrap().unwrap();
+        assert!(matches!(f.value, FieldValue::SGroup));
+        f.field_number
+    }
+
+    fn message_with_group_then_varint() -> Vec<u8> {
+        vec![
+            0x0B, // field 1 SGroup
+            0x10, 0x96, 0x01, // field 2 varint 150
+            0x0C, // field 1 EGroup
+            0x18, 0x07, // field 3 varint 7
+        ]
+    }
+
+    #[test]
+    fn take_empty_group_body() {
+        let bytes = [0x0B, 0x0C, 0x08, 0x01];
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        let body = fields.take_until(until_group_ends(field_number)).unwrap();
+        assert_eq!(body, &[0x0C]);
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 1);
+        let FieldValue::Varint(v) = next.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 1);
+    }
+
+    #[test]
+    fn take_group_with_nested_scalars() {
+        let bytes = message_with_group_then_varint();
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        let body = fields.take_until(until_group_ends(field_number)).unwrap();
+        assert_eq!(body, &[0x10, 0x96, 0x01, 0x0C]);
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 3);
+    }
+
+    #[test]
+    fn take_nested_groups() {
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x13, // 2 SGroup
+            0x18, 0x01, // 3 varint 1
+            0x14, // 2 EGroup
+            0x0C, // 1 EGroup
+            0x20, 0x02, // 4 varint 2
+        ];
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        let body = fields.take_until(until_group_ends(field_number)).unwrap();
+        assert_eq!(body, &[0x13, 0x18, 0x01, 0x14, 0x0C]);
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 4);
+    }
+
+    #[test]
+    fn take_group_containing_len_and_fixed() {
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x12, 0x03, b'a', b'b', b'c', // field 2 len "abc"
+            0x15, 0x01, 0x02, 0x03, 0x04, // field 2 fixed32
+            0x09, 0, 0, 0, 0, 0, 0, 0, 0,    // field 1 fixed64
+            0x0C, // 1 EGroup
+            0x10, 0x05, // field 2 varint 5
+        ];
+        let expected_body = &bytes[1..bytes.len() - 2];
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        let body = fields.take_until(until_group_ends(field_number)).unwrap();
+        assert_eq!(body, expected_body);
+        let next = fields.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 2);
+    }
+
+    #[test]
+    fn take_mismatched_end_group_is_an_error() {
+        let bytes = [0x0B, 0x14];
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        let err = fields
+            .take_until(until_group_ends(field_number))
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ProtobufError::MismatchedEndGroup { expected, got }
+                if expected.as_u32() == 1 && got.as_u32() == 2
+            ),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn take_truncated_group_is_unexpected_eof() {
+        let bytes = [0x0B, 0x08, 0x01];
+        let mut fields = slice_fields(&bytes);
+        let field_number = expect_sgroup(&mut fields);
+        assert!(matches!(
+            fields.take_until(until_group_ends(field_number)),
+            Err(ProtobufError::UnexpectedEof)
+        ));
+    }
+
+    #[test]
+    fn read_copy_until_preserves_group_body() {
+        let bytes = message_with_group_then_varint();
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes.clone()).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+
+        let mut out = Vec::new();
+        let written = fields
+            .copy_until(until_group_ends(start.field_number), &mut out)
+            .unwrap();
+        assert_eq!(out, vec![0x10, 0x96, 0x01, 0x0C]);
+        assert_eq!(written, out.len());
+
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 3);
+        let FieldValue::Varint(v) = after.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 7);
+    }
+
+    #[test]
+    fn read_copy_until_empty_group_body() {
+        let bytes = [0x0B, 0x0C, 0x08, 0x01];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+
+        let mut out = Vec::new();
+        let written = fields
+            .copy_until(until_group_ends(start.field_number), &mut out)
+            .unwrap();
+        assert_eq!(out, vec![0x0C]);
+        assert_eq!(written, 1);
+
+        let after = fields.next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 1);
+        let FieldValue::Varint(v) = after.value else {
+            panic!("expected varint");
+        };
+        assert_eq!(v.to_uint64(), 1);
+    }
+
+    #[test]
+    fn read_copy_until_nested_groups_and_len() {
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x13, // 2 SGroup
+            0x12, 0x02, b'x', b'y', // field 2 len "xy" inside inner group
+            0x14, // 2 EGroup
+            0x0C, // 1 EGroup
+        ];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        let mut out = Vec::new();
+        let written = fields
+            .copy_until(until_group_ends(start.field_number), &mut out)
+            .unwrap();
+        assert_eq!(out, vec![0x13, 0x12, 0x02, b'x', b'y', 0x14, 0x0C]);
+        assert_eq!(written, out.len());
+        assert!(fields.next().is_none());
+    }
+
+    #[test]
+    fn read_copy_until_mismatched_end_group() {
+        let bytes = [0x0B, 0x14];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        let mut out = Vec::new();
+        let err = fields
+            .copy_until(until_group_ends(start.field_number), &mut out)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            ProtobufError::MismatchedEndGroup { expected, got }
+            if expected.as_u32() == 1 && got.as_u32() == 2
+        ));
+        // Partial write includes the mismatched end-group tag that failed pred.
+        assert_eq!(out, vec![0x14]);
+    }
+
+    #[test]
+    fn read_copy_until_truncated_group_is_unexpected_eof() {
+        let bytes = [0x0B, 0x08, 0x01];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+
+        let mut out = Vec::new();
+        let err = fields
+            .copy_until(until_group_ends(start.field_number), &mut out)
+            .unwrap_err();
+        assert!(matches!(err, ProtobufError::UnexpectedEof));
+        // Copied the incomplete body's varint field before EOF waiting for EGroup.
+        assert_eq!(out, vec![0x08, 0x01]);
+    }
+
+    #[test]
+    fn round_trip_preserved_group_reparsed() {
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x10, 0x01, // 2 varint 1
+            0x12, 0x03, b'a', b'b', b'c', // 2 len
+            0x15, 0x11, 0x22, 0x33, 0x44, // 2 fixed32
+            0x13, // 2 SGroup
+            0x18, 0x02, // 3 varint 2
+            0x14, // 2 EGroup
+            0x0C, // 1 EGroup
+        ];
+        let mut fields = slice_fields(&bytes);
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+
+        let mut preserved = Vec::new();
+        preserved.write_protobuf_field(&start).unwrap();
+        let body = fields
+            .take_until(until_group_ends(start.field_number))
+            .unwrap();
+        preserved.extend_from_slice(body);
+        assert_eq!(preserved.as_slice(), bytes.as_slice());
+
+        let reparsed: Vec<_> = AsRefExtProtobuf::read_protobuf_fields(preserved.as_slice())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(reparsed.len(), 8);
+        assert!(matches!(reparsed[0].value, FieldValue::SGroup));
+        assert_eq!(reparsed[0].field_number.as_u32(), 1);
+        assert!(matches!(&reparsed[1].value, FieldValue::Varint(v) if v.to_uint64() == 1));
+        assert!(matches!(reparsed[2].value, FieldValue::Len(b"abc")));
+        assert!(matches!(
+            &reparsed[3].value,
+            FieldValue::I32([0x11, 0x22, 0x33, 0x44])
+        ));
+        assert!(matches!(reparsed[4].value, FieldValue::SGroup));
+        assert_eq!(reparsed[4].field_number.as_u32(), 2);
+        assert!(matches!(&reparsed[5].value, FieldValue::Varint(v) if v.to_uint64() == 2));
+        assert!(matches!(reparsed[6].value, FieldValue::EGroup));
+        assert_eq!(reparsed[6].field_number.as_u32(), 2);
+        assert!(matches!(reparsed[7].value, FieldValue::EGroup));
+        assert_eq!(reparsed[7].field_number.as_u32(), 1);
+    }
+
+    #[test]
+    fn read_copy_until_round_trip_matches_slice_take() {
+        let bytes = message_with_group_then_varint();
+        let group_only = &bytes[..bytes.len() - 2]; // drop trailing field 3
+
+        let mut slice_fields = slice_fields(group_only);
+        let start = slice_fields.next().unwrap().unwrap();
+        let mut from_slice = Vec::new();
+        from_slice.write_protobuf_field(&start).unwrap();
+        from_slice.extend_from_slice(
+            slice_fields
+                .take_until(until_group_ends(start.field_number))
+                .unwrap(),
+        );
+
+        let len = group_only.len();
+        let mut read_fields = Cursor::new(group_only.to_vec()).read_protobuf_fields(len);
+        let start = read_fields.next().unwrap().unwrap();
+        let mut from_read = Vec::new();
+        let start_len = from_read.write_protobuf_field(&start).unwrap();
+        let body_written = read_fields
+            .copy_until(until_group_ends(start.field_number), &mut from_read)
+            .unwrap();
+
+        assert_eq!(from_slice, group_only);
+        assert_eq!(from_read, from_slice);
+        assert_eq!(start_len + body_written, from_read.len());
+    }
+
+    #[test]
+    fn read_copy_until_preserves_noncanonical_varints() {
+        // Overlong length prefix (1 encoded as 0x81 0x00) must not be
+        // re-canonicalized to 0x01 when copying through Read.
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x12, 0x81, 0x00, b'x', // 2 Len, non-canonical length=1, payload 'x'
+            0x0C, // 1 EGroup
+        ];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        assert!(matches!(start.value, FieldValue::SGroup));
+        let mut out = Vec::new();
+        let written = fields
+            .copy_until(until_group_ends(start.field_number), &mut out)
+            .unwrap();
+        assert_eq!(out, vec![0x12, 0x81, 0x00, b'x', 0x0C]);
+        assert_eq!(written, out.len());
+    }
+
+    #[test]
+    fn read_copy_until_preserves_fixed32_and_fixed64() {
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x15, 0x01, 0x02, 0x03, 0x04, // 2 fixed32
+            0x09, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // 1 fixed64
+            0x0C, // 1 EGroup
+        ];
+        let expected_body = &bytes[1..];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        let mut out = Vec::new();
+        let written = fields
+            .copy_until(until_group_ends(start.field_number), &mut out)
+            .unwrap();
+        assert_eq!(out, expected_body);
+        assert_eq!(written, out.len());
+        assert!(fields.next().is_none());
     }
 }
 
@@ -1249,6 +2161,45 @@ mod group_skip {
             .skip_until(until_group_ends(start.field_number))
             .unwrap();
         assert_eq!(cursor.remaining(), 0);
+        assert!(slice.is_empty());
+    }
+
+    #[test]
+    fn slice_reader_read_varint_with_raw_returns_input_subslice() {
+        use crate::wire_format::MAX_VARINT_BYTES;
+
+        let bytes = [0x96u8, 0x01, 0x08];
+        let mut slice = bytes.as_slice();
+        let mut cursor = SliceReader { slice: &mut slice };
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        let (varint, raw) = cursor.read_varint_with_raw(&mut buf).unwrap();
+        assert_eq!(varint.to_uint64(), 150);
+        assert_eq!(raw, &[0x96, 0x01]);
+        assert!(::std::ptr::eq(raw.as_ptr(), bytes.as_ptr()));
+        assert_eq!(slice, &[0x08]);
+    }
+
+    #[test]
+    fn slice_reader_copy_field_copies_fixed_and_len() {
+        // field 2 fixed32, field 3 fixed64, field 4 len "ab"
+        let bytes = [
+            0x15, 0x01, 0x02, 0x03, 0x04, // fixed32
+            0x19, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // fixed64
+            0x22, 0x02, b'a', b'b', // len
+        ];
+        let mut slice = bytes.as_slice();
+        let mut cursor = SliceReader { slice: &mut slice };
+        let mut out = Vec::new();
+        let (tag, n) = cursor.copy_field(&mut out).unwrap();
+        assert_eq!(tag.wire_type, WireType::Int32);
+        assert_eq!(n, 5);
+        let (tag, n) = cursor.copy_field(&mut out).unwrap();
+        assert_eq!(tag.wire_type, WireType::Int64);
+        assert_eq!(n, 9);
+        let (tag, n) = cursor.copy_field(&mut out).unwrap();
+        assert_eq!(tag.wire_type, WireType::Len);
+        assert_eq!(n, 4);
+        assert_eq!(out, bytes);
         assert!(slice.is_empty());
     }
 
