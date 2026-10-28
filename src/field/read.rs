@@ -260,11 +260,11 @@ pub(crate) trait WireCursor {
 
     /// Read a varint and return its exact wire bytes.
     ///
-    /// The returned slice borrows for the joint lifetime of `self` and `buf`:
-    /// it may point into the cursor's input (slice path, no copy) or into
-    /// `buf` (Read path fills `buf` while decoding). Length is in
-    /// `1..=MAX_VARINT_BYTES`. Empty input is [`ProtobufError::UnexpectedEof`]
-    /// (caller must check [`remaining`](Self::remaining) first for soft end).
+    /// The returned slice borrows for the joint lifetime of `self` and `buf`.
+    /// Length is in `1..=MAX_VARINT_BYTES`. [`SliceReader`] returns a subslice of
+    /// the input (no copy); [`Read`] paths fill `buf` and return `&buf[..n]`.
+    /// Empty input is [`ProtobufError::UnexpectedEof`] (caller must check
+    /// [`remaining`](Self::remaining) first for soft end).
     fn read_varint_with_raw<'a>(
         &'a mut self,
         buf: &'a mut [u8; MAX_VARINT_BYTES],
@@ -767,7 +767,11 @@ impl WireCursor for SliceReader<'_, '_> {
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
         use crate::varint::ReadExtVarint;
-        self.slice.read_varint_with_raw(buf)
+        // Decode via ReadExtVarint (tees into `buf`), then return the same-length
+        // span from the input slice so callers see zero-copy wire bytes.
+        let head = *self.slice;
+        let (varint, teed) = self.slice.read_varint_with_raw(buf)?;
+        Ok((varint, &head[..teed.len()]))
     }
 
     #[inline]

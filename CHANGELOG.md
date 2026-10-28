@@ -27,7 +27,7 @@ Additive public API for unknown-field group preserve. Callers that only skip gro
 
 ### Internal
 
-- `WireCursor` is Iterator-like: required fragments (`remaining` / `read_varint_with_raw` / fixed / `skip_bytes` / `copy_bytes`) plus default compose methods (`read_varint` / `read_tag` / `skip_field` / `skip_until` / `copy_field` / `copy_until`). Cursor `read_varint_with_raw` delegates to `ReadExtVarint::read_varint_with_raw` for both `Read` and slice.
+- `WireCursor` is Iterator-like: required fragments (`remaining` / `read_varint_with_raw` / fixed / `skip_bytes` / `copy_bytes`) plus default compose methods (`read_varint` / `read_tag` / `skip_field` / `skip_until` / `copy_field` / `copy_until`). Read cursors delegate `read_varint_with_raw` to `ReadExtVarint` (raw in `buf`); `SliceReader` reuses that decode but returns the same-length subslice of the input (zero-copy raw).
 
 ## [0.6.0]
 
