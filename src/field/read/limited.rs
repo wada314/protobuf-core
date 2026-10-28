@@ -37,19 +37,19 @@ fn copy_len_to_vec<R: Read + ?Sized>(
     Ok((buf, len))
 }
 
-/// Private length budget over an underlying [`Read`].
+/// Private length budget over an owned [`Read`].
 ///
-/// Used only inside this module so tag/varint/fixed reads cannot run past the
-/// message `len` passed to [`ReadExtProtobuf`]. Not exported: Len handlers get
-/// `&mut R` plus the payload length instead.
-struct LimitedRead<'a, R: ?Sized> {
-    inner: &'a mut R,
+/// Stored inside [`FieldIterFromRead`] so tag/varint/fixed reads cannot run past
+/// the message `len` passed to [`ReadExtProtobuf`]. Not exported: Len handlers
+/// get `&mut R` plus the payload length instead.
+struct LimitedRead<R> {
+    inner: R,
     remaining: usize,
 }
 
-impl<'a, R: Read + ?Sized> LimitedRead<'a, R> {
+impl<R: Read> LimitedRead<R> {
     #[inline]
-    fn new(inner: &'a mut R, remaining: usize) -> Self {
+    fn new(inner: R, remaining: usize) -> Self {
         Self { inner, remaining }
     }
 
@@ -62,7 +62,7 @@ impl<'a, R: Read + ?Sized> LimitedRead<'a, R> {
         let mut buf = [0u8; 256];
         while n > 0 {
             let chunk = n.min(buf.len());
-            Read::read_exact(self.inner, &mut buf[..chunk])?;
+            Read::read_exact(&mut self.inner, &mut buf[..chunk])?;
             n -= chunk;
         }
         Ok(())
@@ -76,11 +76,11 @@ impl<'a, R: Read + ?Sized> LimitedRead<'a, R> {
 /// remainder is drained from the underlying reader (message budget already
 /// committed for the full length).
 fn parse_protobuf_field_with<R, L, F>(
-    limited: &mut LimitedRead<'_, R>,
+    limited: &mut LimitedRead<R>,
     handler: &mut F,
 ) -> Result<Field<L>>
 where
-    R: Read + ?Sized,
+    R: Read,
     F: FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>,
 {
     let tag = WireCursor::read_tag(limited)?;
@@ -95,7 +95,7 @@ where
                 return Err(ProtobufError::UnexpectedEof);
             }
             limited.remaining -= length_usize;
-            let (payload, consumed) = handler(tag.field_number, limited.inner, length)?;
+            let (payload, consumed) = handler(tag.field_number, &mut limited.inner, length)?;
             if consumed > length {
                 return Err(ProtobufError::UnexpectedEof);
             }
@@ -114,7 +114,7 @@ where
     })
 }
 
-impl<R: Read + ?Sized> Read for LimitedRead<'_, R> {
+impl<R: Read> Read for LimitedRead<R> {
     #[inline]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.remaining == 0 || buf.is_empty() {
@@ -127,7 +127,7 @@ impl<R: Read + ?Sized> Read for LimitedRead<'_, R> {
     }
 }
 
-impl<R: Read + ?Sized> WireCursor for LimitedRead<'_, R> {
+impl<R: Read> WireCursor for LimitedRead<R> {
     #[inline]
     fn remaining(&self) -> usize {
         self.remaining
@@ -181,12 +181,11 @@ impl<R: Read + ?Sized> WireCursor for LimitedRead<'_, R> {
 /// Iterator for reading raw protobuf fields sequentially from a reader.
 ///
 /// Bounded by the `len` passed to [`ReadExtProtobuf::read_protobuf_fields`].
-/// Uses an internal message-byte budget over `R` — not nested [`std::io::Take`].
+/// Holds an internal length-limited budget over owned `R` — not nested [`std::io::Take`].
 /// `F` is the Len-body handler (default [`VecLenPayload`], or a
 /// `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>`).
 pub struct FieldIterFromRead<R, F = VecLenPayload> {
-    inner: R,
-    remaining: usize,
+    limited: LimitedRead<R>,
     handler: F,
 }
 
@@ -204,10 +203,7 @@ impl<R: Read, F> FieldIterFromRead<R, F> {
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        let mut limited = LimitedRead::new(&mut self.inner, self.remaining);
-        let result = WireCursor::skip_until(&mut limited, pred);
-        self.remaining = limited.remaining;
-        result
+        WireCursor::skip_until(&mut self.limited, pred)
     }
 
     /// Iterate fields until the matching end-group for `field_number`.
@@ -236,16 +232,13 @@ impl<R: Read, F> FieldIterFromRead<R, F> {
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
-        let mut limited = LimitedRead::new(&mut self.inner, self.remaining);
-        let result = WireCursor::copy_until(&mut limited, pred, out);
-        self.remaining = limited.remaining;
-        result
+        WireCursor::copy_until(&mut self.limited, pred, out)
     }
 
     /// Bytes still allowed in this iterator's budget.
     #[inline]
     pub fn remaining(&self) -> usize {
-        self.remaining
+        self.limited.remaining
     }
 }
 
@@ -253,13 +246,13 @@ impl<R: Read> Iterator for FieldIterFromRead<R, VecLenPayload> {
     type Item = Result<Field<Vec<u8>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
+        if self.limited.remaining == 0 {
             return None;
         }
-        let mut limited = LimitedRead::new(&mut self.inner, self.remaining);
-        let result = parse_protobuf_field_with(&mut limited, &mut copy_len_to_vec);
-        self.remaining = limited.remaining;
-        Some(result)
+        Some(parse_protobuf_field_with(
+            &mut self.limited,
+            &mut copy_len_to_vec,
+        ))
     }
 }
 
@@ -271,13 +264,13 @@ where
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
+        if self.limited.remaining == 0 {
             return None;
         }
-        let mut limited = LimitedRead::new(&mut self.inner, self.remaining);
-        let result = parse_protobuf_field_with(&mut limited, &mut self.handler);
-        self.remaining = limited.remaining;
-        Some(result)
+        Some(parse_protobuf_field_with(
+            &mut self.limited,
+            &mut self.handler,
+        ))
     }
 }
 
@@ -382,8 +375,7 @@ where
         Self: Sized,
     {
         FieldIterFromRead {
-            inner: self,
-            remaining: len,
+            limited: LimitedRead::new(self, len),
             handler: VecLenPayload,
         }
     }
@@ -394,8 +386,7 @@ where
         F: FnMut(FieldNumber, &mut Self, u32) -> Result<(L, u32)>,
     {
         FieldIterFromRead {
-            inner: self,
-            remaining: len,
+            limited: LimitedRead::new(self, len),
             handler,
         }
     }

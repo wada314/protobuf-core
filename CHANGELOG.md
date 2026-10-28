@@ -23,7 +23,7 @@ Breaking for any caller of the removed varint/tag partial-resume API, of `read_v
 ### Changed
 
 - `ReadExtVarint::read_varint` / `read_varint_with_raw` and `ReadExtTag::read_tag` return `Result<…>` without `Option`. Empty input is `UnexpectedEof` (same as truncated); soft end is a caller `remaining` / length-bound check. `read_varints` soft-stops on empty.
-- `ReadExtProtobuf::read_protobuf_fields_with` takes `F: FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>` instead of `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>`. Len payload length is `u32` (`try_to_uint32`); consumed is trusted; remainder is drained and the message budget shrinks by the full length. Default `read_protobuf_fields` still yields `Field<Vec<u8>>` via `VecLenPayload`. `FieldIterFromRead` stores `(R, remaining, F)` rather than `Take<R>`. When the message budget equals the available bytes, mid-field truncation is `UnexpectedEof` from the local budget (not necessarily `IoError`).
+- `ReadExtProtobuf::read_protobuf_fields_with` takes `F: FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>` instead of `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>`. Len payload length is `u32` (`try_to_uint32`); consumed is trusted; remainder is drained and the message budget shrinks by the full length. Default `read_protobuf_fields` still yields `Field<Vec<u8>>` via `VecLenPayload`. `FieldIterFromRead` stores an internal owning length budget over `R` (not `Take<R>`, and not a split `(R, remaining)` pair). When the message budget equals the available bytes, mid-field truncation is `UnexpectedEof` from the local budget (not necessarily `IoError`).
 
 ### Removed
 
