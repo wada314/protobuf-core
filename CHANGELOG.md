@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Breaking** relative to published `0.6.0`, plus additive group preserve / parse helpers. Version bump left for a separate release PR (bump before the next crates.io publish).
+**Breaking** relative to published `0.6.0`, plus additive group preserve / parse helpers and a redesigned streaming Len path. Version bump left for a separate release PR (bump before the next crates.io publish).
 
-Breaking for any caller of the removed varint/tag partial-resume API, or of `read_varint` / `read_tag` as `Result<Option<_>>` (including skip-only code that matched on `None`). Empty complete reads are now `UnexpectedEof`; soft end is a `remaining` / length-bound check (or `read_varints`).
+Breaking for any caller of the removed varint/tag partial-resume API, of `read_varint` / `read_tag` as `Result<Option<_>>` (including skip-only code that matched on `None`), or of `read_protobuf_fields_with` / `FieldIterFromRead`'s old `FnMut(usize) -> Result<L>` + `L: AsMut<[u8]>` payload builder (including code that named the old default `fn(usize) -> …` type parameter). Empty complete reads are now `UnexpectedEof`; soft end is a `remaining` / length-bound check (or `read_varints`).
 
 ### Added
 
@@ -18,10 +18,12 @@ Breaking for any caller of the removed varint/tag partial-resume API, or of `rea
 - `FieldIterFromRead::copy_until(pred, out)` — same stop semantics as `skip_until` for streaming input; tees exact wire bytes to `out` (including non-canonical varints).
 - `GroupBody` / `group_body(field_number)` on field iterators — adapter that yields body fields until the matching outermost `EGroup` (consumed, not yielded). Nesting uses a depth counter only; **nested end-group field numbers are not validated** (caller should nest another `group_body` when seeing an inner `SGroup`). Distinct from `until_group_ends`, which keeps a full field-number stack for skip/preserve. Premature end of input before that `EGroup` is `UnexpectedEof`. After the first `None` or a yielded `Err`, further `next` is unspecified (may read past the group); use `Iterator::fuse` for sticky `None`.
 - Contract for skip/preserve mirrors `until_group_ends`: the start-group tag is already consumed (caller writes it to a preserve blob if needed); the helper advances past the matching end-group. Nested groups use the same stack rules. On predicate / decode error, the input cursor may have advanced; `Read` `copy_until` may leave a partial write in `out`.
+- `Limited`, `OnLen`, `VecLenPayload` — streaming Len bodies are a length budget over a shared `Read` with `reborrow_len` for nested messages (no nested `std::io::Take`). `on_len` returns any payload type `L`. `Limited::parse_field` / `read_protobuf_fields` support nested consumption inside a handler. Example: `examples/nested_len_sketch.rs`.
 
 ### Changed
 
 - `ReadExtVarint::read_varint` / `read_varint_with_raw` and `ReadExtTag::read_tag` return `Result<…>` without `Option`. Empty input is `UnexpectedEof` (same as truncated); soft end is a caller `remaining` / length-bound check. `read_varints` soft-stops on empty.
+- `ReadExtProtobuf::read_protobuf_fields_with` takes `F: OnLen<R>` instead of `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>`. Default `read_protobuf_fields` still yields `Field<Vec<u8>>` via `VecLenPayload`. `FieldIterFromRead` stores `(R, remaining, F)` rather than `Take<R>`. When the message budget equals the available bytes, mid-field truncation is `UnexpectedEof` from the local budget (not necessarily `IoError`).
 
 ### Removed
 
