@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Additive public API for unknown-field group preserve. Callers that only skip groups need no changes. Version bump left for a separate release PR.
+**Breaking** relative to published `0.6.0`, plus additive group preserve / parse helpers. Version bump left for a separate release PR (bump before the next crates.io publish).
+
+Breaking for any caller of the removed varint/tag partial-resume API, or of `read_varint` / `read_tag` as `Result<Option<_>>` (including skip-only code that matched on `None`). Empty complete reads are now `UnexpectedEof`; soft end is a `remaining` / length-bound check (or `read_varints`).
 
 ### Added
 
