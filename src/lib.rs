@@ -58,7 +58,7 @@
 //!
 //! - [`Field<L>`]: Represents a raw protobuf field with a field number and value.
 //!   The `L` type parameter represents the type used for length-delimited values
-//!   (`Vec<u8>` by default from `Read`, a custom type from [`LenPayloadHandler`], or
+//!   (`Vec<u8>` by default from `Read`, a custom type from a Len handler closure, or
 //!   `&'a [u8]` for a slice read).
 //! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
 //!   - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64,
@@ -92,7 +92,7 @@
 //!   - Output: [`Field<&[u8]>`] — Len values are borrowed `&[u8]` slices (zero-copy)
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types with an explicit
 //!   byte budget `len` (tracked by [`LimitedRead`], not [`std::io::Take`])
-//!   - Output: [`Field<Vec<u8>>`] by default, or [`Field<L>`] from a custom [`LenPayloadHandler`]
+//!   - Output: [`Field<Vec<u8>>`] by default, or [`Field<L>`] from a Len handler closure
 //! - [`LimitedRead`]: Length budget over a `Read` with [`LimitedRead::reborrow_len`] for
 //!   nested Len bodies without nested `Take` adapters
 //! - [`LimitedReadExtProtobuf`]: Protobuf field parse helpers on [`LimitedRead`]
@@ -136,8 +136,8 @@ pub(crate) mod wire_format;
 
 pub use self::field::{
     AsRefExtProtobuf, Field, FieldIterFromRead, FieldIterFromSlice, FieldValue, GroupBody,
-    LenPayloadHandler, LimitedRead, LimitedReadExtProtobuf, ReadExtProtobuf, VecLenPayload,
-    WriteExtProtobuf, until_group_ends,
+    LimitedRead, LimitedReadExtProtobuf, ReadExtProtobuf, VecLenPayload, WriteExtProtobuf,
+    until_group_ends,
 };
 pub use self::field_number::FieldNumber;
 pub use self::tag::{ReadExtTag, Tag};
