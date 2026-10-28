@@ -105,38 +105,38 @@ fn copy_len_to_vec<R: Read + ?Sized>(
     Ok((buf, len))
 }
 
-/// Parse one protobuf field from `take`.
+/// Parse one protobuf field from `read`.
 ///
 /// When the field is length-delimited, `handler` runs once for that Len body
 /// with `&mut R` and the payload `length` (`u32` from the length prefix). It
 /// returns `(payload, consumed)`; `consumed` is trusted. The caller drains any
 /// remainder via [`Take32::drain_inner`] and sets the post-Len budget with
 /// [`Take32::set_limit`]. Other wire types do not call `handler`.
-fn parse_protobuf_field_with<R, L, F>(take: &mut Take32<R>, handler: &mut F) -> Result<Field<L>>
+fn parse_protobuf_field_with<R, L, F>(read: &mut Take32<R>, handler: &mut F) -> Result<Field<L>>
 where
     R: Read,
     F: FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>,
 {
-    let tag = WireCursor::read_tag(take)?;
+    let tag = WireCursor::read_tag(read)?;
     let value = match tag.wire_type {
-        WireType::Varint => FieldValue::Varint(WireCursor::read_varint(take)?),
-        WireType::Int32 => FieldValue::I32(WireCursor::read_fixed(take)?),
-        WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(take)?),
+        WireType::Varint => FieldValue::Varint(WireCursor::read_varint(read)?),
+        WireType::Int32 => FieldValue::I32(WireCursor::read_fixed(read)?),
+        WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(read)?),
         WireType::Len => {
-            let length = WireCursor::read_varint(take)?.try_to_uint32()?;
-            if length > take.limit() {
+            let length = WireCursor::read_varint(read)?.try_to_uint32()?;
+            if length > read.limit() {
                 return Err(ProtobufError::UnexpectedEof);
             }
-            let (payload, consumed) = handler(tag.field_number, take.get_mut(), length)?;
+            let (payload, consumed) = handler(tag.field_number, read.get_mut(), length)?;
             let unread = length
                 .checked_sub(consumed)
                 .ok_or(ProtobufError::UnexpectedEof)?;
             if unread > 0 {
-                take.drain_inner(unread)?;
+                read.drain_inner(unread)?;
             }
             // `get_mut` / `drain_inner` do not change `limit`, so this matches the
             // pre-handler check above.
-            take.set_limit(take.limit() - length);
+            read.set_limit(read.limit() - length);
             FieldValue::Len(payload)
         }
         WireType::SGroup => FieldValue::SGroup,
@@ -207,7 +207,7 @@ impl<R: Read> WireCursor for Take32<R> {
 /// iterator is built). `F` is the Len-body handler (default [`VecLenPayload`],
 /// or a `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>`).
 pub struct FieldIterFromRead<R, F = VecLenPayload> {
-    take: Take32<R>,
+    read: Take32<R>,
     handler: F,
 }
 
@@ -225,7 +225,7 @@ impl<R: Read, F> FieldIterFromRead<R, F> {
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        WireCursor::skip_until(&mut self.take, pred)
+        WireCursor::skip_until(&mut self.read, pred)
     }
 
     /// Iterate fields until the matching end-group for `field_number`.
@@ -254,13 +254,13 @@ impl<R: Read, F> FieldIterFromRead<R, F> {
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
-        WireCursor::copy_until(&mut self.take, pred, out)
+        WireCursor::copy_until(&mut self.read, pred, out)
     }
 
     /// Bytes still allowed in this iterator's budget.
     #[inline]
     pub fn remaining(&self) -> u32 {
-        self.take.limit()
+        self.read.limit()
     }
 }
 
@@ -268,11 +268,11 @@ impl<R: Read> Iterator for FieldIterFromRead<R, VecLenPayload> {
     type Item = Result<Field<Vec<u8>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.take.limit() == 0 {
+        if self.read.limit() == 0 {
             return None;
         }
         Some(parse_protobuf_field_with(
-            &mut self.take,
+            &mut self.read,
             &mut copy_len_to_vec,
         ))
     }
@@ -286,10 +286,10 @@ where
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.take.limit() == 0 {
+        if self.read.limit() == 0 {
             return None;
         }
-        Some(parse_protobuf_field_with(&mut self.take, &mut self.handler))
+        Some(parse_protobuf_field_with(&mut self.read, &mut self.handler))
     }
 }
 
@@ -406,7 +406,7 @@ where
             "message budget exceeds MAX_MESSAGE_SIZE"
         );
         FieldIterFromRead {
-            take: Take32::new(self, len),
+            read: Take32::new(self, len),
             handler: VecLenPayload,
         }
     }
@@ -421,7 +421,7 @@ where
             "message budget exceeds MAX_MESSAGE_SIZE"
         );
         FieldIterFromRead {
-            take: Take32::new(self, len),
+            read: Take32::new(self, len),
             handler,
         }
     }
