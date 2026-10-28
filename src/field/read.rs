@@ -1435,6 +1435,30 @@ mod group_body_adapter {
     }
 
     #[test]
+    fn group_body_accessors_expose_field_number_and_inner() {
+        let bytes = [0x0B, 0x0C, 0x10, 0x02];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let mut body = fields.group_body(n);
+        assert_eq!(body.field_number(), n);
+        let _ = body.inner();
+        let _ = body.inner_mut();
+        assert!(body.next().is_none()); // empty group body
+        let after = body.into_inner().next().unwrap().unwrap();
+        assert_eq!(after.field_number.as_u32(), 2);
+    }
+
+    #[test]
+    fn group_body_propagates_inner_decode_error() {
+        // SGroup then truncated fixed32 tag/payload → Err from inner parse.
+        let bytes = [0x0B, 0x0D, 0x01];
+        let mut fields = slice_fields(&bytes);
+        let n = expect_sgroup(&mut fields);
+        let err = fields.group_body(n).next().unwrap().unwrap_err();
+        assert!(matches!(err, ProtobufError::UnexpectedEof));
+    }
+
+    #[test]
     fn after_none_further_next_may_read_past_group() {
         let bytes = [0x0B, 0x0C, 0x08, 0x01];
         let mut fields = slice_fields(&bytes);
@@ -1893,6 +1917,27 @@ mod group_preserve {
         assert_eq!(out, vec![0x12, 0x81, 0x00, b'x', 0x0C]);
         assert_eq!(written, out.len());
     }
+
+    #[test]
+    fn read_copy_until_preserves_fixed32_and_fixed64() {
+        let bytes = [
+            0x0B, // 1 SGroup
+            0x15, 0x01, 0x02, 0x03, 0x04, // 2 fixed32
+            0x09, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // 1 fixed64
+            0x0C, // 1 EGroup
+        ];
+        let expected_body = &bytes[1..];
+        let len = bytes.len();
+        let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
+        let start = fields.next().unwrap().unwrap();
+        let mut out = Vec::new();
+        let written = fields
+            .copy_until(until_group_ends(start.field_number), &mut out)
+            .unwrap();
+        assert_eq!(out, expected_body);
+        assert_eq!(written, out.len());
+        assert!(fields.next().is_none());
+    }
 }
 
 #[cfg(test)]
@@ -2132,6 +2177,30 @@ mod group_skip {
         assert_eq!(raw, &[0x96, 0x01]);
         assert!(::std::ptr::eq(raw.as_ptr(), bytes.as_ptr()));
         assert_eq!(slice, &[0x08]);
+    }
+
+    #[test]
+    fn slice_reader_copy_field_copies_fixed_and_len() {
+        // field 2 fixed32, field 3 fixed64, field 4 len "ab"
+        let bytes = [
+            0x15, 0x01, 0x02, 0x03, 0x04, // fixed32
+            0x19, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // fixed64
+            0x22, 0x02, b'a', b'b', // len
+        ];
+        let mut slice = bytes.as_slice();
+        let mut cursor = SliceReader { slice: &mut slice };
+        let mut out = Vec::new();
+        let (tag, n) = cursor.copy_field(&mut out).unwrap();
+        assert_eq!(tag.wire_type, WireType::Int32);
+        assert_eq!(n, 5);
+        let (tag, n) = cursor.copy_field(&mut out).unwrap();
+        assert_eq!(tag.wire_type, WireType::Int64);
+        assert_eq!(n, 9);
+        let (tag, n) = cursor.copy_field(&mut out).unwrap();
+        assert_eq!(tag.wire_type, WireType::Len);
+        assert_eq!(n, 4);
+        assert_eq!(out, bytes);
+        assert!(slice.is_empty());
     }
 
     #[test]
