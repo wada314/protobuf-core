@@ -124,10 +124,9 @@ where
         WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(take)?),
         WireType::Len => {
             let length = WireCursor::read_varint(take)?.try_to_uint32()?;
-            let new_limit = take
-                .limit()
-                .checked_sub(length)
-                .ok_or(ProtobufError::UnexpectedEof)?;
+            if length > take.limit() {
+                return Err(ProtobufError::UnexpectedEof);
+            }
             let (payload, consumed) = handler(tag.field_number, take.get_mut(), length)?;
             let unread = length
                 .checked_sub(consumed)
@@ -135,7 +134,9 @@ where
             if unread > 0 {
                 take.drain_inner(unread)?;
             }
-            take.set_limit(new_limit);
+            // `get_mut` / `drain_inner` do not change `limit`, so this matches the
+            // pre-handler check above.
+            take.set_limit(take.limit() - length);
             FieldValue::Len(payload)
         }
         WireType::SGroup => FieldValue::SGroup,
