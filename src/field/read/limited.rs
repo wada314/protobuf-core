@@ -925,7 +925,7 @@ mod len_payload {
                         let _ = inner_n;
                         Ok(LenValue::Bytes(bytes))
                     };
-                    for field in body.read_protobuf_fields(&mut raw)? {
+                    for field in body.collect_protobuf_fields(&mut raw)? {
                         match (field.field_number.as_u32(), field.value) {
                             (1, FieldValue::Varint(v)) => child.id = v.to_uint64(),
                             (3, FieldValue::Len(LenValue::Bytes(name))) => child.name = name,
