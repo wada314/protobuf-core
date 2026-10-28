@@ -95,6 +95,8 @@
 //!   - Output: [`Field<Vec<u8>>`] by default, or [`Field<L>`] from a custom [`LenPayloadHandler`]
 //! - [`LimitedRead`]: Length budget over a `Read` with [`LimitedRead::reborrow_len`] for
 //!   nested Len bodies without nested `Take` adapters
+//! - [`LimitedReadExtProtobuf`]: Protobuf field parse helpers on [`LimitedRead`]
+//!   (`parse_protobuf_field` / `collect_protobuf_fields`) for nested Len handling
 //!
 //! Field iterators expose `skip_until`, slice `take_until`, Read `copy_until`,
 //! and [`group_body`](FieldIterFromSlice::group_body) /
@@ -134,8 +136,8 @@ pub(crate) mod wire_format;
 
 pub use self::field::{
     AsRefExtProtobuf, Field, FieldIterFromRead, FieldIterFromSlice, FieldValue, GroupBody,
-    LenPayloadHandler, LimitedRead, ReadExtProtobuf, VecLenPayload, WriteExtProtobuf,
-    until_group_ends,
+    LenPayloadHandler, LimitedRead, LimitedReadExtProtobuf, ReadExtProtobuf, VecLenPayload,
+    WriteExtProtobuf, until_group_ends,
 };
 pub use self::field_number::FieldNumber;
 pub use self::tag::{ReadExtTag, Tag};
