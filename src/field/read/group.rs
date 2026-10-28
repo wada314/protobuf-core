@@ -395,7 +395,7 @@ mod group_body_adapter {
     #[test]
     fn works_on_read_iterator() {
         let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
-        let len = bytes.len();
+        let len = bytes.len() as u32;
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         assert!(matches!(start.value, FieldValue::SGroup));
@@ -531,7 +531,7 @@ mod group_preserve {
     #[test]
     fn read_copy_until_preserves_group_body() {
         let bytes = message_with_group_then_varint();
-        let len = bytes.len();
+        let len = bytes.len() as u32;
         let mut fields = Cursor::new(bytes.clone()).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         assert!(matches!(start.value, FieldValue::SGroup));
@@ -554,7 +554,7 @@ mod group_preserve {
     #[test]
     fn read_copy_until_empty_group_body() {
         let bytes = [0x0B, 0x0C, 0x08, 0x01];
-        let len = bytes.len();
+        let len = bytes.len() as u32;
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         assert!(matches!(start.value, FieldValue::SGroup));
@@ -583,7 +583,7 @@ mod group_preserve {
             0x14, // 2 EGroup
             0x0C, // 1 EGroup
         ];
-        let len = bytes.len();
+        let len = bytes.len() as u32;
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         let mut out = Vec::new();
@@ -598,7 +598,7 @@ mod group_preserve {
     #[test]
     fn read_copy_until_mismatched_end_group() {
         let bytes = [0x0B, 0x14];
-        let len = bytes.len();
+        let len = bytes.len() as u32;
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         let mut out = Vec::new();
@@ -617,7 +617,7 @@ mod group_preserve {
     #[test]
     fn read_copy_until_truncated_group_is_unexpected_eof() {
         let bytes = [0x0B, 0x08, 0x01];
-        let len = bytes.len();
+        let len = bytes.len() as u32;
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         assert!(matches!(start.value, FieldValue::SGroup));
@@ -691,7 +691,7 @@ mod group_preserve {
                 .unwrap(),
         );
 
-        let len = group_only.len();
+        let len = group_only.len() as u32;
         let mut read_fields = Cursor::new(group_only.to_vec()).read_protobuf_fields(len);
         let start = read_fields.next().unwrap().unwrap();
         let mut from_read = Vec::new();
@@ -714,7 +714,7 @@ mod group_preserve {
             0x12, 0x81, 0x00, b'x', // 2 Len, non-canonical length=1, payload 'x'
             0x0C, // 1 EGroup
         ];
-        let len = bytes.len();
+        let len = bytes.len() as u32;
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         assert!(matches!(start.value, FieldValue::SGroup));
@@ -735,7 +735,7 @@ mod group_preserve {
             0x0C, // 1 EGroup
         ];
         let expected_body = &bytes[1..];
-        let len = bytes.len();
+        let len = bytes.len() as u32;
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         let mut out = Vec::new();
@@ -932,7 +932,7 @@ mod group_skip {
                 .value,
             FieldValue::SGroup
         );
-        let remaining = reader.get_ref().len() - reader.position() as usize;
+        let remaining = (reader.get_ref().len() - reader.position() as usize) as u32;
         let mut fields = reader.read_protobuf_fields(remaining);
         fields.skip_until(until_group_ends(field(1))).unwrap();
         let after = fields.next().unwrap().unwrap();
@@ -1019,7 +1019,7 @@ mod group_skip {
         use ::std::io::Cursor;
 
         let bytes = message_with_group_then_varint();
-        let len = bytes.len();
+        let len = bytes.len() as u32;
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         assert!(matches!(start.value, FieldValue::SGroup));
@@ -1041,7 +1041,7 @@ mod group_skip {
         // Exercises ReadCursor::skip_bytes via Len inside skip_until.
         // field 1 SGroup, field 2 len "ab", field 1 EGroup, field 3 varint 7
         let bytes = [0x0B, 0x12, 0x02, b'a', b'b', 0x0C, 0x18, 0x07];
-        let len = bytes.len();
+        let len = bytes.len() as u32;
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         assert!(matches!(start.value, FieldValue::SGroup));
@@ -1072,7 +1072,7 @@ mod group_skip {
         bytes.push(0x0C); // field 1 EGroup
         bytes.extend_from_slice(&[0x18, 0x07]); // field 3 varint 7
 
-        let len = bytes.len();
+        let len = bytes.len() as u32;
         let mut fields = Cursor::new(bytes).read_protobuf_fields(len);
         let start = fields.next().unwrap().unwrap();
         assert!(matches!(start.value, FieldValue::SGroup));

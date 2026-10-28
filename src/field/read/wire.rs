@@ -18,7 +18,11 @@ use ::std::io::Write;
 /// [`ProtobufError::UnexpectedEof`].
 pub(crate) trait WireCursor {
     /// Bytes still allowed in this cursor's bound (message budget / slice length).
-    fn remaining(&self) -> usize;
+    ///
+    /// Protobuf message sizes are treated as [`u32`] (see `MAX_MESSAGE_SIZE`).
+    /// Host slices longer than `u32::MAX` report [`u32::MAX`] until drained
+    /// below that (soft end is still `remaining() == 0` only when empty).
+    fn remaining(&self) -> u32;
 
     /// Read a varint and return its exact wire bytes.
     ///
@@ -45,12 +49,12 @@ pub(crate) trait WireCursor {
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]>;
 
     /// Discard exactly `length` bytes without allocating a payload buffer.
-    fn skip_bytes(&mut self, length: usize) -> Result<()>;
+    fn skip_bytes(&mut self, length: u32) -> Result<()>;
 
     /// Copy exactly `length` bytes to `out` (dual of [`skip_bytes`](Self::skip_bytes)).
     ///
-    /// Returns `length` on success.
-    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<usize>;
+    /// Returns `length` on success (as `usize` for host write accounting).
+    fn copy_bytes<W: Write>(&mut self, length: u32, out: &mut W) -> Result<usize>;
 
     /// Read a tag (field number + wire type).
     ///
@@ -79,7 +83,7 @@ pub(crate) trait WireCursor {
             WireType::Int32 => self.skip_bytes(4)?,
             WireType::Int64 => self.skip_bytes(8)?,
             WireType::Len => {
-                let length = self.read_varint()?.try_to_uint32()? as usize;
+                let length = self.read_varint()?.try_to_uint32()?;
                 self.skip_bytes(length)?;
             }
             WireType::SGroup | WireType::EGroup => {}
@@ -132,7 +136,7 @@ pub(crate) trait WireCursor {
             WireType::Len => {
                 let (len_varint, len_raw) = self.read_varint_with_raw(&mut buf)?;
                 written += write_all_len(out, len_raw)?;
-                written += self.copy_bytes(len_varint.try_to_uint32()? as usize, out)?;
+                written += self.copy_bytes(len_varint.try_to_uint32()?, out)?;
             }
             WireType::SGroup | WireType::EGroup => {}
         }
@@ -181,7 +185,7 @@ pub(crate) trait BufWireCursor<L>: WireCursor {
     /// This is the materializing counterpart of [`WireCursor::skip_bytes`].
     /// For a Len field, the length varint is parsed first; this method only
     /// consumes the following payload bytes.
-    fn read_bytes(&mut self, length: usize) -> Result<L>;
+    fn read_bytes(&mut self, length: u32) -> Result<L>;
 
     /// Parse a complete field (tag + value).
     ///
@@ -202,7 +206,7 @@ pub(crate) trait BufWireCursor<L>: WireCursor {
             WireType::Int32 => FieldValue::I32(self.read_fixed::<4>()?),
             WireType::Int64 => FieldValue::I64(self.read_fixed::<8>()?),
             WireType::Len => {
-                let length = self.read_varint()?.try_to_uint32()? as usize;
+                let length = self.read_varint()?.try_to_uint32()?;
                 FieldValue::Len(self.read_bytes(length)?)
             }
             WireType::SGroup => FieldValue::SGroup,

@@ -22,8 +22,8 @@ pub(crate) struct SliceReader<'a, 'b> {
 
 impl WireCursor for SliceReader<'_, '_> {
     #[inline]
-    fn remaining(&self) -> usize {
-        self.slice.len()
+    fn remaining(&self) -> u32 {
+        u32::try_from(self.slice.len()).unwrap_or(u32::MAX)
     }
 
     #[inline]
@@ -50,32 +50,32 @@ impl WireCursor for SliceReader<'_, '_> {
     }
 
     #[inline]
-    fn skip_bytes(&mut self, length: usize) -> Result<()> {
+    fn skip_bytes(&mut self, length: u32) -> Result<()> {
         let (_, remaining) = self
             .slice
-            .split_at_checked(length)
+            .split_at_checked(length as usize)
             .ok_or(ProtobufError::UnexpectedEof)?;
         *self.slice = remaining;
         Ok(())
     }
 
     #[inline]
-    fn copy_bytes<W: Write>(&mut self, length: usize, out: &mut W) -> Result<usize> {
+    fn copy_bytes<W: Write>(&mut self, length: u32, out: &mut W) -> Result<usize> {
         let (payload, remaining) = self
             .slice
-            .split_at_checked(length)
+            .split_at_checked(length as usize)
             .ok_or(ProtobufError::UnexpectedEof)?;
         out.write_all(payload)?;
         *self.slice = remaining;
-        Ok(length)
+        Ok(length as usize)
     }
 }
 
 impl<'a> BufWireCursor<&'a [u8]> for SliceReader<'a, '_> {
-    fn read_bytes(&mut self, length: usize) -> Result<&'a [u8]> {
+    fn read_bytes(&mut self, length: u32) -> Result<&'a [u8]> {
         let (value_slice, remaining) = self
             .slice
-            .split_at_checked(length)
+            .split_at_checked(length as usize)
             .ok_or(ProtobufError::UnexpectedEof)?;
         *self.slice = remaining;
         Ok(value_slice)

@@ -377,7 +377,7 @@ mod tests {
             buffer.write_protobuf_field(&original_field).unwrap();
 
             // Read
-            let len = buffer.len();
+            let len = buffer.len() as u32;
             let reader = buffer.as_slice();
             let fields: Vec<_> = reader
                 .read_protobuf_fields(len)
@@ -399,7 +399,7 @@ mod tests {
             buffer.write_protobuf_field(&original_field).unwrap();
 
             // Read
-            let len = buffer.len();
+            let len = buffer.len() as u32;
             let reader = buffer.as_slice();
             let fields: Vec<_> = reader
                 .read_protobuf_fields(len)
@@ -433,7 +433,7 @@ mod tests {
             buffer.write_protobuf_fields(&original_fields).unwrap();
 
             // Read
-            let len = buffer.len();
+            let len = buffer.len() as u32;
             let reader = buffer.as_slice();
             let read_fields: Vec<_> = reader
                 .read_protobuf_fields(len)
@@ -485,7 +485,7 @@ mod tests {
                 .sum::<usize>();
             assert_eq!(written, expected);
 
-            let len = buffer.len();
+            let len = buffer.len() as u32;
             let read_fields: Vec<_> = buffer
                 .as_slice()
                 .read_protobuf_fields(len)

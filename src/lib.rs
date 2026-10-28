@@ -91,7 +91,7 @@
 //!   (slices, arrays, etc.). The slice length is the bound (no extra `len` arg).
 //!   - Output: [`Field<&[u8]>`] — Len values are borrowed `&[u8]` slices (zero-copy)
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types with an explicit
-//!   message byte budget `len`
+//!   `u32` message byte budget `len`
 //!   - Output: [`Field<Vec<u8>>`] by default, or [`Field<L>`] from a Len handler
 //!     `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>`
 //!
