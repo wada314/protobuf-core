@@ -26,7 +26,7 @@ impl<R: Read> Iterator for VarintIterFromRead<R> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let mut buf = [0u8; MAX_VARINT_BYTES];
-        match try_feed_varint_with_raw(&mut self.reader, &mut buf) {
+        match try_read_varint_with_raw(&mut self.reader, &mut buf) {
             Ok(None) => None,
             Ok(Some((v, _))) => Some(Ok(v)),
             Err(e) => Some(Err(e)),
@@ -46,7 +46,7 @@ impl<R: Read> Iterator for VarintIterFromRead<R> {
 /// - other `Err` — invalid encoding
 #[inline]
 #[allow(clippy::unbuffered_bytes)] // Varint needs byte-at-a-time; prefer BufReader upstream.
-fn try_feed_varint_with_raw<'a, R: Read>(
+fn try_read_varint_with_raw<'a, R: Read>(
     reader: &'a mut R,
     buf: &'a mut [u8; MAX_VARINT_BYTES],
 ) -> Result<Option<(Varint, &'a [u8])>> {
@@ -155,7 +155,7 @@ pub trait ReadExtVarint: Read {
     where
         Self: Sized,
     {
-        try_feed_varint_with_raw(self, buf)?.ok_or(ProtobufError::UnexpectedEof)
+        try_read_varint_with_raw(self, buf)?.ok_or(ProtobufError::UnexpectedEof)
     }
 
     /// Read a varint until a complete value.
