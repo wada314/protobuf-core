@@ -75,18 +75,10 @@ impl<'a, R: Read + ?Sized> LimitedRead<'a, R> {
             remaining: len,
         })
     }
-
-    /// Read exactly `buf.len()` bytes from this budget into `buf`.
-    #[inline]
-    pub fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {
-        if buf.len() > self.remaining {
-            return Err(ProtobufError::UnexpectedEof);
-        }
-        self.inner.read_exact(buf)?;
-        self.remaining -= buf.len();
-        Ok(())
-    }
 }
+
+// `Read::read` above updates `remaining`. Prefer `Read::read_exact` over a
+// custom exact-read helper so budget accounting stays in one place.
 
 /// Parse one protobuf field from `limited`, using `handler` for each Len body.
 fn parse_protobuf_field_with<R, L, F>(
@@ -204,7 +196,7 @@ impl<R: Read + ?Sized> WireCursor for LimitedRead<'_, R> {
     #[inline]
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         let mut bytes = [0u8; N];
-        self.read_exact(&mut bytes)?;
+        Read::read_exact(self, &mut bytes)?;
         Ok(bytes)
     }
 
@@ -213,7 +205,7 @@ impl<R: Read + ?Sized> WireCursor for LimitedRead<'_, R> {
         let mut buf = [0u8; 256];
         while length > 0 {
             let n = length.min(buf.len());
-            self.read_exact(&mut buf[..n])?;
+            Read::read_exact(self, &mut buf[..n])?;
             length -= n;
         }
         Ok(())
@@ -225,7 +217,7 @@ impl<R: Read + ?Sized> WireCursor for LimitedRead<'_, R> {
         let mut buf = [0u8; 256];
         while left > 0 {
             let n = left.min(buf.len());
-            self.read_exact(&mut buf[..n])?;
+            Read::read_exact(self, &mut buf[..n])?;
             out.write_all(&buf[..n])?;
             left -= n;
         }
@@ -403,6 +395,7 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// ```
     /// use ::protobuf_core::{FieldValue, LimitedRead, ReadExtProtobuf};
+    /// use ::std::io::Read;
     ///
     /// let data = &[0x0A, 0x03, b'H', b'e', b'l'][..];
     /// let len = data.len();
@@ -644,23 +637,27 @@ mod tests {
         use crate::ProtobufError;
         use ::std::io::Cursor;
 
-        // Mid-field truncation with budget == input.len(): the local remaining
-        // count catches the shortfall before the underlying Read EOFs.
-        for input in [
-            &[0x0D, 0x01, 0x02, 0x03][..],    // truncated i32
-            &[0x09, 0, 0, 0, 0, 0, 0, 0][..], // truncated i64
-            &[0x0A, 0x05, b'a', b'b'][..],    // truncated len
-        ] {
-            let error = Cursor::new(input)
-                .read_protobuf_fields(input.len())
-                .next()
-                .unwrap()
-                .unwrap_err();
-            assert!(
-                matches!(error, ProtobufError::UnexpectedEof),
-                "input={input:?} got {error:?}"
-            );
-        }
+        // Mid-field truncation with budget == input.len(): fixed-width paths
+        // surface as IoError via `Read::read_exact`; Len that claims more than
+        // the remaining budget fails in `reborrow_len` as UnexpectedEof.
+        use ::std::io::ErrorKind;
+
+        let fixed_err = Cursor::new([0x0D, 0x01, 0x02, 0x03])
+            .read_protobuf_fields(4)
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(
+            fixed_err,
+            ProtobufError::IoError(ref err) if err.kind() == ErrorKind::UnexpectedEof
+        ));
+
+        let len_err = Cursor::new([0x0A, 0x05, b'a', b'b'])
+            .read_protobuf_fields(4)
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(len_err, ProtobufError::UnexpectedEof));
     }
 }
 
