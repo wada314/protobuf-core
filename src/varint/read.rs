@@ -116,33 +116,29 @@ impl<R: Read> Iterator for VarintIterFromRead<R> {
 // ReadExtVarint
 // ============================================================================
 
-/// Feed `state` from `reader`, optionally tee-ing every consumed wire byte into `buf`.
+/// Feed `state` from `reader`, copying every consumed wire byte into `buf`.
 ///
-/// Single decode kernel for complete reads and chunked partial/resume:
-/// - `Some(buf)` — copy wire bytes; return `&buf[..n]` for this call
-/// - `None` — decode only (partial / resume)
+/// Shared decode kernel for complete reads and chunked partial/resume. Returns
+/// the [`DecodeOutcome`] and `&buf[..n]` for bytes read in this call. Callers
+/// that discard `raw` (partial / resume) still pass a scratch buffer; with
+/// `#[inline]`, unused stores can be optimized away after expansion.
 #[inline]
 #[allow(clippy::unbuffered_bytes)] // Varint needs byte-at-a-time; prefer BufReader upstream.
 fn feed_varint_with_raw<'a, R: Read>(
-    reader: &mut R,
+    reader: &'a mut R,
     state: DecodeState,
-    buf: Option<&'a mut [u8; MAX_VARINT_BYTES]>,
-) -> Result<(DecodeOutcome, Option<&'a [u8]>)> {
+    buf: &'a mut [u8; MAX_VARINT_BYTES],
+) -> Result<(DecodeOutcome, &'a [u8])> {
     let mut n = 0usize;
-    match buf {
-        Some(buf) => {
-            let outcome = state.feed(reader.by_ref().bytes().map(|r| {
-                r.map(|b| {
-                    // `feed` caps at `MAX_VARINT_BYTES - state.bytes_consumed`; `n` starts at 0.
-                    buf[n] = b;
-                    n += 1;
-                    b
-                })
-            }))?;
-            Ok((outcome, Some(&buf[..n])))
-        }
-        None => Ok((state.feed(reader.by_ref().bytes())?, None)),
-    }
+    let outcome = state.feed(reader.by_ref().bytes().map(|r| {
+        r.map(|b| {
+            // `feed` caps at `MAX_VARINT_BYTES - state.bytes_consumed`; `n` starts at 0.
+            buf[n] = b;
+            n += 1;
+            b
+        })
+    }))?;
+    Ok((outcome, &buf[..n]))
 }
 
 /// Extension trait for reading varints from [`Read`] instances.
@@ -150,14 +146,15 @@ fn feed_varint_with_raw<'a, R: Read>(
 /// Reads until the reader's EOF (or an existing [`std::io::Take`] bound).
 /// Methods do not take a separate byte-budget argument.
 ///
-/// All decode entry points share one private feed helper:
+/// All decode entry points share one private feed helper (always tees into a
+/// `[u8; MAX_VARINT_BYTES]`; partial / resume discard the slice):
 ///
 /// - [`read_varint_with_raw`](Self::read_varint_with_raw) / [`read_varint`](Self::read_varint)
 ///   / [`read_varints`](Self::read_varints) — complete reads (`Incomplete` →
-///   [`UnexpectedEof`](ProtobufError::UnexpectedEof); raw capture when requested)
+///   [`UnexpectedEof`](ProtobufError::UnexpectedEof))
 /// - [`read_varint_partial`](Self::read_varint_partial) /
-///   [`read_varint_resume`](Self::read_varint_resume) — same feed, chunked
-///   [`DecodeOutcome`] (no raw capture)
+///   [`read_varint_resume`](Self::read_varint_resume) — chunked
+///   [`DecodeOutcome`]
 ///
 /// # Performance Note
 ///
@@ -219,9 +216,9 @@ pub trait ReadExtVarint: Read {
     where
         Self: Sized,
     {
-        let (outcome, raw) = feed_varint_with_raw(self, DecodeState::new(), Some(buf))?;
+        let (outcome, raw) = feed_varint_with_raw(self, DecodeState::new(), buf)?;
         match outcome {
-            DecodeOutcome::Complete(v) => Ok(Some((v, raw.expect("raw capture requested")))),
+            DecodeOutcome::Complete(v) => Ok(Some((v, raw))),
             DecodeOutcome::Empty => Ok(None),
             DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
         }
@@ -273,7 +270,8 @@ pub trait ReadExtVarint: Read {
     where
         Self: Sized,
     {
-        Ok(feed_varint_with_raw(self, DecodeState::new(), None)?.0)
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        Ok(feed_varint_with_raw(self, DecodeState::new(), &mut buf)?.0)
     }
 
     /// Resume varint decoding with additional bytes from this reader.
@@ -282,7 +280,8 @@ pub trait ReadExtVarint: Read {
     where
         Self: Sized,
     {
-        Ok(feed_varint_with_raw(self, state, None)?.0)
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        Ok(feed_varint_with_raw(self, state, &mut buf)?.0)
     }
 }
 
