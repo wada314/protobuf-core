@@ -44,8 +44,9 @@ pub use self::write::WriteExtProtobuf;
 /// `L` is the type for length-delimited values (Len variant).
 ///  - Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`
 ///    ([`VecLenPayload`]). `read_protobuf_fields_with` takes a
-///    `FnMut(FieldNumber, &mut LimitedRead<'_, R>) -> Result<L>` that
-///    receives a [`LimitedRead`] body and returns any `L`.
+///    `FnMut(FieldNumber, LimitedRead<'_, R>) -> Result<(L, usize)>` that
+///    receives a [`LimitedRead`] body by value and returns any `L` plus bytes
+///    consumed from that body.
 ///  - Slice readers borrow the input as `&'a [u8]`.
 ///
 /// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
