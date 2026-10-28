@@ -99,12 +99,15 @@ pub enum Outcome {
 ///
 /// let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
 /// let mut reader = Cursor::new(data);
-/// let tag = reader.read_tag().unwrap().unwrap();
+/// let tag = reader.read_tag().unwrap();
 /// assert_eq!(tag.field_number.as_u32(), 1);
 /// ```
 pub trait ReadExtTag {
-    /// Read a tag from this reader until EOF or a complete value.
-    fn read_tag(&mut self) -> Result<Option<Tag>>;
+    /// Read a tag from this reader until a complete value.
+    ///
+    /// Empty or truncated input is [`ProtobufError::UnexpectedEof`]; check a
+    /// length bound first for soft end.
+    fn read_tag(&mut self) -> Result<Tag>;
 
     /// Read a tag from this reader, supporting incomplete input.
     fn read_tag_partial(&mut self) -> Result<Outcome>;
@@ -117,13 +120,14 @@ impl<R> ReadExtTag for R
 where
     R: Read,
 {
-    fn read_tag(&mut self) -> Result<Option<Tag>> {
+    fn read_tag(&mut self) -> Result<Tag> {
         use crate::varint::{DecodeOutcome, ReadExtVarint};
 
         match self.read_varint_partial()? {
-            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint).map(Some),
-            DecodeOutcome::Empty => Ok(None),
-            DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
+            DecodeOutcome::Complete(varint) => Tag::from_encoded(varint),
+            DecodeOutcome::Empty | DecodeOutcome::Incomplete(_) => {
+                Err(ProtobufError::UnexpectedEof)
+            }
         }
     }
 
@@ -283,7 +287,7 @@ mod tests {
 
         let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
         let mut reader = Cursor::new(data);
-        let tag = reader.read_tag().unwrap().unwrap();
+        let tag = reader.read_tag().unwrap();
         assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
         assert_eq!(tag.wire_type, WireType::Varint);
     }
@@ -295,8 +299,10 @@ mod tests {
 
         let data = vec![];
         let mut reader = Cursor::new(data);
-        let tag = reader.read_tag().unwrap();
-        assert_eq!(tag, None);
+        assert!(matches!(
+            reader.read_tag(),
+            Err(ProtobufError::UnexpectedEof)
+        ));
     }
 
     #[test]

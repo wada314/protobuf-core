@@ -11,11 +11,15 @@ Additive public API for unknown-field group preserve. Callers that only skip gro
 
 ### Added
 
-- `ReadExtVarint::read_varint_with_raw` — decodes a varint while copying its exact wire bytes into a caller-provided `[u8; MAX_VARINT_BYTES]` (including non-canonical encodings). Complete-read stack is `with_raw` → `read_varint` → `read_varints`; `partial` / `resume` share the same private feed helper (scratch buffer; raw discarded).
+- `ReadExtVarint::read_varint_with_raw` — decodes a varint while copying its exact wire bytes into a caller-provided `[u8; MAX_VARINT_BYTES]` (including non-canonical encodings). Complete-read stack is `with_raw` → `read_varint`; `partial` / `resume` share the same private feed helper (scratch buffer; raw discarded). `read_varints` soft-stops via the partial path.
 - `FieldIterFromSlice::take_until(pred)` — after an `SGroup` tag was consumed, returns a zero-copy `&[u8]` span of the group body through the matching `EGroup` (use with `until_group_ends`). Exact wire bytes.
 - `FieldIterFromRead::copy_until(pred, out)` — same stop semantics as `skip_until` for streaming input; tees exact wire bytes to `out` (including non-canonical varints).
 - `GroupBody` / `group_body(field_number)` on field iterators — adapter that yields body fields until the matching outermost `EGroup` (consumed, not yielded). Nesting uses a depth counter only; **nested end-group field numbers are not validated** (caller should nest another `group_body` when seeing an inner `SGroup`). Distinct from `until_group_ends`, which keeps a full field-number stack for skip/preserve. Premature end of input before that `EGroup` is `UnexpectedEof`. After the first `None` or a yielded `Err`, further `next` is unspecified (may read past the group); use `Iterator::fuse` for sticky `None`.
 - Contract for skip/preserve mirrors `until_group_ends`: the start-group tag is already consumed (caller writes it to a preserve blob if needed); the helper advances past the matching end-group. Nested groups use the same stack rules. On predicate / decode error, the input cursor may have advanced; `Read` `copy_until` may leave a partial write in `out`.
+
+### Changed
+
+- `ReadExtVarint::read_varint` / `read_varint_with_raw` and `ReadExtTag::read_tag` return `Result<…>` without `Option`. Empty input is `UnexpectedEof` (same as truncated); soft end is a caller `remaining` / length-bound check. `DecodeOutcome::Empty` / `TagOutcome::Empty` remain on the partial/resume path. `read_varints` still soft-stops on empty.
 
 ### Internal
 

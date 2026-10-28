@@ -475,9 +475,7 @@ where
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
         use crate::varint::ReadExtVarint;
-        self.0
-            .read_varint_with_raw(buf)?
-            .ok_or(ProtobufError::UnexpectedEof)
+        self.0.read_varint_with_raw(buf)
     }
 
     #[inline]
@@ -534,9 +532,7 @@ where
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
         use crate::varint::ReadExtVarint;
-        self.0
-            .read_varint_with_raw(buf)?
-            .ok_or(ProtobufError::UnexpectedEof)
+        self.0.read_varint_with_raw(buf)
     }
 
     #[inline]
@@ -771,9 +767,7 @@ impl WireCursor for SliceReader<'_, '_> {
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
         use crate::varint::ReadExtVarint;
-        self.slice
-            .read_varint_with_raw(buf)?
-            .ok_or(ProtobufError::UnexpectedEof)
+        self.slice.read_varint_with_raw(buf)
     }
 
     #[inline]
