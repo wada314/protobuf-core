@@ -75,12 +75,11 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
             got: tag.field_number,
         }),
         (WireType::EGroup, None) => {
-            // Pred misuse: called after the tracked group already closed.
-            debug_assert!(
-                false,
+            // `skip_until` / `take_until` / `copy_until` stop when this pred
+            // returns `Ok(true)` (stack empty). Calling it again is misuse.
+            unreachable!(
                 "until_group_ends predicate called after the tracked group closed"
-            );
-            Err(ProtobufError::UnexpectedEof)
+            )
         }
         _ => Ok(false),
     }
@@ -2121,6 +2120,21 @@ mod group_skip {
             .unwrap();
         assert_eq!(cursor.remaining(), 0);
         assert!(slice.is_empty());
+    }
+
+    #[test]
+    fn slice_reader_read_varint_with_raw_returns_input_subslice() {
+        use crate::wire_format::MAX_VARINT_BYTES;
+
+        let bytes = [0x96u8, 0x01, 0x08];
+        let mut slice = bytes.as_slice();
+        let mut cursor = SliceReader { slice: &mut slice };
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        let (varint, raw) = cursor.read_varint_with_raw(&mut buf).unwrap();
+        assert_eq!(varint.to_uint64(), 150);
+        assert_eq!(raw, &[0x96, 0x01]);
+        assert!(::std::ptr::eq(raw.as_ptr(), bytes.as_ptr()));
+        assert_eq!(slice, &[0x08]);
     }
 
     #[test]
