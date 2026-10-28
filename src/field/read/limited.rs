@@ -65,8 +65,8 @@ fn take_remaining<R>(take: &Take<R>) -> u32 {
 
 /// Read `n` bytes from the underlying reader without changing [`Take::limit`].
 ///
-/// Used after a Len handler returns a consumed count: the message budget was
-/// already reduced by the full payload length via [`Take::set_limit`].
+/// Used to skip the unread tail of a Len body after the handler returns. The
+/// outer [`Take`] budget is adjusted afterward with [`Take::set_limit`].
 #[inline]
 fn drain_inner<R: Read>(take: &mut Take<R>, mut n: u32) -> Result<()> {
     let mut buf = [0u8; 256];
@@ -83,8 +83,10 @@ fn drain_inner<R: Read>(take: &mut Take<R>, mut n: u32) -> Result<()> {
 /// When the field is length-delimited, `handler` runs once for that Len body
 /// with `&mut R` and the payload `length` (`u32` from the length prefix). It
 /// returns `(payload, consumed)`; `consumed` is trusted and any remainder is
-/// drained from the underlying reader (message budget already committed for the
-/// full length). Other wire types do not call `handler`.
+/// drained from the underlying reader. Only then is the outer [`Take`] limit
+/// reduced by the full payload `length` (body I/O bypasses the `Take`, so the
+/// budget must be corrected after the body is finished). Other wire types do
+/// not call `handler`.
 fn parse_protobuf_field_with<R, L, F>(take: &mut Take<R>, handler: &mut F) -> Result<Field<L>>
 where
     R: Read,
@@ -101,7 +103,6 @@ where
             if length_u64 > take.limit() {
                 return Err(ProtobufError::UnexpectedEof);
             }
-            take.set_limit(take.limit() - length_u64);
             let (payload, consumed) = handler(tag.field_number, take.get_mut(), length)?;
             if consumed > length {
                 return Err(ProtobufError::UnexpectedEof);
@@ -110,6 +111,7 @@ where
             if unread > 0 {
                 drain_inner(take, unread)?;
             }
+            take.set_limit(take.limit() - length_u64);
             FieldValue::Len(payload)
         }
         WireType::SGroup => FieldValue::SGroup,
