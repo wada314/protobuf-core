@@ -60,12 +60,9 @@ fn try_feed_varint_with_raw<'a, R: Read>(
         n += 1;
 
         let value = (byte & VARINT_PAYLOAD_MASK) as u64;
-        // Bytes 1-9 contribute 7 bits each. The 10th byte may only set bit 63.
-        if shift >= 64 {
-            return Err(ProtobufError::VarintTooLong);
-        }
-        let bits_left = 64 - shift;
-        if bits_left < 7 && value >> bits_left != 0 {
+        // Loop is capped at MAX_VARINT_BYTES, so shift is at most 63 here.
+        // Bytes 1-9 contribute 7 bits each; the 10th payload may only set u64 bit 63.
+        if n == MAX_VARINT_BYTES && value > 1 {
             return Err(ProtobufError::VarintTooLong);
         }
         decoded_value |= value << shift;
@@ -80,7 +77,8 @@ fn try_feed_varint_with_raw<'a, R: Read>(
     if n == 0 {
         return Ok(None);
     }
-    if n >= MAX_VARINT_BYTES {
+    // Ten continuation bytes (take capped the loop); shorter shortfall is truncated.
+    if n == MAX_VARINT_BYTES {
         return Err(ProtobufError::VarintTooLong);
     }
     Err(ProtobufError::UnexpectedEof)
