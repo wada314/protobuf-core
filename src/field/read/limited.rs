@@ -77,9 +77,6 @@ impl<'a, R: Read + ?Sized> LimitedRead<'a, R> {
     }
 }
 
-// `Read::read` above updates `remaining`. Prefer `Read::read_exact` over a
-// custom exact-read helper so budget accounting stays in one place.
-
 /// Parse one protobuf field from `limited`, using `handler` for each Len body.
 fn parse_protobuf_field_with<R, L, F>(
     limited: &mut LimitedRead<'_, R>,
