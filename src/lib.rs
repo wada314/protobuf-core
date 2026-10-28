@@ -58,7 +58,7 @@
 //!
 //! - [`Field<L>`]: Represents a raw protobuf field with a field number and value.
 //!   The `L` type parameter represents the type used for length-delimited values
-//!   (`Vec<u8>` by default from `Read`, a custom type from [`OnLen`], or
+//!   (`Vec<u8>` by default from `Read`, a custom type from [`LenPayloadHandler`], or
 //!   `&'a [u8]` for a slice read).
 //! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
 //!   - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64,
@@ -91,9 +91,9 @@
 //!   (slices, arrays, etc.). The slice length is the bound (no extra `len` arg).
 //!   - Output: [`Field<&[u8]>`] — Len values are borrowed `&[u8]` slices (zero-copy)
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types with an explicit
-//!   byte budget `len` (tracked by [`Limited`], not [`std::io::Take`])
-//!   - Output: [`Field<Vec<u8>>`] by default, or [`Field<L>`] from a custom [`OnLen`]
-//! - [`Limited`]: Length budget over a `Read` with [`Limited::reborrow_len`] for
+//!   byte budget `len` (tracked by [`LimitedRead`], not [`std::io::Take`])
+//!   - Output: [`Field<Vec<u8>>`] by default, or [`Field<L>`] from a custom [`LenPayloadHandler`]
+//! - [`LimitedRead`]: Length budget over a `Read` with [`LimitedRead::reborrow_len`] for
 //!   nested Len bodies without nested `Take` adapters
 //!
 //! Field iterators expose `skip_until`, slice `take_until`, Read `copy_until`,
@@ -111,7 +111,7 @@
 //!
 //! For lower-level operations, the library provides traits for reading and writing tags and
 //! varints. These `Read` methods do not take a byte budget; they stop at the reader's EOF
-//! (or the caller's own bound such as [`Limited`] / [`std::io::Take`]):
+//! (or the caller's own bound such as [`LimitedRead`] / [`std::io::Take`]):
 //!
 //! - [`ReadExtTag`]: Read tags from `std::io::Read`
 //! - [`ReadExtVarint`]: Read varints from `std::io::Read` (`with_raw` / `read_varint`
@@ -133,8 +133,9 @@ pub(crate) mod varint;
 pub(crate) mod wire_format;
 
 pub use self::field::{
-    AsRefExtProtobuf, Field, FieldIterFromRead, FieldIterFromSlice, FieldValue, GroupBody, Limited,
-    OnLen, ReadExtProtobuf, VecLenPayload, WriteExtProtobuf, until_group_ends,
+    AsRefExtProtobuf, Field, FieldIterFromRead, FieldIterFromSlice, FieldValue, GroupBody,
+    LenPayloadHandler, LimitedRead, ReadExtProtobuf, VecLenPayload, WriteExtProtobuf,
+    until_group_ends,
 };
 pub use self::field_number::FieldNumber;
 pub use self::tag::{ReadExtTag, Tag};
