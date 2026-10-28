@@ -620,7 +620,7 @@ mod tests {
 
         // Mid-field truncation with budget == input.len(): fixed-width paths
         // surface as IoError via `Read::read_exact`; Len that claims more than
-        // the remaining Take limit fails as UnexpectedEof.
+        // the remaining Take32 limit fails as UnexpectedEof.
         use ::std::io::ErrorKind;
 
         let fixed_err = Cursor::new([0x0D, 0x01, 0x02, 0x03])
