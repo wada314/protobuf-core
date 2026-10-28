@@ -77,9 +77,7 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
         (WireType::EGroup, None) => {
             // `skip_until` / `take_until` / `copy_until` stop when this pred
             // returns `Ok(true)` (stack empty). Calling it again is misuse.
-            unreachable!(
-                "until_group_ends predicate called after the tracked group closed"
-            )
+            unreachable!("until_group_ends predicate called after the tracked group closed")
         }
         _ => Ok(false),
     }
@@ -1365,25 +1363,25 @@ mod tests {
             other => panic!("expected empty len, got {other:?}"),
         }
 
-        let truncated_i32 = (&[0x0D, 0x01, 0x02, 0x03][..])
+        let truncated_i32 = [0x0D, 0x01, 0x02, 0x03][..]
             .read_protobuf_fields()
             .next()
             .unwrap();
         assert!(matches!(truncated_i32, Err(ProtobufError::UnexpectedEof)));
 
-        let truncated_i64 = (&[0x09, 0, 0, 0, 0, 0, 0, 0][..])
+        let truncated_i64 = [0x09, 0, 0, 0, 0, 0, 0, 0][..]
             .read_protobuf_fields()
             .next()
             .unwrap();
         assert!(matches!(truncated_i64, Err(ProtobufError::UnexpectedEof)));
 
-        let truncated_len = (&[0x0A, 0x05, b'a', b'b'][..])
+        let truncated_len = [0x0A, 0x05, b'a', b'b'][..]
             .read_protobuf_fields()
             .next()
             .unwrap();
         assert!(matches!(truncated_len, Err(ProtobufError::UnexpectedEof)));
 
-        let length_past_u32 = (&[0x0A, 0x80, 0x80, 0x80, 0x80, 0x10][..])
+        let length_past_u32 = [0x0A, 0x80, 0x80, 0x80, 0x80, 0x10][..]
             .read_protobuf_fields()
             .next()
             .unwrap();
@@ -1405,7 +1403,6 @@ mod tests {
     }
 }
 
-#[cfg(test)]
 #[cfg(test)]
 mod group_body_adapter {
     use super::{AsRefExtProtobuf, ReadExtProtobuf};

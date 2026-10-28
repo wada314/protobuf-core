@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(varint.to_uint64(), 406);
         match varint.try_to_uint32() {
             Ok(value) => assert_eq!(value, 406),
-            Err(e) => panic!("Expected Ok(406), got error: {:?}", e),
+            Err(e) => panic!("Expected Ok(406), got error: {e:?}"),
         }
 
         let varint = Varint::new(bytes);
@@ -278,7 +278,7 @@ mod tests {
         let varint = Varint::new(bytes);
         match varint.try_to_sint32() {
             Ok(value) => assert_eq!(value, 203),
-            Err(e) => panic!("Expected Ok(203), got error: {:?}", e),
+            Err(e) => panic!("Expected Ok(203), got error: {e:?}"),
         }
 
         let varint = Varint::new(bytes);
@@ -295,7 +295,7 @@ mod tests {
         let varint = Varint::new(bytes);
         match varint.try_to_sint32() {
             Ok(value) => assert_eq!(value, -1),
-            Err(e) => panic!("Expected Ok(-1), got error: {:?}", e),
+            Err(e) => panic!("Expected Ok(-1), got error: {e:?}"),
         }
     }
 

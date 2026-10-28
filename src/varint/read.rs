@@ -395,7 +395,7 @@ mod tests {
             let decoded_varint = reader.read_varint().unwrap();
             let decoded_value = decoded_varint.to_uint64();
 
-            assert_eq!(decoded_value, value, "Roundtrip failed for value {}", value);
+            assert_eq!(decoded_value, value, "Roundtrip failed for value {value}");
         }
     }
 
