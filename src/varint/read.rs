@@ -51,6 +51,7 @@ impl DecodeState {
         self.bytes_consumed
     }
 
+    #[inline]
     pub(crate) fn feed<I, E>(mut self, iter: I) -> Result<DecodeOutcome>
     where
         I: Iterator<Item = ::std::result::Result<u8, E>>,
@@ -115,27 +116,48 @@ impl<R: Read> Iterator for VarintIterFromRead<R> {
 // ReadExtVarint
 // ============================================================================
 
+/// Feed `state` from `reader`, optionally tee-ing every consumed wire byte into `buf`.
+///
+/// Single decode kernel for complete reads and chunked partial/resume:
+/// - `Some(buf)` — copy wire bytes; return `&buf[..n]` for this call
+/// - `None` — decode only (partial / resume)
+#[inline]
+#[allow(clippy::unbuffered_bytes)] // Varint needs byte-at-a-time; prefer BufReader upstream.
+fn feed_varint_with_raw<'a, R: Read>(
+    reader: &mut R,
+    state: DecodeState,
+    buf: Option<&'a mut [u8; MAX_VARINT_BYTES]>,
+) -> Result<(DecodeOutcome, Option<&'a [u8]>)> {
+    let mut n = 0usize;
+    match buf {
+        Some(buf) => {
+            let outcome = state.feed(reader.by_ref().bytes().map(|r| {
+                r.map(|b| {
+                    // `feed` caps at `MAX_VARINT_BYTES - state.bytes_consumed`; `n` starts at 0.
+                    buf[n] = b;
+                    n += 1;
+                    b
+                })
+            }))?;
+            Ok((outcome, Some(&buf[..n])))
+        }
+        None => Ok((state.feed(reader.by_ref().bytes())?, None)),
+    }
+}
+
 /// Extension trait for reading varints from [`Read`] instances.
 ///
 /// Reads until the reader's EOF (or an existing [`std::io::Take`] bound).
 /// Methods do not take a separate byte-budget argument.
 ///
-/// # Method families
+/// All decode entry points share one private feed helper:
 ///
-/// **Complete reads** (one shot until EOF or a finished varint):
-///
-/// - [`read_varint_with_raw`](Self::read_varint_with_raw) — fundamental; keeps
-///   exact wire bytes in a caller buffer
-/// - [`read_varint`](Self::read_varint) — same, discarding the wire bytes
-/// - [`read_varints`](Self::read_varints) — repeatedly calls `read_varint`
-///
-/// **Chunked reads** (orthogonal; may return [`DecodeOutcome::Incomplete`]):
-///
+/// - [`read_varint_with_raw`](Self::read_varint_with_raw) / [`read_varint`](Self::read_varint)
+///   / [`read_varints`](Self::read_varints) — complete reads (`Incomplete` →
+///   [`UnexpectedEof`](ProtobufError::UnexpectedEof); raw capture when requested)
 /// - [`read_varint_partial`](Self::read_varint_partial) /
-///   [`read_varint_resume`](Self::read_varint_resume)
-///
-/// Incomplete / resume cannot preserve a single contiguous `raw` span across
-/// readers, so that path does not go through `read_varint_with_raw`.
+///   [`read_varint_resume`](Self::read_varint_resume) — same feed, chunked
+///   [`DecodeOutcome`] (no raw capture)
 ///
 /// # Performance Note
 ///
@@ -174,10 +196,9 @@ impl<R: Read> Iterator for VarintIterFromRead<R> {
 pub trait ReadExtVarint: Read {
     /// Read a varint and copy its exact wire bytes into `buf`.
     ///
-    /// Fundamental complete-read entry point. Returns `Ok(Some((varint, raw)))`
-    /// where `raw` is `&buf[..n]` (including non-canonical encodings),
-    /// `Ok(None)` on empty input, and `Err` when the input is incomplete or
-    /// invalid.
+    /// Returns `Ok(Some((varint, raw)))` where `raw` is `&buf[..n]` (including
+    /// non-canonical encodings), `Ok(None)` on empty input, and `Err` when the
+    /// input is incomplete or invalid.
     ///
     /// # Example
     /// ```
@@ -190,7 +211,7 @@ pub trait ReadExtVarint: Read {
     /// assert_eq!(varint.to_uint64(), 150);
     /// assert_eq!(raw, &[0x96, 0x01]);
     /// ```
-    #[allow(clippy::unbuffered_bytes)] // Varint needs byte-at-a-time; prefer BufReader upstream.
+    #[inline]
     fn read_varint_with_raw<'a>(
         &'a mut self,
         buf: &'a mut [u8; MAX_VARINT_BYTES],
@@ -198,16 +219,9 @@ pub trait ReadExtVarint: Read {
     where
         Self: Sized,
     {
-        let mut n = 0usize;
-        let outcome = DecodeState::new().feed(self.by_ref().bytes().map(|r| {
-            r.map(|b| {
-                buf[n] = b;
-                n += 1;
-                b
-            })
-        }))?;
+        let (outcome, raw) = feed_varint_with_raw(self, DecodeState::new(), Some(buf))?;
         match outcome {
-            DecodeOutcome::Complete(v) => Ok(Some((v, &buf[..n]))),
+            DecodeOutcome::Complete(v) => Ok(Some((v, raw.expect("raw capture requested")))),
             DecodeOutcome::Empty => Ok(None),
             DecodeOutcome::Incomplete(_) => Err(ProtobufError::UnexpectedEof),
         }
@@ -215,8 +229,9 @@ pub trait ReadExtVarint: Read {
 
     /// Read a varint until EOF or a complete value.
     ///
-    /// Implemented via [`read_varint_with_raw`](Self::read_varint_with_raw)
-    /// (wire bytes discarded). Returns `Ok(None)` on empty input.
+    /// Via [`read_varint_with_raw`](Self::read_varint_with_raw) (wire bytes
+    /// discarded). Returns `Ok(None)` on empty input.
+    #[inline]
     fn read_varint(&mut self) -> Result<Option<Varint>>
     where
         Self: Sized,
@@ -244,6 +259,7 @@ pub trait ReadExtVarint: Read {
     /// assert_eq!(varints[0].to_uint64(), 150);
     /// assert_eq!(varints[1].to_uint64(), 127);
     /// ```
+    #[inline]
     fn read_varints(&mut self) -> VarintIterFromRead<&mut Self>
     where
         Self: Sized,
@@ -252,24 +268,21 @@ pub trait ReadExtVarint: Read {
     }
 
     /// Read a varint, supporting incomplete input ([`DecodeOutcome::Incomplete`]).
-    ///
-    /// Chunked counterpart to the complete-read family; does not capture raw
-    /// wire bytes.
-    #[allow(clippy::unbuffered_bytes)] // Varint needs byte-at-a-time; prefer BufReader upstream.
+    #[inline]
     fn read_varint_partial(&mut self) -> Result<DecodeOutcome>
     where
         Self: Sized,
     {
-        DecodeState::new().feed(self.by_ref().bytes())
+        Ok(feed_varint_with_raw(self, DecodeState::new(), None)?.0)
     }
 
     /// Resume varint decoding with additional bytes from this reader.
-    #[allow(clippy::unbuffered_bytes)] // Varint needs byte-at-a-time; prefer BufReader upstream.
+    #[inline]
     fn read_varint_resume(&mut self, state: DecodeState) -> Result<DecodeOutcome>
     where
         Self: Sized,
     {
-        state.feed(self.by_ref().bytes())
+        Ok(feed_varint_with_raw(self, state, None)?.0)
     }
 }
 
