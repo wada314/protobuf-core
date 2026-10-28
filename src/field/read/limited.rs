@@ -1,4 +1,4 @@
-//! Streaming (`Read`) field iteration with a local [`LimitedRead`] budget.
+//! Streaming (`Read`) field iteration with an internal message-byte budget.
 
 use super::group::GroupBody;
 use super::wire::WireCursor;
@@ -11,17 +11,17 @@ use crate::{ProtobufError, Result};
 use ::std::io::{self, Read, Write};
 
 // ============================================================================
-// LimitedRead budget (no nested std::io::Take)
+// Internal message budget (not part of the public API)
 // ============================================================================
 
 /// Default Len handler for [`ReadExtProtobuf::read_protobuf_fields`]: copy each
 /// body into a new `Vec<u8>`.
 ///
 /// Custom handlers are ordinary
-/// `FnMut(FieldNumber, LimitedRead<'_, R>) -> Result<(L, usize)>` closures
-/// passed to [`ReadExtProtobuf::read_protobuf_fields_with`] — there is no
-/// separate handler trait on the public API. The `usize` is bytes consumed from
-/// the body (trusted); the library skips any remainder.
+/// `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>` closures passed to
+/// [`ReadExtProtobuf::read_protobuf_fields_with`] — there is no separate handler
+/// trait on the public API. The `u32` arguments are the Len payload length and
+/// bytes consumed (trusted); the library skips any remainder.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct VecLenPayload;
 
@@ -29,60 +29,34 @@ pub struct VecLenPayload;
 #[inline]
 fn copy_len_to_vec<R: Read + ?Sized>(
     _field_number: FieldNumber,
-    mut body: LimitedRead<'_, R>,
-) -> Result<(Vec<u8>, usize)> {
-    let len = body.remaining();
-    let mut buf = vec![0u8; len];
-    body.read_exact(&mut buf)?;
+    reader: &mut R,
+    len: u32,
+) -> Result<(Vec<u8>, u32)> {
+    let mut buf = vec![0u8; len as usize];
+    reader.read_exact(&mut buf)?;
     Ok((buf, len))
 }
 
-/// A length budget over an underlying [`Read`].
+/// Private length budget over an underlying [`Read`].
 ///
-/// Nesting does **not** wrap another adapter around `R`. [`reborrow_len`](Self::reborrow_len)
-/// commits `len` bytes from this budget and returns a child over the same `&mut R`.
-/// Boundary checks stay O(1) per read regardless of nesting depth.
-pub struct LimitedRead<'a, R: ?Sized> {
+/// Used only inside this module so tag/varint/fixed reads cannot run past the
+/// message `len` passed to [`ReadExtProtobuf`]. Not exported: Len handlers get
+/// `&mut R` plus the payload length instead.
+struct LimitedRead<'a, R: ?Sized> {
     inner: &'a mut R,
     remaining: usize,
 }
 
 impl<'a, R: Read + ?Sized> LimitedRead<'a, R> {
-    /// Bound `inner` to at most `remaining` bytes.
     #[inline]
-    pub fn new(inner: &'a mut R, remaining: usize) -> Self {
+    fn new(inner: &'a mut R, remaining: usize) -> Self {
         Self { inner, remaining }
     }
 
-    /// Bytes still allowed in this budget.
-    #[inline]
-    pub fn remaining(&self) -> usize {
-        self.remaining
-    }
-
-    /// Commit `len` bytes from this budget and return a child over the same `R`.
+    /// Read `n` bytes from the underlying reader without changing `remaining`.
     ///
-    /// The parent's [`remaining`](Self::remaining) decreases by `len` immediately.
-    /// Nested message parsing uses the child. After the Len handler returns its
-    /// consumed byte count, [`LimitedReadExtProtobuf::parse_protobuf_field`]
-    /// drains any remainder from the underlying reader without touching this
-    /// budget again.
-    #[inline]
-    pub fn reborrow_len(&mut self, len: usize) -> Result<LimitedRead<'_, R>> {
-        if len > self.remaining {
-            return Err(ProtobufError::UnexpectedEof);
-        }
-        self.remaining -= len;
-        Ok(LimitedRead {
-            inner: self.inner,
-            remaining: len,
-        })
-    }
-
-    /// Read `n` bytes from the underlying reader without changing [`remaining`](Self::remaining).
-    ///
-    /// Used after a Len handler returns a consumed count: the parent budget was
-    /// already committed by [`reborrow_len`](Self::reborrow_len).
+    /// Used after a Len handler returns a consumed count: the message budget
+    /// was already reduced by the full payload length.
     #[inline]
     fn drain_inner(&mut self, mut n: usize) -> Result<()> {
         let mut buf = [0u8; 256];
@@ -97,16 +71,17 @@ impl<'a, R: Read + ?Sized> LimitedRead<'a, R> {
 
 /// Parse one protobuf field from `limited`, using `handler` for each Len body.
 ///
-/// Len handlers take the body by value and return `(payload, consumed)`.
-/// `consumed` is trusted; any `length - consumed` remainder is drained from the
-/// underlying reader (parent budget already committed).
+/// Len handlers receive `&mut R` and the payload `length` (`u32` from the length
+/// prefix). They return `(payload, consumed)`; `consumed` is trusted and any
+/// remainder is drained from the underlying reader (message budget already
+/// committed for the full length).
 fn parse_protobuf_field_with<R, L, F>(
     limited: &mut LimitedRead<'_, R>,
     handler: &mut F,
 ) -> Result<Field<L>>
 where
     R: Read + ?Sized,
-    F: FnMut(FieldNumber, LimitedRead<'_, R>) -> Result<(L, usize)>,
+    F: FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>,
 {
     let tag = WireCursor::read_tag(limited)?;
     let value = match tag.wire_type {
@@ -114,13 +89,17 @@ where
         WireType::Int32 => FieldValue::I32(WireCursor::read_fixed(limited)?),
         WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(limited)?),
         WireType::Len => {
-            let length = WireCursor::read_varint(limited)?.try_to_uint32()? as usize;
-            let body = limited.reborrow_len(length)?;
-            let (payload, consumed) = handler(tag.field_number, body)?;
+            let length = WireCursor::read_varint(limited)?.try_to_uint32()?;
+            let length_usize = length as usize;
+            if length_usize > limited.remaining {
+                return Err(ProtobufError::UnexpectedEof);
+            }
+            limited.remaining -= length_usize;
+            let (payload, consumed) = handler(tag.field_number, limited.inner, length)?;
             if consumed > length {
                 return Err(ProtobufError::UnexpectedEof);
             }
-            let unread = length - consumed;
+            let unread = (length - consumed) as usize;
             if unread > 0 {
                 limited.drain_inner(unread)?;
             }
@@ -133,58 +112,6 @@ where
         field_number: tag.field_number,
         value,
     })
-}
-
-/// Protobuf field parsing over a [`LimitedRead`] budget.
-///
-/// Kept separate from [`LimitedRead`] so the budget type stays a generic
-/// length-limited [`Read`], not a protobuf message API.
-///
-/// Len handlers are
-/// `FnMut(FieldNumber, LimitedRead<'_, Self::Reader>) -> Result<(L, usize)>`
-/// (`usize` = bytes consumed from the body).
-pub trait LimitedReadExtProtobuf {
-    /// Underlying reader inside this [`LimitedRead`].
-    type Reader: Read + ?Sized;
-
-    /// Parse one field. Soft end is the caller's [`LimitedRead::remaining`]
-    /// `== 0` check; mid-field emptiness is [`ProtobufError::UnexpectedEof`].
-    fn parse_protobuf_field<L, F>(&mut self, handler: &mut F) -> Result<Field<L>>
-    where
-        F: FnMut(FieldNumber, LimitedRead<'_, Self::Reader>) -> Result<(L, usize)>;
-
-    /// Collect every field in this budget.
-    ///
-    /// Useful inside a Len handler for nested messages. Prefer
-    /// [`ReadExtProtobuf::read_protobuf_fields`] at the top level when an
-    /// iterator is enough. Named differently from that method so both traits
-    /// can be in scope on a [`LimitedRead`] (which also implements [`Read`]).
-    fn collect_protobuf_fields<L, F>(&mut self, handler: &mut F) -> Result<Vec<Field<L>>>
-    where
-        F: FnMut(FieldNumber, LimitedRead<'_, Self::Reader>) -> Result<(L, usize)>;
-}
-
-impl<R: Read + ?Sized> LimitedReadExtProtobuf for LimitedRead<'_, R> {
-    type Reader = R;
-
-    #[inline]
-    fn parse_protobuf_field<L, F>(&mut self, handler: &mut F) -> Result<Field<L>>
-    where
-        F: FnMut(FieldNumber, LimitedRead<'_, R>) -> Result<(L, usize)>,
-    {
-        parse_protobuf_field_with(self, handler)
-    }
-
-    fn collect_protobuf_fields<L, F>(&mut self, handler: &mut F) -> Result<Vec<Field<L>>>
-    where
-        F: FnMut(FieldNumber, LimitedRead<'_, R>) -> Result<(L, usize)>,
-    {
-        let mut fields = Vec::new();
-        while self.remaining() > 0 {
-            fields.push(self.parse_protobuf_field(handler)?);
-        }
-        Ok(fields)
-    }
 }
 
 impl<R: Read + ?Sized> Read for LimitedRead<'_, R> {
@@ -212,7 +139,6 @@ impl<R: Read + ?Sized> WireCursor for LimitedRead<'_, R> {
         buf: &'a mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'a [u8])> {
         use crate::varint::ReadExtVarint;
-        // `ReadExtVarint` reads through `Read`, which updates `self.remaining`.
         ReadExtVarint::read_varint_with_raw(self, buf)
     }
 
@@ -255,9 +181,9 @@ impl<R: Read + ?Sized> WireCursor for LimitedRead<'_, R> {
 /// Iterator for reading raw protobuf fields sequentially from a reader.
 ///
 /// Bounded by the `len` passed to [`ReadExtProtobuf::read_protobuf_fields`].
-/// Uses a local budget ([`LimitedRead`]) over `R` — not nested [`std::io::Take`].
+/// Uses an internal message-byte budget over `R` — not nested [`std::io::Take`].
 /// `F` is the Len-body handler (default [`VecLenPayload`], or a
-/// `FnMut(FieldNumber, LimitedRead<'_, R>) -> Result<(L, usize)>`).
+/// `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>`).
 pub struct FieldIterFromRead<R, F = VecLenPayload> {
     inner: R,
     remaining: usize,
@@ -340,7 +266,7 @@ impl<R: Read> Iterator for FieldIterFromRead<R, VecLenPayload> {
 impl<R, L, F> Iterator for FieldIterFromRead<R, F>
 where
     R: Read,
-    F: FnMut(FieldNumber, LimitedRead<'_, R>) -> Result<(L, usize)>,
+    F: FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>,
 {
     type Item = Result<Field<L>>;
 
@@ -358,14 +284,12 @@ where
 /// Extension trait for reading raw Protocol Buffer fields from `Read` types
 ///
 /// This trait provides low-level utilities for reading field-by-field from a byte stream.
-/// Each method takes an explicit byte budget `len` and tracks it with a local
-/// [`LimitedRead`] over the reader (not [`std::io::Take`]). Length-delimited
+/// Each method takes an explicit message byte budget `len` (host `usize`). Length-delimited
 /// payloads default to `Vec<u8>` via [`VecLenPayload`].
 /// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
 /// supplies a custom
-/// `FnMut(FieldNumber, LimitedRead<'_, R>) -> Result<(L, usize)>`
-/// (nested parse, custom buffer, …). The `usize` is bytes consumed from the
-/// Len body; unread remainder is skipped.
+/// `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>`
+/// (field number, reader, Len payload length → payload + bytes consumed).
 /// It does not provide semantic interpretation - that is the caller's responsibility.
 ///
 /// # Example
@@ -395,7 +319,7 @@ where
 pub trait ReadExtProtobuf: Read {
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
-    /// Consumes at most `len` bytes (local budget; see [`LimitedRead`]).
+    /// Consumes at most `len` bytes of message budget.
     /// This consumes the reader and returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
     /// Length-delimited payloads are `Vec<u8>`.
@@ -405,32 +329,36 @@ pub trait ReadExtProtobuf: Read {
 
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
-    /// Consumes at most `len` bytes (local budget; see [`LimitedRead`]).
+    /// Consumes at most `len` bytes of message budget.
     ///
     /// `handler` is called once for each length-delimited field with the field
-    /// number and a [`LimitedRead`] body (by value) already bounded to the
-    /// payload length. Return [`Ok`](Result::Ok)`((payload, consumed))` with any
-    /// payload type `L` and the number of body bytes consumed (trusted). The
-    /// library skips `length - consumed` from the stream afterward. Return
+    /// number, a mutable borrow of this reader, and the Len payload length
+    /// (`u32` from the length prefix). Return
+    /// [`Ok`](Result::Ok)`((payload, consumed))` with any payload type `L` and
+    /// the number of body bytes consumed (trusted). The library skips
+    /// `length - consumed` from the stream afterward. Return
     /// [`Err`](Result::Err) to fail the field. Varint and fixed-width fields do
     /// not call `handler`.
+    ///
+    /// Nested messages can call [`read_protobuf_fields`](Self::read_protobuf_fields)
+    /// / [`read_protobuf_fields_with`](Self::read_protobuf_fields_with) again on
+    /// `&mut R` with `len as usize` as the nested budget.
     ///
     /// # Examples
     ///
     /// Copy each Len body into a `Box<[u8]>`:
     ///
     /// ```
-    /// use ::protobuf_core::{FieldValue, LimitedRead, ReadExtProtobuf};
+    /// use ::protobuf_core::{FieldValue, ReadExtProtobuf};
     /// use ::std::io::Read;
     ///
     /// let data = &[0x0A, 0x03, b'H', b'e', b'l'][..];
     /// let len = data.len();
     /// let fields: Vec<_> = data
-    ///     .read_protobuf_fields_with(len, |_n, mut body: LimitedRead<'_, _>| {
-    ///         let n = body.remaining();
-    ///         let mut buf = vec![0u8; n];
-    ///         body.read_exact(&mut buf)?;
-    ///         Ok((buf.into_boxed_slice(), n))
+    ///     .read_protobuf_fields_with(len, |_n, r, body_len| {
+    ///         let mut buf = vec![0u8; body_len as usize];
+    ///         r.read_exact(&mut buf)?;
+    ///         Ok((buf.into_boxed_slice(), body_len))
     ///     })
     ///     .collect::<Result<Vec<_>, _>>()
     ///     .unwrap();
@@ -442,7 +370,7 @@ pub trait ReadExtProtobuf: Read {
     fn read_protobuf_fields_with<L, F>(self, len: usize, handler: F) -> FieldIterFromRead<Self, F>
     where
         Self: Sized,
-        F: FnMut(FieldNumber, LimitedRead<'_, Self>) -> Result<(L, usize)>;
+        F: FnMut(FieldNumber, &mut Self, u32) -> Result<(L, u32)>;
 }
 
 impl<R> ReadExtProtobuf for R
@@ -463,7 +391,7 @@ where
     fn read_protobuf_fields_with<L, F>(self, len: usize, handler: F) -> FieldIterFromRead<Self, F>
     where
         Self: Sized,
-        F: FnMut(FieldNumber, LimitedRead<'_, Self>) -> Result<(L, usize)>,
+        F: FnMut(FieldNumber, &mut Self, u32) -> Result<(L, u32)>,
     {
         FieldIterFromRead {
             inner: self,
@@ -690,7 +618,7 @@ mod tests {
 
 #[cfg(test)]
 mod len_payload {
-    use super::{LimitedRead, LimitedReadExtProtobuf, ReadExtProtobuf};
+    use super::ReadExtProtobuf;
     use crate::varint::Varint;
     use crate::{Field, FieldNumber, FieldValue, ProtobufError};
     use ::std::io::{Cursor, Read};
@@ -702,11 +630,11 @@ mod len_payload {
 
     fn read_bytes_payload<R: Read>(
         _n: FieldNumber,
-        mut body: LimitedRead<'_, R>,
-    ) -> crate::Result<(Bytes, usize)> {
-        let len = body.remaining();
-        let mut data = vec![0; len];
-        body.read_exact(&mut data)?;
+        reader: &mut R,
+        len: u32,
+    ) -> crate::Result<(Bytes, u32)> {
+        let mut data = vec![0; len as usize];
+        reader.read_exact(&mut data)?;
         Ok((Bytes(data), len))
     }
 
@@ -758,11 +686,10 @@ mod len_payload {
 
     fn assert_box(message: &[u8], expected: &[u8]) {
         let from_read = Cursor::new(message.to_vec())
-            .read_protobuf_fields_with(message.len(), |_n, mut body: LimitedRead<'_, _>| {
-                let n = body.remaining();
-                let mut buf = vec![0u8; n];
-                body.read_exact(&mut buf)?;
-                Ok((buf.into_boxed_slice(), n))
+            .read_protobuf_fields_with(message.len(), |_n, r, body_len| {
+                let mut buf = vec![0u8; body_len as usize];
+                r.read_exact(&mut buf)?;
+                Ok((buf.into_boxed_slice(), body_len))
             })
             .next()
             .unwrap()
@@ -814,11 +741,10 @@ mod len_payload {
         let len = message.len();
 
         let from_read = Cursor::new(message)
-            .read_protobuf_fields_with(len, |_n, mut body: LimitedRead<'_, _>| {
-                let n = body.remaining();
-                let mut data = vec![0; n];
-                body.read_exact(&mut data)?;
-                Ok((Tagged { id, data }, n))
+            .read_protobuf_fields_with(len, |_n, r, body_len| {
+                let mut data = vec![0; body_len as usize];
+                r.read_exact(&mut data)?;
+                Ok((Tagged { id, data }, body_len))
             })
             .collect::<crate::Result<Vec<_>>>()
             .unwrap();
@@ -830,9 +756,9 @@ mod len_payload {
         let mixed = [0x08, 0x96, 0x01, 0x12, 0x03, b'H', b'e', b'l'];
         let mut calls = 0usize;
         let fields = Cursor::new(mixed)
-            .read_protobuf_fields_with(mixed.len(), |_n, body: LimitedRead<'_, _>| {
+            .read_protobuf_fields_with(mixed.len(), |_n, r, body_len| {
                 calls += 1;
-                read_bytes_payload(_n, body)
+                read_bytes_payload(_n, r, body_len)
             })
             .collect::<crate::Result<Vec<_>>>()
             .unwrap();
@@ -852,7 +778,7 @@ mod len_payload {
         let error = Cursor::new(input)
             .read_protobuf_fields_with(
                 input.len(),
-                |_n, _body: LimitedRead<'_, _>| -> crate::Result<(Vec<u8>, usize)> {
+                |_n, _r, _len| -> crate::Result<(Vec<u8>, u32)> {
                     Err(ProtobufError::UnexpectedEof)
                 },
             )
@@ -886,11 +812,11 @@ mod len_payload {
         let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
 
         let from_read = Cursor::new(message)
-            .read_protobuf_fields_with(message.len(), |_n, mut body: LimitedRead<'_, _>| {
-                let len = body.remaining();
-                let mut data = vec![0xAB; len + 4];
-                body.read_exact(&mut data[..len])?;
-                Ok((Spare { data }, len))
+            .read_protobuf_fields_with(message.len(), |_n, r, body_len| {
+                let n = body_len as usize;
+                let mut data = vec![0xAB; n + 4];
+                r.read_exact(&mut data[..n])?;
+                Ok((Spare { data }, body_len))
             })
             .collect::<crate::Result<Vec<_>>>()
             .unwrap();
@@ -903,10 +829,10 @@ mod len_payload {
         // drained so the following varint field is still visible.
         let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
         let fields = Cursor::new(message)
-            .read_protobuf_fields_with(message.len(), |_n, mut body: LimitedRead<'_, _>| {
+            .read_protobuf_fields_with(message.len(), |_n, r, _body_len| {
                 let mut one = [0u8; 1];
-                body.read_exact(&mut one)?;
-                Ok((one[0], 1))
+                r.read_exact(&mut one)?;
+                Ok((one[0], 1u32))
             })
             .collect::<crate::Result<Vec<_>>>()
             .unwrap();
@@ -942,32 +868,33 @@ mod len_payload {
 
         fn decode_len<R: Read>(
             field_number: FieldNumber,
-            mut body: LimitedRead<'_, R>,
-        ) -> crate::Result<(LenValue, usize)> {
-            let budget = body.remaining();
+            reader: &mut R,
+            len: u32,
+        ) -> crate::Result<(LenValue, u32)> {
             match field_number.as_u32() {
                 2 => {
                     let mut child = Child::default();
-                    let mut raw = |inner_n: FieldNumber, mut inner: LimitedRead<'_, R>| {
-                        let n = inner.remaining();
-                        let mut bytes = vec![0u8; n];
-                        inner.read_exact(&mut bytes)?;
-                        let _ = inner_n;
-                        Ok((LenValue::Bytes(bytes), n))
-                    };
-                    for field in body.collect_protobuf_fields(&mut raw)? {
+                    let nested = reader
+                        .read_protobuf_fields_with(len as usize, |inner_n, inner, inner_len| {
+                            let mut bytes = vec![0u8; inner_len as usize];
+                            inner.read_exact(&mut bytes)?;
+                            let _ = inner_n;
+                            Ok((LenValue::Bytes(bytes), inner_len))
+                        })
+                        .collect::<crate::Result<Vec<_>>>()?;
+                    for field in nested {
                         match (field.field_number.as_u32(), field.value) {
                             (1, FieldValue::Varint(v)) => child.id = v.to_uint64(),
                             (3, FieldValue::Len(LenValue::Bytes(name))) => child.name = name,
                             _ => {}
                         }
                     }
-                    Ok((LenValue::Child(child), budget - body.remaining()))
+                    Ok((LenValue::Child(child), len))
                 }
                 _ => {
-                    let mut bytes = vec![0u8; budget];
-                    body.read_exact(&mut bytes)?;
-                    Ok((LenValue::Bytes(bytes), budget))
+                    let mut bytes = vec![0u8; len as usize];
+                    reader.read_exact(&mut bytes)?;
+                    Ok((LenValue::Bytes(bytes), len))
                 }
             }
         }

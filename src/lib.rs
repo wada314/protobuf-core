@@ -91,12 +91,9 @@
 //!   (slices, arrays, etc.). The slice length is the bound (no extra `len` arg).
 //!   - Output: [`Field<&[u8]>`] — Len values are borrowed `&[u8]` slices (zero-copy)
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types with an explicit
-//!   byte budget `len` (tracked by [`LimitedRead`], not [`std::io::Take`])
-//!   - Output: [`Field<Vec<u8>>`] by default, or [`Field<L>`] from a Len handler closure
-//! - [`LimitedRead`]: Length budget over a `Read` with [`LimitedRead::reborrow_len`] for
-//!   nested Len bodies without nested `Take` adapters
-//! - [`LimitedReadExtProtobuf`]: Protobuf field parse helpers on [`LimitedRead`]
-//!   (`parse_protobuf_field` / `collect_protobuf_fields`) for nested Len handling
+//!   message byte budget `len`
+//!   - Output: [`Field<Vec<u8>>`] by default, or [`Field<L>`] from a Len handler
+//!     `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>`
 //!
 //! Field iterators expose `skip_until`, slice `take_until`, Read `copy_until`,
 //! and [`group_body`](FieldIterFromSlice::group_body) /
@@ -113,7 +110,7 @@
 //!
 //! For lower-level operations, the library provides traits for reading and writing tags and
 //! varints. These `Read` methods do not take a byte budget; they stop at the reader's EOF
-//! (or the caller's own bound such as [`LimitedRead`] / [`std::io::Take`]):
+//! (or the caller's own bound such as [`std::io::Take`]):
 //!
 //! - [`ReadExtTag`]: Read tags from `std::io::Read`
 //! - [`ReadExtVarint`]: Read varints from `std::io::Read` (`with_raw` / `read_varint`
@@ -136,8 +133,7 @@ pub(crate) mod wire_format;
 
 pub use self::field::{
     AsRefExtProtobuf, Field, FieldIterFromRead, FieldIterFromSlice, FieldValue, GroupBody,
-    LimitedRead, LimitedReadExtProtobuf, ReadExtProtobuf, VecLenPayload, WriteExtProtobuf,
-    until_group_ends,
+    ReadExtProtobuf, VecLenPayload, WriteExtProtobuf, until_group_ends,
 };
 pub use self::field_number::FieldNumber;
 pub use self::tag::{ReadExtTag, Tag};

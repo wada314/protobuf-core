@@ -17,7 +17,7 @@ use ::std::io::Write;
 /// (field iterators stop there). Mid-field emptiness is
 /// [`ProtobufError::UnexpectedEof`].
 pub(crate) trait WireCursor {
-    /// Bytes still allowed in this cursor's bound ([`LimitedRead`] / slice length).
+    /// Bytes still allowed in this cursor's bound (message budget / slice length).
     fn remaining(&self) -> usize;
 
     /// Read a varint and return its exact wire bytes.

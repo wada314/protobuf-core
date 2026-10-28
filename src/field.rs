@@ -30,8 +30,8 @@ pub(crate) mod read;
 pub(crate) mod write;
 
 pub use self::read::{
-    AsRefExtProtobuf, FieldIterFromRead, FieldIterFromSlice, GroupBody, LimitedRead,
-    LimitedReadExtProtobuf, ReadExtProtobuf, VecLenPayload, until_group_ends,
+    AsRefExtProtobuf, FieldIterFromRead, FieldIterFromSlice, GroupBody, ReadExtProtobuf,
+    VecLenPayload, until_group_ends,
 };
 pub use self::write::WriteExtProtobuf;
 
@@ -44,9 +44,8 @@ pub use self::write::WriteExtProtobuf;
 /// `L` is the type for length-delimited values (Len variant).
 ///  - Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`
 ///    ([`VecLenPayload`]). `read_protobuf_fields_with` takes a
-///    `FnMut(FieldNumber, LimitedRead<'_, R>) -> Result<(L, usize)>` that
-///    receives a [`LimitedRead`] body by value and returns any `L` plus bytes
-///    consumed from that body.
+///    `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>` that receives the
+///    reader and Len payload length and returns any `L` plus bytes consumed.
 ///  - Slice readers borrow the input as `&'a [u8]`.
 ///
 /// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
@@ -180,7 +179,7 @@ impl<L> FieldValue<L> {
 /// `L` is the type for length-delimited values (FieldValue::Len).
 /// Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`
 /// ([`crate::VecLenPayload`]). `read_protobuf_fields_with` takes a
-/// `FnMut` over a [`crate::LimitedRead`] body.
+/// `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>` Len handler.
 /// Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
