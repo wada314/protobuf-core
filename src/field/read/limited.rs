@@ -1,4 +1,4 @@
-//! Streaming (`Read`) field iteration with an internal message-byte budget.
+//! Streaming (`Read`) field iteration bounded by [`std::io::Take`].
 
 use super::group::GroupBody;
 use super::wire::WireCursor;
@@ -8,10 +8,10 @@ use crate::tag::Tag;
 use crate::varint::Varint;
 use crate::wire_format::{MAX_VARINT_BYTES, WireType};
 use crate::{ProtobufError, Result};
-use ::std::io::{self, Read, Write};
+use ::std::io::{self, Read, Take, Write};
 
 // ============================================================================
-// Internal message budget (not part of the public API)
+// Message budget via std::io::Take
 // ============================================================================
 
 /// Default Len handler for [`ReadExtProtobuf::read_protobuf_fields`]: copy each
@@ -37,71 +37,56 @@ fn copy_len_to_vec<R: Read + ?Sized>(
     Ok((buf, len))
 }
 
-/// Private length budget over an owned [`Read`].
+#[inline]
+fn take_remaining<R>(take: &Take<R>) -> usize {
+    usize::try_from(take.limit()).unwrap_or(usize::MAX)
+}
+
+/// Read `n` bytes from the underlying reader without changing [`Take::limit`].
 ///
-/// Stored inside [`FieldIterFromRead`] so tag/varint/fixed reads cannot run past
-/// the message `len` passed to [`ReadExtProtobuf`]. Not exported: Len handlers
-/// get `&mut R` plus the payload length instead.
-struct LimitedRead<R> {
-    inner: R,
-    remaining: usize,
+/// Used after a Len handler returns a consumed count: the message budget was
+/// already reduced by the full payload length via [`Take::set_limit`].
+#[inline]
+fn drain_inner<R: Read>(take: &mut Take<R>, mut n: usize) -> Result<()> {
+    let mut buf = [0u8; 256];
+    while n > 0 {
+        let chunk = n.min(buf.len());
+        Read::read_exact(take.get_mut(), &mut buf[..chunk])?;
+        n -= chunk;
+    }
+    Ok(())
 }
 
-impl<R: Read> LimitedRead<R> {
-    #[inline]
-    fn new(inner: R, remaining: usize) -> Self {
-        Self { inner, remaining }
-    }
-
-    /// Read `n` bytes from the underlying reader without changing `remaining`.
-    ///
-    /// Used after a Len handler returns a consumed count: the message budget
-    /// was already reduced by the full payload length.
-    #[inline]
-    fn drain_inner(&mut self, mut n: usize) -> Result<()> {
-        let mut buf = [0u8; 256];
-        while n > 0 {
-            let chunk = n.min(buf.len());
-            Read::read_exact(&mut self.inner, &mut buf[..chunk])?;
-            n -= chunk;
-        }
-        Ok(())
-    }
-}
-
-/// Parse one protobuf field from `limited`, using `handler` for each Len body.
+/// Parse one protobuf field from `take`, using `handler` for each Len body.
 ///
 /// Len handlers receive `&mut R` and the payload `length` (`u32` from the length
 /// prefix). They return `(payload, consumed)`; `consumed` is trusted and any
 /// remainder is drained from the underlying reader (message budget already
 /// committed for the full length).
-fn parse_protobuf_field_with<R, L, F>(
-    limited: &mut LimitedRead<R>,
-    handler: &mut F,
-) -> Result<Field<L>>
+fn parse_protobuf_field_with<R, L, F>(take: &mut Take<R>, handler: &mut F) -> Result<Field<L>>
 where
     R: Read,
     F: FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>,
 {
-    let tag = WireCursor::read_tag(limited)?;
+    let tag = WireCursor::read_tag(take)?;
     let value = match tag.wire_type {
-        WireType::Varint => FieldValue::Varint(WireCursor::read_varint(limited)?),
-        WireType::Int32 => FieldValue::I32(WireCursor::read_fixed(limited)?),
-        WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(limited)?),
+        WireType::Varint => FieldValue::Varint(WireCursor::read_varint(take)?),
+        WireType::Int32 => FieldValue::I32(WireCursor::read_fixed(take)?),
+        WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(take)?),
         WireType::Len => {
-            let length = WireCursor::read_varint(limited)?.try_to_uint32()?;
-            let length_usize = length as usize;
-            if length_usize > limited.remaining {
+            let length = WireCursor::read_varint(take)?.try_to_uint32()?;
+            let length_u64 = u64::from(length);
+            if length_u64 > take.limit() {
                 return Err(ProtobufError::UnexpectedEof);
             }
-            limited.remaining -= length_usize;
-            let (payload, consumed) = handler(tag.field_number, &mut limited.inner, length)?;
+            take.set_limit(take.limit() - length_u64);
+            let (payload, consumed) = handler(tag.field_number, take.get_mut(), length)?;
             if consumed > length {
                 return Err(ProtobufError::UnexpectedEof);
             }
             let unread = (length - consumed) as usize;
             if unread > 0 {
-                limited.drain_inner(unread)?;
+                drain_inner(take, unread)?;
             }
             FieldValue::Len(payload)
         }
@@ -114,23 +99,10 @@ where
     })
 }
 
-impl<R: Read> Read for LimitedRead<R> {
-    #[inline]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.remaining == 0 || buf.is_empty() {
-            return Ok(0);
-        }
-        let want = buf.len().min(self.remaining);
-        let n = self.inner.read(&mut buf[..want])?;
-        self.remaining -= n;
-        Ok(n)
-    }
-}
-
-impl<R: Read> WireCursor for LimitedRead<R> {
+impl<R: Read> WireCursor for Take<R> {
     #[inline]
     fn remaining(&self) -> usize {
-        self.remaining
+        take_remaining(self)
     }
 
     #[inline]
@@ -180,12 +152,11 @@ impl<R: Read> WireCursor for LimitedRead<R> {
 
 /// Iterator for reading raw protobuf fields sequentially from a reader.
 ///
-/// Bounded by the `len` passed to [`ReadExtProtobuf::read_protobuf_fields`].
-/// Holds an internal length-limited budget over owned `R` — not nested [`std::io::Take`].
-/// `F` is the Len-body handler (default [`VecLenPayload`], or a
+/// Bounded by the `len` passed to [`ReadExtProtobuf::read_protobuf_fields`] via
+/// [`std::io::Take`]. `F` is the Len-body handler (default [`VecLenPayload`], or a
 /// `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>`).
 pub struct FieldIterFromRead<R, F = VecLenPayload> {
-    limited: LimitedRead<R>,
+    take: Take<R>,
     handler: F,
 }
 
@@ -203,7 +174,7 @@ impl<R: Read, F> FieldIterFromRead<R, F> {
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        WireCursor::skip_until(&mut self.limited, pred)
+        WireCursor::skip_until(&mut self.take, pred)
     }
 
     /// Iterate fields until the matching end-group for `field_number`.
@@ -232,13 +203,13 @@ impl<R: Read, F> FieldIterFromRead<R, F> {
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
-        WireCursor::copy_until(&mut self.limited, pred, out)
+        WireCursor::copy_until(&mut self.take, pred, out)
     }
 
     /// Bytes still allowed in this iterator's budget.
     #[inline]
     pub fn remaining(&self) -> usize {
-        self.limited.remaining
+        take_remaining(&self.take)
     }
 }
 
@@ -246,11 +217,11 @@ impl<R: Read> Iterator for FieldIterFromRead<R, VecLenPayload> {
     type Item = Result<Field<Vec<u8>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.limited.remaining == 0 {
+        if self.take.limit() == 0 {
             return None;
         }
         Some(parse_protobuf_field_with(
-            &mut self.limited,
+            &mut self.take,
             &mut copy_len_to_vec,
         ))
     }
@@ -264,13 +235,10 @@ where
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.limited.remaining == 0 {
+        if self.take.limit() == 0 {
             return None;
         }
-        Some(parse_protobuf_field_with(
-            &mut self.limited,
-            &mut self.handler,
-        ))
+        Some(parse_protobuf_field_with(&mut self.take, &mut self.handler))
     }
 }
 
@@ -375,7 +343,7 @@ where
         Self: Sized,
     {
         FieldIterFromRead {
-            limited: LimitedRead::new(self, len),
+            take: self.take(len as u64),
             handler: VecLenPayload,
         }
     }
@@ -386,7 +354,7 @@ where
         F: FnMut(FieldNumber, &mut Self, u32) -> Result<(L, u32)>,
     {
         FieldIterFromRead {
-            limited: LimitedRead::new(self, len),
+            take: self.take(len as u64),
             handler,
         }
     }
@@ -585,7 +553,7 @@ mod tests {
 
         // Mid-field truncation with budget == input.len(): fixed-width paths
         // surface as IoError via `Read::read_exact`; Len that claims more than
-        // the remaining budget fails in `reborrow_len` as UnexpectedEof.
+        // the remaining Take limit fails as UnexpectedEof.
         use ::std::io::ErrorKind;
 
         let fixed_err = Cursor::new([0x0D, 0x01, 0x02, 0x03])
