@@ -8,7 +8,7 @@ use crate::tag::Tag;
 use crate::varint::Varint;
 use crate::wire_format::{MAX_VARINT_BYTES, WireType};
 use crate::{ProtobufError, Result};
-use ::std::io::{self, Read, Take, Write};
+use ::std::io::{Read, Take, Write};
 
 // ============================================================================
 // Message budget via std::io::Take
