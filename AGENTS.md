@@ -18,8 +18,8 @@ cargo clippy --all-targets
 
 ## Constraints (do not reverse these)
 
-- **Sync only.** No async public API, no `StreamExt*` traits. Callers buffer bytes and use sync parse (including tag/varint `*_partial` / `*_resume`).
-- **No field-level partial/resume** (`read_field_partial`). Compose from tag + varint primitives if needed.
+- **Sync only.** No async public API, no `StreamExt*` traits. Callers buffer bytes and use sync parse. There is no tag/varint `*_partial` / `*_resume`; a varint is at most 10 bytes, so chunked callers buffer until a terminator or `MAX_VARINT_BYTES` then call the complete-read APIs (same model as fixed-width wire types).
+- **No field-level partial/resume** (`read_field_partial`).
 - **No full message types.** Keep the surface to constants, `Varint`, `Tag`, `Field` / `FieldValue`, and extension traits.
 - **Do not confuse Rust types with protobuf types.** Name conversions after the protobuf type (`from_sint32`, `to_uint64`), not the Rust integer.
 - Minimize dependencies. `thiserror` is the expected exception.

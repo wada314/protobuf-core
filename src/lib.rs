@@ -111,9 +111,9 @@
 //! varints. These `Read` methods do not take a byte budget; they stop at the reader's EOF
 //! (or an existing [`std::io::Take`] from [`ReadExtProtobuf`] / the caller):
 //!
-//! - [`ReadExtTag`]: Read tags from `std::io::Read` (with partial/resume for chunked input)
+//! - [`ReadExtTag`]: Read tags from `std::io::Read`
 //! - [`ReadExtVarint`]: Read varints from `std::io::Read` (`with_raw` / `read_varint`
-//!   return `Result` — empty is `UnexpectedEof`; `partial` / `resume` for chunked input)
+//!   return `Result` — empty is `UnexpectedEof`; chunked callers buffer ≤10 bytes)
 //! - [`WriteExtVarint`]: Write varints
 //!
 //! ## Constants
@@ -135,10 +135,8 @@ pub use self::field::{
     ReadExtProtobuf, WriteExtProtobuf, until_group_ends,
 };
 pub use self::field_number::FieldNumber;
-pub use self::tag::{Outcome as TagOutcome, ReadExtTag, Tag};
-pub use self::varint::{
-    DecodeOutcome, DecodeState, ReadExtVarint, Varint, VarintIterFromRead, WriteExtVarint,
-};
+pub use self::tag::{ReadExtTag, Tag};
+pub use self::varint::{ReadExtVarint, Varint, VarintIterFromRead, WriteExtVarint};
 pub use self::wire_format::{
     FIELD_NUMBER_SHIFT, FIXED32_BYTES, FIXED64_BYTES, MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT,
     MAX_3_BYTE_VARINT, MAX_4_BYTE_VARINT, MAX_5_BYTE_VARINT, MAX_6_BYTE_VARINT, MAX_7_BYTE_VARINT,
