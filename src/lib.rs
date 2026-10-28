@@ -112,7 +112,8 @@
 //! (or an existing [`std::io::Take`] from [`ReadExtProtobuf`] / the caller):
 //!
 //! - [`ReadExtTag`]: Read tags from `std::io::Read` (with partial/resume for chunked input)
-//! - [`ReadExtVarint`]: Read varints from `std::io::Read` (with partial/resume for chunked input)
+//! - [`ReadExtVarint`]: Read varints from `std::io::Read` (`with_raw` / `read_varint` for
+//!   complete reads; `partial` / `resume` for chunked input)
 //! - [`WriteExtVarint`]: Write varints
 //!
 //! ## Constants
