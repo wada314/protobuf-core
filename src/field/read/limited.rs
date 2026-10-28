@@ -1,4 +1,15 @@
 //! Streaming (`Read`) field iteration bounded by [`std::io::Take`].
+//!
+//! # `Take` budget contract
+//!
+//! Every [`Take`] on this path (the one stored in [`FieldIterFromRead`], and any
+//! `Take` that implements [`WireCursor`] here) must satisfy
+//! `limit() <= MAX_MESSAGE_SIZE` ([`crate::MAX_MESSAGE_SIZE`], 2 GiB). That keeps
+//! the budget inside a [`u32`] and matches the protobuf encoded-message size
+//! constant. [`ReadExtProtobuf::read_protobuf_fields`] /
+//! [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
+//! `debug_assert` this at the entrance; do not feed a larger `Take` into the
+//! private helpers.
 
 use super::group::GroupBody;
 use super::wire::WireCursor;
@@ -6,7 +17,7 @@ use crate::field::{Field, FieldValue};
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
-use crate::wire_format::{MAX_VARINT_BYTES, WireType};
+use crate::wire_format::{MAX_MESSAGE_SIZE, MAX_VARINT_BYTES, WireType};
 use crate::{ProtobufError, Result};
 use ::std::io::{Read, Take, Write};
 
@@ -37,9 +48,19 @@ fn copy_len_to_vec<R: Read + ?Sized>(
     Ok((buf, len))
 }
 
+/// [`Take::limit`] as [`u32`].
+///
+/// # Contract
+///
+/// `take.limit()` must be `<= MAX_MESSAGE_SIZE` (hence `<= u32::MAX`). Entrance
+/// `debug_assert`s on [`ReadExtProtobuf`] uphold this for iterator-owned Takes.
 #[inline]
 fn take_remaining<R>(take: &Take<R>) -> u32 {
-    u32::try_from(take.limit()).unwrap_or(u32::MAX)
+    debug_assert!(
+        take.limit() <= MAX_MESSAGE_SIZE as u64,
+        "Take limit exceeds MAX_MESSAGE_SIZE"
+    );
+    take.limit() as u32
 }
 
 /// Read `n` bytes from the underlying reader without changing [`Take::limit`].
@@ -57,12 +78,13 @@ fn drain_inner<R: Read>(take: &mut Take<R>, mut n: u32) -> Result<()> {
     Ok(())
 }
 
-/// Parse one protobuf field from `take`, using `handler` for each Len body.
+/// Parse one protobuf field from `take`.
 ///
-/// Len handlers receive `&mut R` and the payload `length` (`u32` from the length
-/// prefix). They return `(payload, consumed)`; `consumed` is trusted and any
-/// remainder is drained from the underlying reader (message budget already
-/// committed for the full length).
+/// When the field is length-delimited, `handler` runs once for that Len body
+/// with `&mut R` and the payload `length` (`u32` from the length prefix). It
+/// returns `(payload, consumed)`; `consumed` is trusted and any remainder is
+/// drained from the underlying reader (message budget already committed for the
+/// full length). Other wire types do not call `handler`.
 fn parse_protobuf_field_with<R, L, F>(take: &mut Take<R>, handler: &mut F) -> Result<Field<L>>
 where
     R: Read,
@@ -99,6 +121,13 @@ where
     })
 }
 
+/// [`WireCursor`] for a message-bounded [`Take`].
+///
+/// # Contract
+///
+/// `Take::limit()` must be `<= MAX_MESSAGE_SIZE`. Prefer Takes created through
+/// [`ReadExtProtobuf`]; nested Len budgets should also stay within that bound
+/// when re-entering `read_protobuf_fields*`.
 impl<R: Read> WireCursor for Take<R> {
     #[inline]
     fn remaining(&self) -> u32 {
@@ -153,7 +182,9 @@ impl<R: Read> WireCursor for Take<R> {
 /// Iterator for reading raw protobuf fields sequentially from a reader.
 ///
 /// Bounded by the `len` passed to [`ReadExtProtobuf::read_protobuf_fields`] via
-/// [`std::io::Take`]. `F` is the Len-body handler (default [`VecLenPayload`], or a
+/// [`std::io::Take`]. That `Take`'s limit is expected to be at most
+/// [`MAX_MESSAGE_SIZE`] (`debug_assert`ed when the iterator is built). `F` is the
+/// Len-body handler (default [`VecLenPayload`], or a
 /// `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>`).
 pub struct FieldIterFromRead<R, F = VecLenPayload> {
     take: Take<R>,
@@ -281,6 +312,10 @@ pub trait ReadExtProtobuf: Read {
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
     /// Consumes at most `len` bytes of message budget.
+    ///
+    /// # Contract
+    ///
+    /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
     /// This consumes the reader and returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
     /// Length-delimited payloads are `Vec<u8>`.
@@ -291,6 +326,10 @@ pub trait ReadExtProtobuf: Read {
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
     /// Consumes at most `len` bytes of message budget.
+    ///
+    /// # Contract
+    ///
+    /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
     ///
     /// `handler` is called once for each length-delimited field with the field
     /// number, a mutable borrow of this reader, and the Len payload length
@@ -303,11 +342,11 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// Nested messages can call [`read_protobuf_fields`](Self::read_protobuf_fields)
     /// / [`read_protobuf_fields_with`](Self::read_protobuf_fields_with) again on
-    /// `&mut R` with the nested payload `len`.
+    /// `&mut R` with the nested payload `len` (same contract).
     ///
     /// # Examples
     ///
-    /// Copy each Len body into a `Box<[u8]>`:
+    /// Copy a Len body into a `Box<[u8]>`:
     ///
     /// ```
     /// use ::protobuf_core::{FieldValue, ReadExtProtobuf};
@@ -342,6 +381,10 @@ where
     where
         Self: Sized,
     {
+        debug_assert!(
+            (len as usize) <= MAX_MESSAGE_SIZE,
+            "message budget exceeds MAX_MESSAGE_SIZE"
+        );
         FieldIterFromRead {
             take: self.take(u64::from(len)),
             handler: VecLenPayload,
@@ -353,6 +396,10 @@ where
         Self: Sized,
         F: FnMut(FieldNumber, &mut Self, u32) -> Result<(L, u32)>,
     {
+        debug_assert!(
+            (len as usize) <= MAX_MESSAGE_SIZE,
+            "message budget exceeds MAX_MESSAGE_SIZE"
+        );
         FieldIterFromRead {
             take: self.take(u64::from(len)),
             handler,

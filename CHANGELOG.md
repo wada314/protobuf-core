@@ -23,7 +23,7 @@ Breaking for any caller of the removed varint/tag partial-resume API, of `read_v
 ### Changed
 
 - `ReadExtVarint::read_varint` / `read_varint_with_raw` and `ReadExtTag::read_tag` return `Result<…>` without `Option`. Empty input is `UnexpectedEof` (same as truncated); soft end is a caller `remaining` / length-bound check. `read_varints` soft-stops on empty.
-- `ReadExtProtobuf::read_protobuf_fields` / `read_protobuf_fields_with` take `len: u32` (was host `usize` in 0.6.0). `*_with` takes `F: FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>` instead of `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>`. Consumed is trusted; remainder is drained after `Take::set_limit` commits the full length. Default `read_protobuf_fields` still yields `Field<Vec<u8>>` via `VecLenPayload`. Handlers see `&mut R`, not nested `Take`. Mid-field truncation with budget equal to available bytes is `UnexpectedEof` from the local budget (not necessarily `IoError`).
+- `ReadExtProtobuf::read_protobuf_fields` / `read_protobuf_fields_with` take `len: u32` (was host `usize` in 0.6.0). `*_with` takes `F: FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>` instead of `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>`. Consumed is trusted; remainder is drained after `Take::set_limit` commits the full length. Default `read_protobuf_fields` still yields `Field<Vec<u8>>` via `VecLenPayload`. Handlers see `&mut R`, not nested `Take`. Mid-field truncation with budget equal to available bytes is `UnexpectedEof` from the local budget (not necessarily `IoError`). Streaming `Take` budgets are contracted to `<= MAX_MESSAGE_SIZE` (docs + entrance `debug_assert`; release builds do not reject oversized `len`).
 
 ### Removed
 
