@@ -57,6 +57,16 @@ impl<'a, R: ?Sized> Drop for Take32<'a, R> {
             *parent = (*parent)
                 .saturating_add(self.remaining)
                 .saturating_add(self.pending_skip);
+        } else {
+            // Top-level take: no parent to receive skip debt. Leaving
+            // `pending_skip` would break the full-consume contract for prepaid
+            // scoped lengths (those bytes never leave the underlying reader).
+            assert!(
+                self.pending_skip == 0,
+                "Take32 dropped with pending_skip={} and no parent; flush before drop \
+                 (or keep iterating so next/Read drains the debt)",
+                self.pending_skip
+            );
         }
     }
 }
