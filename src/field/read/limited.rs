@@ -45,25 +45,15 @@ pub struct Take32<'a, R: ?Sized> {
     pending_skip: u32,
     /// When set, this take was produced by [`scope`](Self::scope). On drop,
     /// unused `remaining` is added to the parent's `pending_skip` (not to
-    /// `remaining` — the length was prepaid).
-    parent_pending_skip: Option<*mut u32>,
+    /// `remaining` — the length was prepaid). Disjoint from [`reader`]: both
+    /// are reborrows of the parent for `'a`.
+    parent_pending_skip: Option<&'a mut u32>,
 }
-
-// `parent_pending_skip` is only used while the child exclusively borrows the
-// parent via the usual `&mut` scope lifetime; the raw pointer does not create
-// shared aliasing across threads beyond `R`'s own `Send`/`Sync`.
-unsafe impl<'a, R: ?Sized + Send> Send for Take32<'a, R> {}
-unsafe impl<'a, R: ?Sized + Sync> Sync for Take32<'a, R> {}
 
 impl<'a, R: ?Sized> Drop for Take32<'a, R> {
     fn drop(&mut self) {
         if let Some(parent) = self.parent_pending_skip.take() {
-            // SAFETY: `parent` points at the `pending_skip` field of the Take32
-            // that created this child via `scope`. That parent is exclusively
-            // borrowed for this child's lifetime.
-            unsafe {
-                *parent = (*parent).saturating_add(self.remaining);
-            }
+            *parent = (*parent).saturating_add(self.remaining);
         }
     }
 }
@@ -134,12 +124,11 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
             self.remaining
         );
         self.remaining -= n;
-        let parent_pending_skip = &mut self.pending_skip as *mut u32;
         Ok(Take32 {
             reader: &mut *self.reader,
             remaining: n,
             pending_skip: 0,
-            parent_pending_skip: Some(parent_pending_skip),
+            parent_pending_skip: Some(&mut self.pending_skip),
         })
     }
 
