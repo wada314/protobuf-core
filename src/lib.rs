@@ -93,7 +93,7 @@
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types with an explicit
 //!   `u32` message byte budget `len` (via [`Take32`])
 //!   - Output: [`Field<Vec<u8>>`] by default, or [`Field<L>`] from a Len handler
-//!     `FnMut(FieldNumber, &mut Take32<'_, R>) -> Result<(L, u32)>`
+//!     `FnMut(FieldNumber, Take32<'_, R>) -> Result<(L, u32)>`
 //!
 //! Field iterators expose `skip_until`, slice `take_until`, Read `copy_until`,
 //! and [`group_body`](FieldIterFromSlice::group_body) /
