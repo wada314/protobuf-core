@@ -115,27 +115,33 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
     }
 
     /// Iterate fields within this take's current [`remaining`](Self::remaining)
-    /// budget (no extra wrap / no new `len`).
+    /// budget.
+    ///
+    /// Internally [`scope`](Self::scope)s the full remaining count into an owned
+    /// [`FieldIterFromRead`] (same type as [`ReadExtProtobuf::read_protobuf_fields`]).
+    /// Unused budget is restored when the iterator drops.
     ///
     /// Prefer this for nested messages already bounded by [`scope`](Self::scope).
     /// Calling [`ReadExtProtobuf::read_protobuf_fields`] on a `Take32` would
     /// wrap another `Take32` around it and restack monomorphizations.
     #[inline]
-    pub fn fields(&mut self) -> FieldIterOnTake32<'_, 'a, R, VecLenPayload> {
-        FieldIterOnTake32 {
-            read: self,
+    pub fn fields(&mut self) -> FieldIterFromRead<'_, R, VecLenPayload> {
+        let n = self.remaining();
+        FieldIterFromRead {
+            read: self.scope(n),
             handler: VecLenPayload,
         }
     }
 
     /// Like [`fields`](Self::fields) with a custom Len handler.
     #[inline]
-    pub fn fields_with<L, F>(&mut self, handler: F) -> FieldIterOnTake32<'_, 'a, R, F>
+    pub fn fields_with<L, F>(&mut self, handler: F) -> FieldIterFromRead<'_, R, F>
     where
         F: for<'t> FnMut(FieldNumber, &mut Take32<'t, R>, u32) -> Result<(L, u32)>,
     {
-        FieldIterOnTake32 {
-            read: self,
+        let n = self.remaining();
+        FieldIterFromRead {
+            read: self.scope(n),
             handler,
         }
     }
@@ -283,11 +289,12 @@ impl<'a, R: Read + ?Sized> WireCursor for Take32<'a, R> {
 
 /// Iterator for reading raw protobuf fields sequentially from a reader.
 ///
-/// Owns a [`Take32`] over the borrowed reader for `'a`. Bounded by the `len`
-/// passed to [`ReadExtProtobuf::read_protobuf_fields`]. That budget is a
-/// [`u32`]; protobuf message budgets are also expected to be at most
-/// [`MAX_MESSAGE_SIZE`] (`debug_assert`ed when the iterator is built). `F` is
-/// the Len-body handler (default [`VecLenPayload`], or a
+/// Owns a [`Take32`] for `'a`. Built by [`ReadExtProtobuf::read_protobuf_fields`]
+/// (fresh take with `len`) or [`Take32::fields`] / [`Take32::fields_with`]
+/// (`scope` of the take's current remaining). That budget is a [`u32`];
+/// protobuf message budgets are also expected to be at most
+/// [`MAX_MESSAGE_SIZE`] (`debug_assert`ed at top-level entrances). `F` is the
+/// Len-body handler (default [`VecLenPayload`], or a
 /// `FnMut(FieldNumber, &mut Take32<'_, R>, u32) -> Result<(L, u32)>`).
 pub struct FieldIterFromRead<'a, R: ?Sized, F = VecLenPayload> {
     read: Take32<'a, R>,
@@ -373,75 +380,6 @@ where
             return None;
         }
         Some(parse_protobuf_field_with(&mut self.read, &mut self.handler))
-    }
-}
-
-/// Field iterator over an existing [`Take32`] (nested re-entry).
-///
-/// Produced by [`Take32::fields`] / [`Take32::fields_with`]. Borrows the take
-/// so nested Len handlers can walk the scoped body without wrapping another
-/// `Take32` around it.
-pub struct FieldIterOnTake32<'t, 'a, R: ?Sized, F = VecLenPayload> {
-    read: &'t mut Take32<'a, R>,
-    handler: F,
-}
-
-impl<'t, 'a, R: Read + ?Sized, F> FieldIterOnTake32<'t, 'a, R, F> {
-    /// Bytes still allowed in the underlying take's budget.
-    #[inline]
-    pub fn remaining(&self) -> u32 {
-        self.read.remaining()
-    }
-
-    /// Skip fields until `pred` returns `Ok(true)`. See
-    /// [`FieldIterFromRead::skip_until`].
-    pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
-    where
-        P: FnMut(Tag) -> Result<bool>,
-    {
-        WireCursor::skip_until(self.read, pred)
-    }
-
-    /// Iterate fields until the matching end-group for `field_number`.
-    #[inline]
-    pub fn group_body(&mut self, field_number: FieldNumber) -> GroupBody<&mut Self> {
-        GroupBody::new(self, field_number)
-    }
-
-    /// Copy fields to `out` until `pred` returns `Ok(true)`. See
-    /// [`FieldIterFromRead::copy_until`].
-    pub fn copy_until<P, W>(&mut self, pred: P, out: &mut W) -> Result<usize>
-    where
-        P: FnMut(Tag) -> Result<bool>,
-        W: Write,
-    {
-        WireCursor::copy_until(self.read, pred, out)
-    }
-}
-
-impl<'t, 'a, R: Read + ?Sized> Iterator for FieldIterOnTake32<'t, 'a, R, VecLenPayload> {
-    type Item = Result<Field<Vec<u8>>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.read.remaining() == 0 {
-            return None;
-        }
-        Some(parse_protobuf_field_with(self.read, &mut copy_len_to_vec))
-    }
-}
-
-impl<'t, 'a, R, L, F> Iterator for FieldIterOnTake32<'t, 'a, R, F>
-where
-    R: Read + ?Sized,
-    F: for<'s> FnMut(FieldNumber, &mut Take32<'s, R>, u32) -> Result<(L, u32)>,
-{
-    type Item = Result<Field<L>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.read.remaining() == 0 {
-            return None;
-        }
-        Some(parse_protobuf_field_with(self.read, &mut self.handler))
     }
 }
 
