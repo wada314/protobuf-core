@@ -879,8 +879,10 @@ mod len_payload {
     }
 
     #[test]
-    fn nested_message_via_on_len() {
-        // field 1 string "Hi"; field 2 message { id=7, name="ok" }
+    fn nested_message_different_and_overlapping_field_numbers() {
+        // Parent field 1 = string "Hi" (Len).
+        // Parent field 2 = Child message { field 1 = id 7 (Varint), field 3 = name "ok" }.
+        // Field number 1 appears on both parent and child with different meanings.
         let wire: &[u8] = &[
             0x0A, 0x02, b'H', b'i', //
             0x12, 0x06, //
@@ -896,11 +898,12 @@ mod len_payload {
             match field_number.as_u32() {
                 2 => {
                     let mut child = Child::default();
+                    // Inner Len bodies are only Child.name (bytes) — not the same
+                    // recursive handler. See `direct_recursive_node_via_buffered_reparse`.
                     let nested = reader
-                        .read_protobuf_fields_with(len, |inner_n, inner, inner_len| {
+                        .read_protobuf_fields_with(len, |_n, inner, inner_len| {
                             let mut bytes = vec![0u8; inner_len as usize];
                             inner.read_exact(&mut bytes)?;
-                            let _ = inner_n;
                             Ok((LenValue::Bytes(bytes), inner_len))
                         })
                         .collect::<crate::Result<Vec<_>>>()?;
@@ -926,13 +929,251 @@ mod len_payload {
             .collect::<crate::Result<Vec<_>>>()
             .unwrap();
         assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].field_number.as_u32(), 1);
         assert!(matches!(
             &fields[0].value,
             FieldValue::Len(LenValue::Bytes(b)) if b == b"Hi"
         ));
+        assert_eq!(fields[1].field_number.as_u32(), 2);
         assert!(matches!(
             &fields[1].value,
             FieldValue::Len(LenValue::Child(Child { id: 7, name })) if name == b"ok"
         ));
+    }
+
+    #[test]
+    fn nested_message_same_field_number_as_child() {
+        // Parent field 1 = Child message { field 1 = 42 }. Same number, nested scope.
+        let wire: &[u8] = &[0x0A, 0x02, 0x08, 0x2A];
+
+        #[derive(Debug, Default, PartialEq)]
+        struct OnlyChild {
+            n: u64,
+        }
+
+        let fields = Cursor::new(wire)
+            .read_protobuf_fields_with(wire.len() as u32, |_n, reader, len| {
+                let mut child = OnlyChild::default();
+                for field in reader.read_protobuf_fields(len) {
+                    let field = field?;
+                    if field.field_number.as_u32() == 1 {
+                        if let FieldValue::Varint(v) = field.value {
+                            child.n = v.to_uint64();
+                        }
+                    }
+                }
+                Ok((child, len))
+            })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        assert_eq!(fields[0].value, FieldValue::Len(OnlyChild { n: 42 }));
+    }
+
+    /// Dummy self-recursive message: `Node { value, child: Option<Node> }`.
+    ///
+    /// # Avoiding infinite monomorphization
+    ///
+    /// Do **not** implement recursion as a generic
+    /// `fn decode<R: Read>(..., reader: &mut R, len)` that calls
+    /// `reader.read_protobuf_fields_with(len, decode)` on that same `reader`.
+    /// Each nesting level would monomorphize `R = &mut PreviousR` (`Cursor`, then
+    /// `&mut Cursor`, then `&mut &mut Cursor`, …) and rustc does not terminate.
+    ///
+    /// Safe pattern used here: copy the Len body into a buffer and re-enter
+    /// `parse_node` on `Cursor::new(buf)` so nested levels share one `R`.
+    #[derive(Debug, Default, PartialEq)]
+    struct Node {
+        value: u64,
+        child: Option<Box<Node>>,
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum NodeLen {
+        Child(Node),
+        Skip(Vec<u8>),
+    }
+
+    fn parse_node(reader: impl Read, len: u32) -> crate::Result<Node> {
+        let mut node = Node::default();
+        for field in reader.read_protobuf_fields_with(len, |n, r, body_len| match n.as_u32() {
+            2 => {
+                let mut buf = vec![0u8; body_len as usize];
+                r.read_exact(&mut buf)?;
+                let child = parse_node(Cursor::new(buf), body_len)?;
+                Ok((NodeLen::Child(child), body_len))
+            }
+            _ => {
+                let mut buf = vec![0u8; body_len as usize];
+                r.read_exact(&mut buf)?;
+                Ok((NodeLen::Skip(buf), body_len))
+            }
+        }) {
+            match field? {
+                Field {
+                    field_number,
+                    value: FieldValue::Varint(v),
+                } if field_number.as_u32() == 1 => {
+                    node.value = v.to_uint64();
+                }
+                Field {
+                    field_number,
+                    value: FieldValue::Len(NodeLen::Child(child)),
+                } if field_number.as_u32() == 2 => {
+                    node.child = Some(Box::new(child));
+                }
+                _ => {}
+            }
+        }
+        Ok(node)
+    }
+
+    #[test]
+    fn direct_recursive_node_via_buffered_reparse() {
+        // Node { value=1, child: Node { value=2, child: Node { value=3 } } }
+        // Node3 = 08 03
+        // Node2 = 08 02 | 12 02 | 08 03
+        // Node1 = 08 01 | 12 06 | (Node2)
+        let wire: &[u8] = &[
+            0x08, 0x01, //
+            0x12, 0x06, //
+            0x08, 0x02, //
+            0x12, 0x02, //
+            0x08, 0x03,
+        ];
+        let got = parse_node(Cursor::new(wire), wire.len() as u32).unwrap();
+        assert_eq!(
+            got,
+            Node {
+                value: 1,
+                child: Some(Box::new(Node {
+                    value: 2,
+                    child: Some(Box::new(Node {
+                        value: 3,
+                        child: None,
+                    })),
+                })),
+            }
+        );
+    }
+
+    /// Indirect recursion: `TypeA` contains `TypeB`, `TypeB` contains `TypeA`.
+    /// Same buffered-reparse pattern as [`direct_recursive_node_via_buffered_reparse`].
+    #[derive(Debug, Default, PartialEq)]
+    struct TypeA {
+        mark: u64,
+        b: Option<Box<TypeB>>,
+    }
+
+    #[derive(Debug, Default, PartialEq)]
+    struct TypeB {
+        mark: u64,
+        a: Option<Box<TypeA>>,
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum ALen {
+        B(TypeB),
+        Skip(Vec<u8>),
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum BLen {
+        A(TypeA),
+        Skip(Vec<u8>),
+    }
+
+    fn parse_a(reader: impl Read, len: u32) -> crate::Result<TypeA> {
+        let mut msg = TypeA::default();
+        for field in reader.read_protobuf_fields_with(len, |n, r, body_len| match n.as_u32() {
+            2 => {
+                let mut buf = vec![0u8; body_len as usize];
+                r.read_exact(&mut buf)?;
+                Ok((ALen::B(parse_b(Cursor::new(buf), body_len)?), body_len))
+            }
+            _ => {
+                let mut buf = vec![0u8; body_len as usize];
+                r.read_exact(&mut buf)?;
+                Ok((ALen::Skip(buf), body_len))
+            }
+        }) {
+            match field? {
+                Field {
+                    field_number,
+                    value: FieldValue::Varint(v),
+                } if field_number.as_u32() == 1 => {
+                    msg.mark = v.to_uint64();
+                }
+                Field {
+                    field_number,
+                    value: FieldValue::Len(ALen::B(b)),
+                } if field_number.as_u32() == 2 => {
+                    msg.b = Some(Box::new(b));
+                }
+                _ => {}
+            }
+        }
+        Ok(msg)
+    }
+
+    fn parse_b(reader: impl Read, len: u32) -> crate::Result<TypeB> {
+        let mut msg = TypeB::default();
+        for field in reader.read_protobuf_fields_with(len, |n, r, body_len| match n.as_u32() {
+            2 => {
+                let mut buf = vec![0u8; body_len as usize];
+                r.read_exact(&mut buf)?;
+                Ok((BLen::A(parse_a(Cursor::new(buf), body_len)?), body_len))
+            }
+            _ => {
+                let mut buf = vec![0u8; body_len as usize];
+                r.read_exact(&mut buf)?;
+                Ok((BLen::Skip(buf), body_len))
+            }
+        }) {
+            match field? {
+                Field {
+                    field_number,
+                    value: FieldValue::Varint(v),
+                } if field_number.as_u32() == 1 => {
+                    msg.mark = v.to_uint64();
+                }
+                Field {
+                    field_number,
+                    value: FieldValue::Len(BLen::A(a)),
+                } if field_number.as_u32() == 2 => {
+                    msg.a = Some(Box::new(a));
+                }
+                _ => {}
+            }
+        }
+        Ok(msg)
+    }
+
+    #[test]
+    fn indirect_recursive_a_b_via_buffered_reparse() {
+        // A { mark=1, b: B { mark=2, a: A { mark=3 } } }
+        // Inner A = 08 03
+        // B      = 08 02 | 12 02 | 08 03
+        // Outer A= 08 01 | 12 06 | (B)
+        // Field 1 = mark on both A and B; field 2 = nested peer type on both.
+        let wire: &[u8] = &[
+            0x08, 0x01, //
+            0x12, 0x06, //
+            0x08, 0x02, //
+            0x12, 0x02, //
+            0x08, 0x03,
+        ];
+        let got = parse_a(Cursor::new(wire), wire.len() as u32).unwrap();
+        assert_eq!(
+            got,
+            TypeA {
+                mark: 1,
+                b: Some(Box::new(TypeB {
+                    mark: 2,
+                    a: Some(Box::new(TypeA { mark: 3, b: None })),
+                })),
+            }
+        );
     }
 }
