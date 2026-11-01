@@ -25,18 +25,16 @@ use ::std::io::{Read, Write};
 
 /// Budgeted view of `&'a mut R` whose remaining count always fits in a [`u32`].
 ///
-/// Construct with [`Take32::new`] or [`ReadExtProtobuf::take32`]. Nested Len
-/// bodies use [`scope`](Self::scope): the child is `Take32<'b, R>` for the same
-/// root `R` (no `&mut` stacking). A scoped child **always consumes** its
-/// prepaid length: on drop, unused `remaining` plus any unflushed
-/// [`pending_skip`](Self::pending_skip) are recorded on the parent; the parent
-/// (or a later child that inherited the debt) drains on the next fallible read.
-/// No budget is restored.
+/// Built only inside this crate (via [`ReadExtProtobuf::read_protobuf_fields`]).
+/// Nested Len bodies use [`scope`](Self::scope): the child is `Take32<'b, R>`
+/// for the same root `R` (no `&mut` stacking). A scoped child **always
+/// consumes** its prepaid length: on drop, unused `remaining` plus any
+/// unflushed [`pending_skip`](Self::pending_skip) are recorded on the parent;
+/// the parent (or a later child that inherited the debt) drains on the next
+/// fallible read. No budget is restored.
 ///
-/// A top-level take with leftover [`pending_skip`](Self::pending_skip) and no
-/// parent panics on drop unless built with
-/// [`ReadExtProtobuf::take32_with`] / [`Take32::new_with`], which install an
-/// orphan-skip callback.
+/// Field iterators install an orphan-skip drain so abandoning a top-level take
+/// with leftover [`pending_skip`](Self::pending_skip) does not panic.
 ///
 /// # Contract
 ///
@@ -55,8 +53,8 @@ pub struct Take32<'a, R: ?Sized> {
     /// Disjoint from [`reader`]: both are reborrows of the parent for `'a`.
     parent_pending_skip: Option<&'a mut u32>,
     /// Top-level only: called from [`Drop`] with `(&mut R, pending_skip)` when
-    /// there is skip debt and no parent. [`take32`](ReadExtProtobuf::take32) /
-    /// [`new`](Self::new) leave this `None` (panic instead).
+    /// there is skip debt and no parent. Field iterators install a drain;
+    /// `None` panics (crate-internal / test construction only).
     on_orphan_pending_skip: Option<OrphanPendingSkip<'a, R>>,
 }
 
@@ -78,8 +76,7 @@ impl<'a, R: ?Sized> Drop for Take32<'a, R> {
         } else {
             panic!(
                 "Take32 dropped with pending_skip={pending} and no parent; flush before \
-                 drop, keep iterating so next/Read drains the debt, or use take32_with \
-                 / Take32::new_with to handle orphan skip"
+                 drop or keep iterating so next/Read drains the debt"
             );
         }
     }
@@ -87,26 +84,22 @@ impl<'a, R: ?Sized> Drop for Take32<'a, R> {
 
 type OrphanPendingSkip<'a, R> = Box<dyn FnOnce(&mut R, u32) + Send + 'a>;
 
-impl<'a, R: Read + ?Sized> Take32<'a, R> {
-    /// Budgeted view of `reader` that may consume at most `len` bytes.
-    ///
-    /// Drop panics if this take still holds [`pending_skip`](Self::pending_skip)
-    /// (no parent and no orphan handler). Prefer
-    /// [`new_with`](Self::new_with) / [`ReadExtProtobuf::take32_with`] when an
-    /// early drop with skip debt must be handled.
-    #[inline]
-    pub fn new(reader: &'a mut R, len: u32) -> Self {
-        Self::new_with(reader, len, None)
+fn drain_orphan_pending_skip<R: Read + ?Sized>(reader: &mut R, mut n: u32) {
+    let mut buf = [0u8; 256];
+    while n > 0 {
+        let chunk = n.min(buf.len() as u32) as usize;
+        if Read::read_exact(reader, &mut buf[..chunk]).is_err() {
+            return;
+        }
+        n -= chunk as u32;
     }
+}
 
-    /// Like [`new`](Self::new), with an optional orphan-`pending_skip` handler.
-    ///
-    /// If this top-level take is dropped with `pending_skip > 0`, `on_orphan`
-    /// is called as `on_orphan(reader, pending_skip)` instead of panicking.
-    /// The callback typically drains those bytes from `reader` (fallible work
-    /// does not belong in [`Drop`] itself).
+impl<'a, R: Read + ?Sized> Take32<'a, R> {
+    /// Crate-internal: top-level take with optional orphan-`pending_skip` handler.
+    /// `None` panics on Drop if `pending_skip != 0`.
     #[inline]
-    pub fn new_with(
+    pub(crate) fn new_with(
         reader: &'a mut R,
         len: u32,
         on_orphan_pending_skip: Option<OrphanPendingSkip<'a, R>>,
@@ -118,6 +111,13 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
             parent_pending_skip: None,
             on_orphan_pending_skip,
         }
+    }
+
+    /// Top-level take for [`FieldIterFromRead`]: drains orphan `pending_skip` on
+    /// Drop instead of panicking.
+    #[inline]
+    pub(crate) fn for_field_iter(reader: &'a mut R, len: u32) -> Self {
+        Self::new_with(reader, len, Some(Box::new(drain_orphan_pending_skip)))
     }
 
     /// Bytes still allowed under this take's budget.
@@ -490,52 +490,6 @@ where
 /// }
 /// ```
 pub trait ReadExtProtobuf: Read {
-    /// Budgeted view of `self` that may consume at most `len` bytes.
-    ///
-    /// Drop panics if the take is abandoned with leftover
-    /// [`Take32::pending_skip`]. See [`take32_with`](Self::take32_with) to
-    /// supply an orphan-skip callback instead.
-    ///
-    /// # Contract
-    ///
-    /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
-    #[inline]
-    fn take32(&mut self, len: u32) -> Take32<'_, Self>
-    where
-        Self: Sized,
-    {
-        debug_assert!(
-            (len as usize) <= MAX_MESSAGE_SIZE,
-            "message budget exceeds MAX_MESSAGE_SIZE"
-        );
-        Take32::new(self, len)
-    }
-
-    /// Like [`take32`](Self::take32), with a callback for leftover
-    /// [`Take32::pending_skip`] if this top-level take is dropped without a
-    /// parent to receive the debt.
-    ///
-    /// `on_orphan_pending_skip(reader, n)` runs from [`Drop`] when `n > 0`.
-    /// Use it to drain `n` bytes from `reader` (or otherwise make the stream
-    /// consistent). Scoped children still forward debt to their parent; this
-    /// only covers the top-level orphan case.
-    ///
-    /// # Contract
-    ///
-    /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
-    #[inline]
-    fn take32_with<'a, F>(&'a mut self, len: u32, on_orphan_pending_skip: F) -> Take32<'a, Self>
-    where
-        Self: Sized,
-        F: FnOnce(&mut Self, u32) + Send + 'a,
-    {
-        debug_assert!(
-            (len as usize) <= MAX_MESSAGE_SIZE,
-            "message budget exceeds MAX_MESSAGE_SIZE"
-        );
-        Take32::new_with(self, len, Some(Box::new(on_orphan_pending_skip)))
-    }
-
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
     /// Borrows `self` and consumes at most `len` bytes of message budget.
@@ -619,7 +573,7 @@ where
             "message budget exceeds MAX_MESSAGE_SIZE"
         );
         FieldIterFromRead {
-            read: Take32::new(self, len),
+            read: Take32::for_field_iter(self, len),
             handler: VecLenPayload,
         }
     }
@@ -638,7 +592,7 @@ where
             "message budget exceeds MAX_MESSAGE_SIZE"
         );
         FieldIterFromRead {
-            read: Take32::new(self, len),
+            read: Take32::for_field_iter(self, len),
             handler,
         }
     }
@@ -651,28 +605,33 @@ mod tests {
     #[test]
     #[should_panic(expected = "pending_skip")]
     fn take32_drop_with_pending_skip_panics_without_handler() {
-        use super::ReadExtProtobuf;
+        use super::Take32;
         use ::std::io::Cursor;
 
+        // Crate-internal construction without orphan handler: Drop panics.
         let mut data = Cursor::new(vec![1u8, 2, 3]);
-        let mut take = data.take32(3);
+        let mut take = Take32::new_with(&mut data, 3, None);
         drop(take.scope(2));
         drop(take);
     }
 
     #[test]
     fn take32_with_orphan_pending_skip_callback_drains_reader() {
-        use super::ReadExtProtobuf;
+        use super::Take32;
         use ::std::io::{Cursor, Read};
 
         let mut data = Cursor::new(vec![1u8, 2, 3, 4, 5]);
         let mut skipped = 0u32;
         {
-            let mut take = data.take32_with(5, |r, n| {
-                skipped = n;
-                let mut buf = vec![0u8; n as usize];
-                r.read_exact(&mut buf).unwrap();
-            });
+            let mut take = Take32::new_with(
+                &mut data,
+                5,
+                Some(Box::new(|r, n| {
+                    skipped = n;
+                    let mut buf = vec![0u8; n as usize];
+                    r.read_exact(&mut buf).unwrap();
+                })),
+            );
             drop(take.scope(3));
             assert_eq!(take.pending_skip(), 3);
             assert_eq!(take.remaining(), 2);
@@ -681,6 +640,36 @@ mod tests {
         let mut rest = Vec::new();
         data.read_to_end(&mut rest).unwrap();
         assert_eq!(rest, [4, 5]);
+    }
+
+    #[test]
+    fn field_iter_abandon_drains_orphan_pending_skip() {
+        use super::ReadExtProtobuf;
+        use ::std::io::{Cursor, Read};
+
+        // Public entrance installs a drain: abandoning the iterator mid-scope
+        // must not panic and must advance the underlying reader.
+        let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
+        let mut reader = Cursor::new(message);
+        {
+            let mut fields = reader.read_protobuf_fields_with(
+                message.len() as u32,
+                |_n, mut body| -> crate::Result<(u8, u32)> {
+                    let mut one = [0u8; 1];
+                    body.read_exact(&mut one)?;
+                    // Leave 2 body bytes unread → pending_skip on Drop of body
+                    // then of the iterator's top-level take.
+                    Ok((one[0], 1))
+                },
+            );
+            let first = fields.next().unwrap().unwrap();
+            assert!(matches!(first.value, FieldValue::Len(b'H')));
+            // Abandon without reading the trailing varint.
+        }
+        let mut rest = Vec::new();
+        reader.read_to_end(&mut rest).unwrap();
+        // Body leftover (e,l) drained; trailing field still on the stream.
+        assert_eq!(rest, [0x10, 0x01]);
     }
 
     #[test]
@@ -1278,6 +1267,40 @@ mod len_payload {
         Ok(node)
     }
 
+    /// Top-level entrance via [`ReadExtProtobuf`]; nested bodies stay on
+    /// [`Take32::fields_with`] / [`parse_node`].
+    fn parse_node_from_read<R: Read>(reader: &mut R, len: u32) -> crate::Result<Node> {
+        let mut node = Node::default();
+        for field in reader.read_protobuf_fields_with(len, |n, mut body| {
+            let body_len = body.remaining();
+            match n.as_u32() {
+                2 => Ok((NodeLen::Child(parse_node(body)?), body_len)),
+                _ => {
+                    let mut buf = vec![0u8; body_len as usize];
+                    body.read_exact(&mut buf)?;
+                    Ok((NodeLen::Skip(buf), body_len))
+                }
+            }
+        }) {
+            match field? {
+                Field {
+                    field_number,
+                    value: FieldValue::Varint(v),
+                } if field_number.as_u32() == 1 => {
+                    node.value = v.to_uint64();
+                }
+                Field {
+                    field_number,
+                    value: FieldValue::Len(NodeLen::Child(child)),
+                } if field_number.as_u32() == 2 => {
+                    node.child = Some(Box::new(child));
+                }
+                _ => {}
+            }
+        }
+        Ok(node)
+    }
+
     #[test]
     fn direct_recursive_node_via_take32_scope() {
         // Node { value=1, child: Node { value=2, child: Node { value=3 } } }
@@ -1292,7 +1315,7 @@ mod len_payload {
             0x08, 0x03,
         ];
         let mut input = Cursor::new(wire);
-        let got = parse_node(input.take32(wire.len() as u32)).unwrap();
+        let got = parse_node_from_read(&mut input, wire.len() as u32).unwrap();
         assert_eq!(
             got,
             Node {
@@ -1398,6 +1421,38 @@ mod len_payload {
         Ok(msg)
     }
 
+    fn parse_a_from_read<R: Read>(reader: &mut R, len: u32) -> crate::Result<TypeA> {
+        let mut msg = TypeA::default();
+        for field in reader.read_protobuf_fields_with(len, |n, mut body| {
+            let body_len = body.remaining();
+            match n.as_u32() {
+                2 => Ok((ALen::B(parse_b(body)?), body_len)),
+                _ => {
+                    let mut buf = vec![0u8; body_len as usize];
+                    body.read_exact(&mut buf)?;
+                    Ok((ALen::Skip(buf), body_len))
+                }
+            }
+        }) {
+            match field? {
+                Field {
+                    field_number,
+                    value: FieldValue::Varint(v),
+                } if field_number.as_u32() == 1 => {
+                    msg.mark = v.to_uint64();
+                }
+                Field {
+                    field_number,
+                    value: FieldValue::Len(ALen::B(b)),
+                } if field_number.as_u32() == 2 => {
+                    msg.b = Some(Box::new(b));
+                }
+                _ => {}
+            }
+        }
+        Ok(msg)
+    }
+
     #[test]
     fn indirect_recursive_a_b_via_take32_scope() {
         // A { mark=1, b: B { mark=2, a: A { mark=3 } } }
@@ -1413,7 +1468,7 @@ mod len_payload {
             0x08, 0x03,
         ];
         let mut input = Cursor::new(wire);
-        let got = parse_a(input.take32(wire.len() as u32)).unwrap();
+        let got = parse_a_from_read(&mut input, wire.len() as u32).unwrap();
         assert_eq!(
             got,
             TypeA {
