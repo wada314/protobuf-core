@@ -33,9 +33,12 @@ use ::std::io::{Read, Write};
 /// the parent (or a later child that inherited the debt) drains on the next
 /// fallible read. No budget is restored.
 ///
-/// Field iterators install an orphan-skip drain so abandoning a top-level take
-/// with leftover [`pending_skip`](Self::pending_skip) drains the underlying
-/// reader instead of leaving skip debt.
+/// [`Drop`] itself does no I/O: scoped children only forward counters to the
+/// parent; a top-level take with leftover [`pending_skip`](Self::pending_skip)
+/// invokes its orphan callback (default: panic). Drain happens on the next
+/// fallible [`Read`] / [`flush_pending_skip`](Self::flush_pending_skip) /
+/// field-iterator `next`. To choose another orphan policy (including I/O in
+/// that callback), use [`FieldIterFromRead::on_orphan_pending_skip`].
 ///
 /// # Contract
 ///
@@ -55,13 +58,15 @@ pub struct Take32<'a, R: ?Sized> {
 /// Where unused budget / skip debt goes when a [`Take32`] drops.
 ///
 /// Parent and orphan are exclusive: scoped children forward to the parent;
-/// top-level takes always own an orphan handler (field iters install a drain).
+/// top-level takes always own an orphan callback (default panics; no I/O).
 enum SkipOnDrop<'a, R: ?Sized> {
     /// Scoped child: add unused `remaining` + `pending_skip` to the parent's
     /// `pending_skip` (length was prepaid; do not restore budget).
     /// Disjoint from the child's `reader` reborrow of the same parent.
     Parent(&'a mut u32),
     /// Top-level: called with `(&mut R, pending_skip)` when skip debt remains.
+    /// Must not be required for correctness of the happy path (prefer flush on
+    /// `Read` / `next`); exists so callers can choose abandon behavior.
     Orphan(OrphanPendingSkip<'a, R>),
 }
 
@@ -84,15 +89,11 @@ impl<'a, R: ?Sized> Drop for Take32<'a, R> {
 
 type OrphanPendingSkip<'a, R> = Box<dyn FnMut(&mut R, u32) + Send + 'a>;
 
-fn drain_orphan_pending_skip<R: Read + ?Sized>(reader: &mut R, mut n: u32) {
-    let mut buf = [0u8; 256];
-    while n > 0 {
-        let chunk = n.min(buf.len() as u32) as usize;
-        if Read::read_exact(reader, &mut buf[..chunk]).is_err() {
-            return;
-        }
-        n -= chunk as u32;
-    }
+fn panic_orphan_pending_skip<R: ?Sized>(_reader: &mut R, pending: u32) {
+    panic!(
+        "Take32 dropped with pending_skip={pending}; flush via Read / next / \
+         flush_pending_skip, or set on_orphan_pending_skip"
+    );
 }
 
 impl<'a, R: Read + ?Sized> Take32<'a, R> {
@@ -111,11 +112,23 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
         }
     }
 
-    /// Top-level take for [`FieldIterFromRead`]: drains orphan `pending_skip` on
-    /// Drop.
+    /// Top-level take for [`FieldIterFromRead`]: orphan `pending_skip` panics on
+    /// Drop (no I/O). Override with [`FieldIterFromRead::on_orphan_pending_skip`].
     #[inline]
     pub(crate) fn for_field_iter(reader: &'a mut R, len: u32) -> Self {
-        Self::new_with(reader, len, Box::new(drain_orphan_pending_skip))
+        Self::new_with(reader, len, Box::new(panic_orphan_pending_skip))
+    }
+
+    /// Replace the top-level orphan callback. Panics if this take is a scoped
+    /// child ([`SkipOnDrop::Parent`]).
+    #[inline]
+    pub(crate) fn set_orphan_pending_skip(&mut self, f: OrphanPendingSkip<'a, R>) {
+        match &mut self.skip_on_drop {
+            SkipOnDrop::Orphan(slot) => *slot = f,
+            SkipOnDrop::Parent(_) => {
+                panic!("set_orphan_pending_skip requires a top-level Take32");
+            }
+        }
     }
 
     /// Bytes still allowed under this take's budget.
@@ -400,6 +413,26 @@ impl<'a, R: Read + ?Sized, F> FieldIterFromRead<'a, R, F> {
     pub fn remaining(&self) -> u32 {
         self.read.remaining()
     }
+
+    /// Choose what happens if this iterator is dropped with leftover
+    /// [`Take32::pending_skip`].
+    ///
+    /// The default (from [`ReadExtProtobuf::read_protobuf_fields`]) **panics** and
+    /// does no I/O in [`Drop`]. Prefer flushing via `next` / [`Take32`] [`Read`] /
+    /// continuing the iterator. Pass a callback only when you intentionally want
+    /// a different abandon policy (for example a best-effort drain — any I/O
+    /// then runs in `Drop` by your choice).
+    ///
+    /// Panics if this iterator was built from a scoped [`Take32::fields`] child
+    /// (those forward to a parent instead of an orphan callback).
+    #[inline]
+    pub fn on_orphan_pending_skip<G>(mut self, f: G) -> Self
+    where
+        G: FnMut(&mut R, u32) + Send + 'a,
+    {
+        self.read.set_orphan_pending_skip(Box::new(f));
+        self
+    }
 }
 
 impl<'a, R: Read + ?Sized> Iterator for FieldIterFromRead<'a, R, VecLenPayload> {
@@ -590,6 +623,58 @@ mod tests {
     use crate::field::FieldValue;
 
     #[test]
+    #[should_panic(expected = "pending_skip")]
+    fn field_iter_abandon_with_pending_skip_panics_by_default() {
+        use super::ReadExtProtobuf;
+        use ::std::io::{Cursor, Read};
+
+        // Default orphan policy: panic, no I/O in Drop.
+        let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
+        let mut reader = Cursor::new(message);
+        let mut fields = reader.read_protobuf_fields_with(
+            message.len() as u32,
+            |_n, mut body| -> crate::Result<u8> {
+                let mut one = [0u8; 1];
+                body.read_exact(&mut one)?;
+                Ok(one[0])
+            },
+        );
+        let first = fields.next().unwrap().unwrap();
+        assert!(matches!(first.value, FieldValue::Len(b'H')));
+        drop(fields);
+    }
+
+    #[test]
+    fn field_iter_on_orphan_pending_skip_lets_caller_drain() {
+        use super::ReadExtProtobuf;
+        use ::std::io::{Cursor, Read};
+
+        // Caller opts into Drop-time I/O via on_orphan_pending_skip.
+        let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
+        let mut reader = Cursor::new(message);
+        {
+            let mut fields = reader
+                .read_protobuf_fields_with(
+                    message.len() as u32,
+                    |_n, mut body| -> crate::Result<u8> {
+                        let mut one = [0u8; 1];
+                        body.read_exact(&mut one)?;
+                        Ok(one[0])
+                    },
+                )
+                .on_orphan_pending_skip(|r, n| {
+                    let mut buf = vec![0u8; n as usize];
+                    let _ = r.read_exact(&mut buf);
+                });
+            let first = fields.next().unwrap().unwrap();
+            assert!(matches!(first.value, FieldValue::Len(b'H')));
+        }
+        let mut rest = Vec::new();
+        reader.read_to_end(&mut rest).unwrap();
+        assert_eq!(rest, [0x10, 0x01]);
+    }
+
+    #[test]
     fn take32_with_orphan_pending_skip_callback_drains_reader() {
         use super::Take32;
         use ::std::io::{Cursor, Read};
@@ -614,36 +699,6 @@ mod tests {
         let mut rest = Vec::new();
         data.read_to_end(&mut rest).unwrap();
         assert_eq!(rest, [4, 5]);
-    }
-
-    #[test]
-    fn field_iter_abandon_drains_orphan_pending_skip() {
-        use super::ReadExtProtobuf;
-        use ::std::io::{Cursor, Read};
-
-        // Public entrance installs a drain: abandoning the iterator mid-scope
-        // must not panic and must advance the underlying reader.
-        let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
-        let mut reader = Cursor::new(message);
-        {
-            let mut fields = reader.read_protobuf_fields_with(
-                message.len() as u32,
-                |_n, mut body| -> crate::Result<u8> {
-                    let mut one = [0u8; 1];
-                    body.read_exact(&mut one)?;
-                    // Leave 2 body bytes unread → pending_skip on Drop of body
-                    // then of the iterator's top-level take.
-                    Ok(one[0])
-                },
-            );
-            let first = fields.next().unwrap().unwrap();
-            assert!(matches!(first.value, FieldValue::Len(b'H')));
-            // Abandon without reading the trailing varint.
-        }
-        let mut rest = Vec::new();
-        reader.read_to_end(&mut rest).unwrap();
-        // Body leftover (e,l) drained; trailing field still on the stream.
-        assert_eq!(rest, [0x10, 0x01]);
     }
 
     #[test]
