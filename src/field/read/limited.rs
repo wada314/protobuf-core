@@ -5,9 +5,8 @@
 //! additionally expected to be `<= MAX_MESSAGE_SIZE` ([`crate::MAX_MESSAGE_SIZE`],
 //! 2 GiB); that is `debug_assert`ed at the entrance.
 //!
-//! Nested Len bodies use [`Take32::scope`] so the handler sees another
-//! `Take32<'_, R>` (same root `R`, shorter lifetime) instead of stacking
-//! `&mut` layers.
+//! Nested Len bodies use [`Take32::scope`] so the handler sees `&mut Take32`
+//! for the same root `R` (shorter lifetime) instead of stacking `&mut` layers.
 
 use super::group::GroupBody;
 use super::wire::WireCursor;
@@ -27,18 +26,14 @@ use ::std::io::{Read, Write};
 ///
 /// Built only inside this crate (via [`ReadExtProtobuf::read_protobuf_fields`]).
 /// Nested Len bodies use [`scope`](Self::scope): the child is `Take32<'b, R>`
-/// for the same root `R` (no `&mut` stacking). A scoped child **always
-/// consumes** its prepaid length: on drop, unused `remaining` plus any
-/// unflushed [`pending_skip`](Self::pending_skip) are recorded on the parent;
-/// the parent (or a later child that inherited the debt) drains on the next
-/// fallible read. No budget is restored.
+/// for the same root `R` (no `&mut` stacking).
 ///
-/// [`Drop`] itself does no I/O: scoped children only forward counters to the
-/// parent; a top-level take with leftover [`pending_skip`](Self::pending_skip)
-/// invokes its orphan callback (default: panic). Drain happens on the next
-/// fallible [`Read`] / [`flush_pending_skip`](Self::flush_pending_skip) /
-/// field-iterator `next`. To choose another orphan policy (including I/O in
-/// that callback), use [`FieldIterFromRead::on_orphan_pending_skip`].
+/// Drop is infallible and does no I/O. A scoped child restores unused
+/// [`remaining`](Self::remaining) to the parent (like [`std::io::Take`]).
+/// Length-delimited handlers receive `&mut Take32`; after the closure returns,
+/// the library [`discard_remaining`](Self::discard_remaining)s so the parent
+/// cursor sits at the field boundary before the next field (or before the
+/// iterator is dropped).
 ///
 /// # Contract
 ///
@@ -48,86 +43,27 @@ use ::std::io::{Read, Write};
 pub struct Take32<'a, R: ?Sized> {
     reader: &'a mut R,
     remaining: u32,
-    /// Bytes that must be discarded from `reader` before the next real read.
-    /// Set by a scoped child's [`Drop`]; flushed by [`flush_pending_skip`](Self::flush_pending_skip).
-    pending_skip: u32,
-    /// Parent forward vs top-level orphan handler (exclusive).
-    skip_on_drop: SkipOnDrop<'a, R>,
-}
-
-/// Where unused budget / skip debt goes when a [`Take32`] drops.
-///
-/// Parent and orphan are exclusive: scoped children forward to the parent;
-/// top-level takes always own an orphan callback (default panics; no I/O).
-enum SkipOnDrop<'a, R: ?Sized> {
-    /// Scoped child: add unused `remaining` + `pending_skip` to the parent's
-    /// `pending_skip` (length was prepaid; do not restore budget).
-    /// Disjoint from the child's `reader` reborrow of the same parent.
-    Parent(&'a mut u32),
-    /// Top-level: called with `(&mut R, pending_skip)` when skip debt remains.
-    /// Must not be required for correctness of the happy path (prefer flush on
-    /// `Read` / `next`); exists so callers can choose abandon behavior.
-    Orphan(OrphanPendingSkip<'a, R>),
+    /// Scoped child only: restore unused `remaining` to the parent on Drop.
+    parent_remaining: Option<&'a mut u32>,
 }
 
 impl<'a, R: ?Sized> Drop for Take32<'a, R> {
     fn drop(&mut self) {
-        match &mut self.skip_on_drop {
-            SkipOnDrop::Parent(parent) => {
-                **parent = (**parent)
-                    .saturating_add(self.remaining)
-                    .saturating_add(self.pending_skip);
-            }
-            SkipOnDrop::Orphan(handler) => {
-                if self.pending_skip != 0 {
-                    handler(self.reader, self.pending_skip);
-                }
-            }
+        if let Some(parent) = self.parent_remaining.take() {
+            *parent = (*parent).saturating_add(self.remaining);
         }
     }
-}
-
-type OrphanPendingSkip<'a, R> = Box<dyn FnMut(&mut R, u32) + Send + 'a>;
-
-fn panic_orphan_pending_skip<R: ?Sized>(_reader: &mut R, pending: u32) {
-    panic!(
-        "Take32 dropped with pending_skip={pending}; flush via Read / next / \
-         flush_pending_skip, or set on_orphan_pending_skip"
-    );
 }
 
 impl<'a, R: Read + ?Sized> Take32<'a, R> {
-    /// Crate-internal: top-level take with a required orphan-`pending_skip` handler.
+    /// Crate-internal: top-level take (unused budget stays on the underlying
+    /// reader when this value is dropped — like [`std::io::Take`]).
     #[inline]
-    pub(crate) fn new_with(
-        reader: &'a mut R,
-        len: u32,
-        on_orphan_pending_skip: OrphanPendingSkip<'a, R>,
-    ) -> Self {
+    pub(crate) fn new(reader: &'a mut R, len: u32) -> Self {
         Self {
             reader,
             remaining: len,
-            pending_skip: 0,
-            skip_on_drop: SkipOnDrop::Orphan(on_orphan_pending_skip),
-        }
-    }
-
-    /// Top-level take for [`FieldIterFromRead`]: orphan `pending_skip` panics on
-    /// Drop (no I/O). Override with [`FieldIterFromRead::on_orphan_pending_skip`].
-    #[inline]
-    pub(crate) fn for_field_iter(reader: &'a mut R, len: u32) -> Self {
-        Self::new_with(reader, len, Box::new(panic_orphan_pending_skip))
-    }
-
-    /// Replace the top-level orphan callback. Panics if this take is a scoped
-    /// child ([`SkipOnDrop::Parent`]).
-    #[inline]
-    pub(crate) fn set_orphan_pending_skip(&mut self, f: OrphanPendingSkip<'a, R>) {
-        match &mut self.skip_on_drop {
-            SkipOnDrop::Orphan(slot) => *slot = f,
-            SkipOnDrop::Parent(_) => {
-                panic!("set_orphan_pending_skip requires a top-level Take32");
-            }
+            parent_remaining: None,
         }
     }
 
@@ -137,20 +73,10 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
         self.remaining
     }
 
-    /// Bytes queued to skip before the next real read (from a dropped scope).
+    /// Read and discard any unused [`remaining`](Self::remaining) bytes.
     #[inline]
-    pub fn pending_skip(&self) -> u32 {
-        self.pending_skip
-    }
-
-    /// Discard any [`pending_skip`](Self::pending_skip) bytes from the underlying
-    /// reader. Does not change [`remaining`](Self::remaining).
-    #[inline]
-    pub fn flush_pending_skip(&mut self) -> Result<()> {
-        let mut left = ::std::mem::take(&mut self.pending_skip);
-        if left == 0 {
-            return Ok(());
-        }
+    pub fn discard_remaining(&mut self) -> Result<()> {
+        let mut left = ::std::mem::take(&mut self.remaining);
         let mut buf = [0u8; 256];
         while left > 0 {
             let chunk = left.min(buf.len() as u32) as usize;
@@ -163,12 +89,9 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
     /// Scoped body view of exactly `n` bytes (prepaid).
     ///
     /// Charges `n` against this take immediately. The returned child is
-    /// `Take32<'b, R>` for the **same** root `R`. Any current
-    /// [`pending_skip`](Self::pending_skip) is moved onto the child (so this
-    /// method stays infallible); the child flushes it on its next read. The
-    /// child must consume those `n` stream bytes (via [`Read`] /
-    /// [`fields`](Self::fields)); on drop, unused child `remaining` and any
-    /// still-queued skip return to this take's `pending_skip`. Panics if
+    /// `Take32<'b, R>` for the **same** root `R`. On drop, unused child
+    /// `remaining` is restored to this take (Take-like). Len parse drains the
+    /// child after the handler returns so restore is zero. Panics if
     /// `n > remaining()`.
     #[inline]
     pub fn scope<'b>(&'b mut self, n: u32) -> Take32<'b, R> {
@@ -181,32 +104,45 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
         Take32 {
             reader: &mut *self.reader,
             remaining: n,
-            pending_skip: ::std::mem::take(&mut self.pending_skip),
-            skip_on_drop: SkipOnDrop::Parent(&mut self.pending_skip),
+            parent_remaining: Some(&mut self.remaining),
         }
     }
 
-    /// Iterate fields, consuming this take entirely (by value).
+    /// Iterate fields from this take.
     ///
-    /// Prefer this for nested messages already bounded by [`scope`](Self::scope).
+    /// Moves the current budget into the returned iterator (restored on Drop if
+    /// the iterator is abandoned early — like [`std::io::Take`]). Prefer this
+    /// for nested messages already bounded by [`scope`](Self::scope).
     /// Calling [`ReadExtProtobuf::read_protobuf_fields`] on a `Take32` would
     /// wrap another `Take32` around it and restack monomorphizations.
     #[inline]
-    pub fn fields(self) -> FieldIterFromRead<'a, R, VecLenPayload> {
+    pub fn fields(&mut self) -> FieldIterFromRead<'_, R, VecLenPayload> {
+        let n = self.remaining;
+        self.remaining = 0;
         FieldIterFromRead {
-            read: self,
+            read: Take32 {
+                reader: &mut *self.reader,
+                remaining: n,
+                parent_remaining: Some(&mut self.remaining),
+            },
             handler: VecLenPayload,
         }
     }
 
     /// Like [`fields`](Self::fields) with a custom Len handler.
     #[inline]
-    pub fn fields_with<L, F>(self, handler: F) -> FieldIterFromRead<'a, R, F>
+    pub fn fields_with<L, F>(&mut self, handler: F) -> FieldIterFromRead<'_, R, F>
     where
-        F: for<'t> FnMut(FieldNumber, Take32<'t, R>) -> Result<L>,
+        F: for<'t> FnMut(FieldNumber, &mut Take32<'t, R>) -> Result<L>,
     {
+        let n = self.remaining;
+        self.remaining = 0;
         FieldIterFromRead {
-            read: self,
+            read: Take32 {
+                reader: &mut *self.reader,
+                remaining: n,
+                parent_remaining: Some(&mut self.remaining),
+            },
             handler,
         }
     }
@@ -215,12 +151,6 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
 impl<'a, R: Read + ?Sized> Read for Take32<'a, R> {
     #[inline]
     fn read(&mut self, buf: &mut [u8]) -> ::std::io::Result<usize> {
-        if self.pending_skip != 0 {
-            self.flush_pending_skip().map_err(|err| match err {
-                ProtobufError::IoError(io) => io,
-                other => ::std::io::Error::other(other.to_string()),
-            })?;
-        }
         let max = buf.len().min(self.remaining as usize);
         if max == 0 {
             return Ok(0);
@@ -235,11 +165,11 @@ impl<'a, R: Read + ?Sized> Read for Take32<'a, R> {
 /// body into a new `Vec<u8>`.
 ///
 /// Custom handlers are ordinary
-/// `FnMut(FieldNumber, Take32<'_, R>) -> Result<L>` closures passed to
+/// `FnMut(FieldNumber, &mut Take32<'_, R>) -> Result<L>` closures passed to
 /// [`ReadExtProtobuf::read_protobuf_fields_with`] — there is no separate handler
 /// trait on the public API. The body take is already scoped to the Len length
-/// (`remaining()` at entry) and is consumed by value; unused body bytes become
-/// the parent's [`Take32::pending_skip`] on drop.
+/// (`remaining()` at entry). After the closure returns, unused body bytes are
+/// discarded by the library before the next field.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct VecLenPayload;
 
@@ -247,7 +177,7 @@ pub struct VecLenPayload;
 #[inline]
 fn copy_len_to_vec<R: Read + ?Sized>(
     _field_number: FieldNumber,
-    mut reader: Take32<'_, R>,
+    reader: &mut Take32<'_, R>,
 ) -> Result<Vec<u8>> {
     let len = reader.remaining();
     let mut buf = vec![0u8; len as usize];
@@ -258,13 +188,13 @@ fn copy_len_to_vec<R: Read + ?Sized>(
 /// Parse one protobuf field from `read`.
 ///
 /// When the field is length-delimited, `handler` runs once on a
-/// [`Take32::scope`] of the payload length (body take passed by value). Unused
-/// body bytes are queued as [`Take32::pending_skip`] when that take drops.
-/// Other wire types do not call `handler`.
+/// [`Take32::scope`] of the payload length (`&mut` body). After the handler
+/// returns, unused body bytes are [`Take32::discard_remaining`]ed. Other wire
+/// types do not call `handler`.
 fn parse_protobuf_field_with<R, L, F>(read: &mut Take32<'_, R>, handler: &mut F) -> Result<Field<L>>
 where
     R: Read + ?Sized,
-    F: for<'t> FnMut(FieldNumber, Take32<'t, R>) -> Result<L>,
+    F: for<'t> FnMut(FieldNumber, &mut Take32<'t, R>) -> Result<L>,
 {
     let tag = WireCursor::read_tag(read)?;
     let value = match tag.wire_type {
@@ -276,16 +206,13 @@ where
             if length > read.remaining() {
                 return Err(ProtobufError::UnexpectedEof);
             }
-            let body = read.scope(length);
-            match handler(tag.field_number, body) {
+            let mut body = read.scope(length);
+            let result = handler(tag.field_number, &mut body);
+            // Always drain before body Drop restores unused budget to `read`.
+            body.discard_remaining()?;
+            match result {
                 Ok(payload) => FieldValue::Len(payload),
-                Err(err) => {
-                    // Body Drop already queued leftover into `read.pending_skip`.
-                    // Flush now so callers can abandon the iterator after this
-                    // error without tripping the top-level orphan-skip panic.
-                    read.flush_pending_skip()?;
-                    return Err(err);
-                }
+                Err(err) => return Err(err),
             }
         }
         WireType::SGroup => FieldValue::SGroup,
@@ -350,13 +277,13 @@ impl<'a, R: Read + ?Sized> WireCursor for Take32<'a, R> {
 
 /// Iterator for reading raw protobuf fields sequentially from a reader.
 ///
-/// Owns a [`Take32`] for `'a`. Built by [`ReadExtProtobuf::read_protobuf_fields`]
-/// (fresh take with `len`) or [`Take32::fields`] / [`Take32::fields_with`]
-/// (`scope` of the take's current remaining). That budget is a [`u32`];
+/// Built by [`ReadExtProtobuf::read_protobuf_fields`] (fresh take with `len`) or
+/// [`Take32::fields`] / [`Take32::fields_with`] (budget moved from an existing
+/// take, restored on Drop if abandoned early). That budget is a [`u32`];
 /// protobuf message budgets are also expected to be at most
 /// [`MAX_MESSAGE_SIZE`] (`debug_assert`ed at top-level entrances). `F` is the
 /// Len-body handler (default [`VecLenPayload`], or a
-/// `FnMut(FieldNumber, Take32<'_, R>) -> Result<L>`).
+/// `FnMut(FieldNumber, &mut Take32<'_, R>) -> Result<L>`).
 pub struct FieldIterFromRead<'a, R: ?Sized, F = VecLenPayload> {
     read: Take32<'a, R>,
     handler: F,
@@ -413,35 +340,12 @@ impl<'a, R: Read + ?Sized, F> FieldIterFromRead<'a, R, F> {
     pub fn remaining(&self) -> u32 {
         self.read.remaining()
     }
-
-    /// Choose what happens if this iterator is dropped with leftover
-    /// [`Take32::pending_skip`].
-    ///
-    /// The default (from [`ReadExtProtobuf::read_protobuf_fields`]) **panics** and
-    /// does no I/O in [`Drop`]. Prefer flushing via `next` / [`Take32`] [`Read`] /
-    /// continuing the iterator. Pass a callback only when you intentionally want
-    /// a different abandon policy (for example a best-effort drain — any I/O
-    /// then runs in `Drop` by your choice).
-    ///
-    /// Panics if this iterator was built from a scoped [`Take32::fields`] child
-    /// (those forward to a parent instead of an orphan callback).
-    #[inline]
-    pub fn on_orphan_pending_skip<G>(mut self, f: G) -> Self
-    where
-        G: FnMut(&mut R, u32) + Send + 'a,
-    {
-        self.read.set_orphan_pending_skip(Box::new(f));
-        self
-    }
 }
 
 impl<'a, R: Read + ?Sized> Iterator for FieldIterFromRead<'a, R, VecLenPayload> {
     type Item = Result<Field<Vec<u8>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Err(err) = self.read.flush_pending_skip() {
-            return Some(Err(err));
-        }
         if self.read.remaining() == 0 {
             return None;
         }
@@ -455,14 +359,11 @@ impl<'a, R: Read + ?Sized> Iterator for FieldIterFromRead<'a, R, VecLenPayload> 
 impl<'a, R, L, F> Iterator for FieldIterFromRead<'a, R, F>
 where
     R: Read + ?Sized,
-    F: for<'t> FnMut(FieldNumber, Take32<'t, R>) -> Result<L>,
+    F: for<'t> FnMut(FieldNumber, &mut Take32<'t, R>) -> Result<L>,
 {
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Err(err) = self.read.flush_pending_skip() {
-            return Some(Err(err));
-        }
         if self.read.remaining() == 0 {
             return None;
         }
@@ -481,7 +382,7 @@ where
 /// payloads default to `Vec<u8>` via [`VecLenPayload`].
 /// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
 /// supplies a custom
-/// `FnMut(FieldNumber, Take32<'_, Self>) -> Result<L>`
+/// `FnMut(FieldNumber, &mut Take32<'_, Self>) -> Result<L>`
 /// (field number, scoped body take → payload).
 /// It does not provide semantic interpretation - that is the caller's responsibility.
 ///
@@ -533,15 +434,14 @@ pub trait ReadExtProtobuf: Read {
     /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
     ///
     /// `handler` is called once for each length-delimited field with the field
-    /// number and a [`Take32::scope`] of the Len body by value (same root reader
-    /// type; `remaining()` at entry is the payload length). Return
-    /// [`Ok`](Result::Ok)`(payload)` with any payload type `L`.
-    /// Unused body bytes are queued as the parent's [`Take32::pending_skip`] when
-    /// the body take drops (full-consume scope). Return [`Err`](Result::Err) to
-    /// fail the field. Varint and fixed-width fields do not call `handler`.
+    /// number and a [`Take32::scope`] of the Len body (`remaining()` at entry is
+    /// the payload length). Return [`Ok`](Result::Ok)`(payload)` with any payload
+    /// type `L`. After the closure returns, unused body bytes are discarded so
+    /// the parent cursor is at the field boundary. Return [`Err`](Result::Err)
+    /// to fail the field (body leftover is still discarded first).
     ///
     /// Nested messages should call [`Take32::fields`] /
-    /// [`Take32::fields_with`] on that body (by value; keeps `R` fixed). Do
+    /// [`Take32::fields_with`] on that body (keeps `R` fixed). Do
     /// **not** call [`read_protobuf_fields`](Self::read_protobuf_fields) on a
     /// `Take32` itself — that wraps another take and can restack
     /// monomorphizations.
@@ -557,7 +457,7 @@ pub trait ReadExtProtobuf: Read {
     /// let mut data = &[0x0A, 0x03, b'H', b'e', b'l'][..];
     /// let len = data.len() as u32;
     /// let fields: Vec<_> = data
-    ///     .read_protobuf_fields_with(len, |_n, mut body| {
+    ///     .read_protobuf_fields_with(len, |_n, body| {
     ///         let body_len = body.remaining();
     ///         let mut buf = vec![0u8; body_len as usize];
     ///         body.read_exact(&mut buf)?;
@@ -577,7 +477,7 @@ pub trait ReadExtProtobuf: Read {
     ) -> FieldIterFromRead<'_, Self, F>
     where
         Self: Sized,
-        F: for<'t> FnMut(FieldNumber, Take32<'t, Self>) -> Result<L>;
+        F: for<'t> FnMut(FieldNumber, &mut Take32<'t, Self>) -> Result<L>;
 }
 
 impl<R> ReadExtProtobuf for R
@@ -593,7 +493,7 @@ where
             "message budget exceeds MAX_MESSAGE_SIZE"
         );
         FieldIterFromRead {
-            read: Take32::for_field_iter(self, len),
+            read: Take32::new(self, len),
             handler: VecLenPayload,
         }
     }
@@ -605,14 +505,14 @@ where
     ) -> FieldIterFromRead<'_, Self, F>
     where
         Self: Sized,
-        F: for<'t> FnMut(FieldNumber, Take32<'t, Self>) -> Result<L>,
+        F: for<'t> FnMut(FieldNumber, &mut Take32<'t, Self>) -> Result<L>,
     {
         debug_assert!(
             (len as usize) <= MAX_MESSAGE_SIZE,
             "message budget exceeds MAX_MESSAGE_SIZE"
         );
         FieldIterFromRead {
-            read: Take32::for_field_iter(self, len),
+            read: Take32::new(self, len),
             handler,
         }
     }
@@ -623,49 +523,48 @@ mod tests {
     use crate::field::FieldValue;
 
     #[test]
-    #[should_panic(expected = "pending_skip")]
-    fn field_iter_abandon_with_pending_skip_panics_by_default() {
+    fn unread_len_body_is_discarded_before_next_field() {
         use super::ReadExtProtobuf;
         use ::std::io::{Cursor, Read};
 
-        // Default orphan policy: panic, no I/O in Drop.
-        let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
-        let mut reader = Cursor::new(message);
-        let mut fields = reader.read_protobuf_fields_with(
-            message.len() as u32,
-            |_n, mut body| -> crate::Result<u8> {
-                let mut one = [0u8; 1];
-                body.read_exact(&mut one)?;
-                Ok(one[0])
-            },
-        );
-        let first = fields.next().unwrap().unwrap();
-        assert!(matches!(first.value, FieldValue::Len(b'H')));
-        drop(fields);
-    }
-
-    #[test]
-    fn field_iter_on_orphan_pending_skip_lets_caller_drain() {
-        use super::ReadExtProtobuf;
-        use ::std::io::{Cursor, Read};
-
-        // Caller opts into Drop-time I/O via on_orphan_pending_skip.
         let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
         let mut reader = Cursor::new(message);
         {
-            let mut fields = reader
-                .read_protobuf_fields_with(
-                    message.len() as u32,
-                    |_n, mut body| -> crate::Result<u8> {
-                        let mut one = [0u8; 1];
-                        body.read_exact(&mut one)?;
-                        Ok(one[0])
-                    },
-                )
-                .on_orphan_pending_skip(|r, n| {
-                    let mut buf = vec![0u8; n as usize];
-                    let _ = r.read_exact(&mut buf);
-                });
+            let mut fields = reader.read_protobuf_fields_with(
+                message.len() as u32,
+                |_n, body| -> crate::Result<u8> {
+                    let mut one = [0u8; 1];
+                    body.read_exact(&mut one)?;
+                    Ok(one[0])
+                },
+            );
+            let first = fields.next().unwrap().unwrap();
+            assert!(matches!(first.value, FieldValue::Len(b'H')));
+            let second = fields.next().unwrap().unwrap();
+            let FieldValue::Varint(v) = second.value else {
+                panic!("expected varint");
+            };
+            assert_eq!(v.to_uint64(), 1);
+        }
+        assert_eq!(reader.position(), message.len() as u64);
+    }
+
+    #[test]
+    fn abandon_after_partial_len_leaves_cursor_at_field_end() {
+        use super::ReadExtProtobuf;
+        use ::std::io::{Cursor, Read};
+
+        let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
+        let mut reader = Cursor::new(message);
+        {
+            let mut fields = reader.read_protobuf_fields_with(
+                message.len() as u32,
+                |_n, body| -> crate::Result<u8> {
+                    let mut one = [0u8; 1];
+                    body.read_exact(&mut one)?;
+                    Ok(one[0])
+                },
+            );
             let first = fields.next().unwrap().unwrap();
             assert!(matches!(first.value, FieldValue::Len(b'H')));
         }
@@ -675,30 +574,20 @@ mod tests {
     }
 
     #[test]
-    fn take32_with_orphan_pending_skip_callback_drains_reader() {
+    fn scope_restores_unused_remaining_like_take() {
         use super::Take32;
-        use ::std::io::{Cursor, Read};
+        use ::std::io::Cursor;
 
         let mut data = Cursor::new(vec![1u8, 2, 3, 4, 5]);
-        let mut skipped = 0u32;
+        let mut take = Take32::new(&mut data, 5);
+        assert_eq!(take.remaining(), 5);
         {
-            let mut take = Take32::new_with(
-                &mut data,
-                5,
-                Box::new(|r, n| {
-                    skipped = n;
-                    let mut buf = vec![0u8; n as usize];
-                    r.read_exact(&mut buf).unwrap();
-                }),
-            );
-            drop(take.scope(3));
-            assert_eq!(take.pending_skip(), 3);
-            assert_eq!(take.remaining(), 2);
+            let child = take.scope(3);
+            assert_eq!(child.remaining(), 3);
         }
-        assert_eq!(skipped, 3);
-        let mut rest = Vec::new();
-        data.read_to_end(&mut rest).unwrap();
-        assert_eq!(rest, [4, 5]);
+        assert_eq!(take.remaining(), 5);
+        drop(take);
+        assert_eq!(data.position(), 0);
     }
 
     #[test]
@@ -926,7 +815,7 @@ mod len_payload {
 
     fn read_bytes_payload<R: Read + ?Sized>(
         _n: FieldNumber,
-        mut reader: Take32<'_, R>,
+        reader: &mut Take32<'_, R>,
     ) -> crate::Result<Bytes> {
         let len = reader.remaining();
         let mut data = vec![0; len as usize];
@@ -982,7 +871,7 @@ mod len_payload {
 
     fn assert_box(message: &[u8], expected: &[u8]) {
         let from_read = Cursor::new(message.to_vec())
-            .read_protobuf_fields_with(message.len() as u32, |_n, mut r| {
+            .read_protobuf_fields_with(message.len() as u32, |_n, r| {
                 let body_len = r.remaining();
                 let mut buf = vec![0u8; body_len as usize];
                 r.read_exact(&mut buf)?;
@@ -1038,7 +927,7 @@ mod len_payload {
         let len = message.len() as u32;
 
         let from_read = Cursor::new(message)
-            .read_protobuf_fields_with(len, |_n, mut r| {
+            .read_protobuf_fields_with(len, |_n, r| {
                 let body_len = r.remaining();
                 let mut data = vec![0; body_len as usize];
                 r.read_exact(&mut data)?;
@@ -1107,7 +996,7 @@ mod len_payload {
         let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
 
         let from_read = Cursor::new(message)
-            .read_protobuf_fields_with(message.len() as u32, |_n, mut r| {
+            .read_protobuf_fields_with(message.len() as u32, |_n, r| {
                 let body_len = r.remaining();
                 let n = body_len as usize;
                 let mut data = vec![0xAB; n + 4];
@@ -1125,7 +1014,7 @@ mod len_payload {
         // drained so the following varint field is still visible.
         let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
         let fields = Cursor::new(message)
-            .read_protobuf_fields_with(message.len() as u32, |_n, mut r| {
+            .read_protobuf_fields_with(message.len() as u32, |_n, r| {
                 let mut one = [0u8; 1];
                 r.read_exact(&mut one)?;
                 Ok(one[0])
@@ -1166,15 +1055,15 @@ mod len_payload {
 
         fn decode_len<R: Read + ?Sized>(
             field_number: FieldNumber,
-            mut reader: Take32<'_, R>,
+            reader: &mut Take32<'_, R>,
         ) -> crate::Result<LenValue> {
             let len = reader.remaining();
             match field_number.as_u32() {
                 2 => {
                     let mut child = Child::default();
-                    // Body take is consumed by `fields_with` (by value).
+                    // Nested fields move the body budget into a child iterator.
                     let nested = reader
-                        .fields_with(|_n, mut inner| {
+                        .fields_with(|_n, inner| {
                             let inner_len = inner.remaining();
                             let mut bytes = vec![0u8; inner_len as usize];
                             inner.read_exact(&mut bytes)?;
@@ -1262,9 +1151,9 @@ mod len_payload {
         Skip(Vec<u8>),
     }
 
-    fn parse_node<R: Read + ?Sized>(take: Take32<'_, R>) -> crate::Result<Node> {
+    fn parse_node<R: Read + ?Sized>(take: &mut Take32<'_, R>) -> crate::Result<Node> {
         let mut node = Node::default();
-        for field in take.fields_with(|n, mut body| {
+        for field in take.fields_with(|n, body| {
             let body_len = body.remaining();
             match n.as_u32() {
                 2 => Ok(NodeLen::Child(parse_node(body)?)),
@@ -1298,7 +1187,7 @@ mod len_payload {
     /// [`Take32::fields_with`] / [`parse_node`].
     fn parse_node_from_read<R: Read>(reader: &mut R, len: u32) -> crate::Result<Node> {
         let mut node = Node::default();
-        for field in reader.read_protobuf_fields_with(len, |n, mut body| {
+        for field in reader.read_protobuf_fields_with(len, |n, body| {
             let body_len = body.remaining();
             match n.as_u32() {
                 2 => Ok(NodeLen::Child(parse_node(body)?)),
@@ -1384,9 +1273,9 @@ mod len_payload {
         Skip(Vec<u8>),
     }
 
-    fn parse_a<R: Read + ?Sized>(take: Take32<'_, R>) -> crate::Result<TypeA> {
+    fn parse_a<R: Read + ?Sized>(take: &mut Take32<'_, R>) -> crate::Result<TypeA> {
         let mut msg = TypeA::default();
-        for field in take.fields_with(|n, mut body| {
+        for field in take.fields_with(|n, body| {
             let body_len = body.remaining();
             match n.as_u32() {
                 2 => Ok(ALen::B(parse_b(body)?)),
@@ -1416,9 +1305,9 @@ mod len_payload {
         Ok(msg)
     }
 
-    fn parse_b<R: Read + ?Sized>(take: Take32<'_, R>) -> crate::Result<TypeB> {
+    fn parse_b<R: Read + ?Sized>(take: &mut Take32<'_, R>) -> crate::Result<TypeB> {
         let mut msg = TypeB::default();
-        for field in take.fields_with(|n, mut body| {
+        for field in take.fields_with(|n, body| {
             let body_len = body.remaining();
             match n.as_u32() {
                 2 => Ok(BLen::A(parse_a(body)?)),
@@ -1450,7 +1339,7 @@ mod len_payload {
 
     fn parse_a_from_read<R: Read>(reader: &mut R, len: u32) -> crate::Result<TypeA> {
         let mut msg = TypeA::default();
-        for field in reader.read_protobuf_fields_with(len, |n, mut body| {
+        for field in reader.read_protobuf_fields_with(len, |n, body| {
             let body_len = body.remaining();
             match n.as_u32() {
                 2 => Ok(ALen::B(parse_b(body)?)),

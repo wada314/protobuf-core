@@ -44,9 +44,9 @@ pub use self::write::WriteExtProtobuf;
 /// `L` is the type for length-delimited values (Len variant).
 ///  - Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`
 ///    ([`VecLenPayload`]). `read_protobuf_fields_with` takes a
-///    `FnMut(FieldNumber, Take32<'_, R>) -> Result<L>` that
-///    receives a scoped Len body take by value (`remaining()` is the payload
-///    length) and returns any `L`.
+///    `FnMut(FieldNumber, &mut Take32<'_, R>) -> Result<L>` that
+///    receives a scoped Len body (`remaining()` is the payload length) and
+///    returns any `L`. Unused body bytes are discarded after the closure.
 ///  - Slice readers borrow the input as `&'a [u8]`.
 ///
 /// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
@@ -180,7 +180,7 @@ impl<L> FieldValue<L> {
 /// `L` is the type for length-delimited values (FieldValue::Len).
 /// Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`
 /// ([`crate::VecLenPayload`]). `read_protobuf_fields_with` takes a
-/// `FnMut(FieldNumber, Take32<'_, R>) -> Result<L>` Len handler.
+/// `FnMut(FieldNumber, &mut Take32<'_, R>) -> Result<L>` Len handler.
 /// Slice readers borrow the input as `&'a [u8]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
