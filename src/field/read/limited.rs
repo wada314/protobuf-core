@@ -28,9 +28,10 @@ use ::std::io::{Read, Write};
 /// Construct with [`Take32::new`] or [`ReadExtProtobuf::take32`]. Nested Len
 /// bodies use [`scope`](Self::scope): the child is `Take32<'b, R>` for the same
 /// root `R` (no `&mut` stacking). A scoped child **always consumes** its
-/// prepaid length: on drop, any unused `remaining` is recorded as
-/// [`pending_skip`](Self::pending_skip) on the parent (infallible); the parent
-/// drains that debt on the next fallible read. No budget is restored.
+/// prepaid length: on drop, unused `remaining` plus any unflushed
+/// [`pending_skip`](Self::pending_skip) are recorded on the parent; the parent
+/// (or a later child that inherited the debt) drains on the next fallible read.
+/// No budget is restored.
 ///
 /// # Contract
 ///
@@ -44,16 +45,18 @@ pub struct Take32<'a, R: ?Sized> {
     /// Set by a scoped child's [`Drop`]; flushed by [`flush_pending_skip`](Self::flush_pending_skip).
     pending_skip: u32,
     /// When set, this take was produced by [`scope`](Self::scope). On drop,
-    /// unused `remaining` is added to the parent's `pending_skip` (not to
-    /// `remaining` — the length was prepaid). Disjoint from [`reader`]: both
-    /// are reborrows of the parent for `'a`.
+    /// unused `remaining` and any still-queued `pending_skip` are added to the
+    /// parent's `pending_skip` (not to `remaining` — the length was prepaid).
+    /// Disjoint from [`reader`]: both are reborrows of the parent for `'a`.
     parent_pending_skip: Option<&'a mut u32>,
 }
 
 impl<'a, R: ?Sized> Drop for Take32<'a, R> {
     fn drop(&mut self) {
         if let Some(parent) = self.parent_pending_skip.take() {
-            *parent = (*parent).saturating_add(self.remaining);
+            *parent = (*parent)
+                .saturating_add(self.remaining)
+                .saturating_add(self.pending_skip);
         }
     }
 }
@@ -111,25 +114,27 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
     /// Scoped body view of exactly `n` bytes (prepaid).
     ///
     /// Charges `n` against this take immediately. The returned child is
-    /// `Take32<'b, R>` for the **same** root `R`. The child must consume those
-    /// `n` stream bytes (via [`Read`] / [`fields`](Self::fields)); on drop, any
-    /// unused child `remaining` becomes this take's [`pending_skip`](Self::pending_skip).
-    /// Flushes existing pending skip first. Panics if `n > remaining()`.
+    /// `Take32<'b, R>` for the **same** root `R`. Any current
+    /// [`pending_skip`](Self::pending_skip) is moved onto the child (so this
+    /// method stays infallible); the child flushes it on its next read. The
+    /// child must consume those `n` stream bytes (via [`Read`] /
+    /// [`fields`](Self::fields)); on drop, unused child `remaining` and any
+    /// still-queued skip return to this take's `pending_skip`. Panics if
+    /// `n > remaining()`.
     #[inline]
-    pub fn scope<'b>(&'b mut self, n: u32) -> Result<Take32<'b, R>> {
-        self.flush_pending_skip()?;
+    pub fn scope<'b>(&'b mut self, n: u32) -> Take32<'b, R> {
         assert!(
             n <= self.remaining,
             "Take32::scope length {n} exceeds remaining {}",
             self.remaining
         );
         self.remaining -= n;
-        Ok(Take32 {
+        Take32 {
             reader: &mut *self.reader,
             remaining: n,
-            pending_skip: 0,
+            pending_skip: ::std::mem::take(&mut self.pending_skip),
             parent_pending_skip: Some(&mut self.pending_skip),
-        })
+        }
     }
 
     /// Iterate fields, consuming this take entirely (by value).
@@ -223,7 +228,7 @@ where
             if length > read.remaining() {
                 return Err(ProtobufError::UnexpectedEof);
             }
-            let body = read.scope(length)?;
+            let body = read.scope(length);
             let (payload, _consumed) = handler(tag.field_number, body)?;
             FieldValue::Len(payload)
         }
