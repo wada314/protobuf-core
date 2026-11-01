@@ -48,9 +48,8 @@ pub struct Take32<'a, R: ?Sized> {
     /// Bytes that must be discarded from `reader` before the next real read.
     /// Set by a scoped child's [`Drop`]; flushed by [`flush_pending_skip`](Self::flush_pending_skip).
     pending_skip: u32,
-    /// Parent forward vs top-level orphan handler. `Option` exists only so
-    /// [`Drop`] can move the value out; construction always sets `Some`.
-    skip_on_drop: Option<SkipOnDrop<'a, R>>,
+    /// Parent forward vs top-level orphan handler (exclusive).
+    skip_on_drop: SkipOnDrop<'a, R>,
 }
 
 /// Where unused budget / skip debt goes when a [`Take32`] drops.
@@ -68,24 +67,23 @@ enum SkipOnDrop<'a, R: ?Sized> {
 
 impl<'a, R: ?Sized> Drop for Take32<'a, R> {
     fn drop(&mut self) {
-        match self.skip_on_drop.take() {
-            Some(SkipOnDrop::Parent(parent)) => {
-                *parent = (*parent)
+        match &mut self.skip_on_drop {
+            SkipOnDrop::Parent(parent) => {
+                **parent = (**parent)
                     .saturating_add(self.remaining)
                     .saturating_add(self.pending_skip);
             }
-            Some(SkipOnDrop::Orphan(handler)) => {
+            SkipOnDrop::Orphan(handler) => {
                 let pending = ::std::mem::take(&mut self.pending_skip);
                 if pending != 0 {
                     handler(self.reader, pending);
                 }
             }
-            None => {}
         }
     }
 }
 
-type OrphanPendingSkip<'a, R> = Box<dyn FnOnce(&mut R, u32) + Send + 'a>;
+type OrphanPendingSkip<'a, R> = Box<dyn FnMut(&mut R, u32) + Send + 'a>;
 
 fn drain_orphan_pending_skip<R: Read + ?Sized>(reader: &mut R, mut n: u32) {
     let mut buf = [0u8; 256];
@@ -110,7 +108,7 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
             reader,
             remaining: len,
             pending_skip: 0,
-            skip_on_drop: Some(SkipOnDrop::Orphan(on_orphan_pending_skip)),
+            skip_on_drop: SkipOnDrop::Orphan(on_orphan_pending_skip),
         }
     }
 
@@ -172,7 +170,7 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
             reader: &mut *self.reader,
             remaining: n,
             pending_skip: ::std::mem::take(&mut self.pending_skip),
-            skip_on_drop: Some(SkipOnDrop::Parent(&mut self.pending_skip)),
+            skip_on_drop: SkipOnDrop::Parent(&mut self.pending_skip),
         }
     }
 
