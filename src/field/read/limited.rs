@@ -34,7 +34,8 @@ use ::std::io::{Read, Write};
 /// fallible read. No budget is restored.
 ///
 /// Field iterators install an orphan-skip drain so abandoning a top-level take
-/// with leftover [`pending_skip`](Self::pending_skip) does not panic.
+/// with leftover [`pending_skip`](Self::pending_skip) drains the underlying
+/// reader instead of leaving skip debt.
 ///
 /// # Contract
 ///
@@ -47,37 +48,39 @@ pub struct Take32<'a, R: ?Sized> {
     /// Bytes that must be discarded from `reader` before the next real read.
     /// Set by a scoped child's [`Drop`]; flushed by [`flush_pending_skip`](Self::flush_pending_skip).
     pending_skip: u32,
-    /// When set, this take was produced by [`scope`](Self::scope). On drop,
-    /// unused `remaining` and any still-queued `pending_skip` are added to the
-    /// parent's `pending_skip` (not to `remaining` — the length was prepaid).
-    /// Disjoint from [`reader`]: both are reborrows of the parent for `'a`.
-    parent_pending_skip: Option<&'a mut u32>,
-    /// Top-level only: called from [`Drop`] with `(&mut R, pending_skip)` when
-    /// there is skip debt and no parent. Field iterators install a drain;
-    /// `None` panics (crate-internal / test construction only).
-    on_orphan_pending_skip: Option<OrphanPendingSkip<'a, R>>,
+    /// Parent forward vs top-level orphan handler. `Option` exists only so
+    /// [`Drop`] can move the value out; construction always sets `Some`.
+    skip_on_drop: Option<SkipOnDrop<'a, R>>,
+}
+
+/// Where unused budget / skip debt goes when a [`Take32`] drops.
+///
+/// Parent and orphan are exclusive: scoped children forward to the parent;
+/// top-level takes always own an orphan handler (field iters install a drain).
+enum SkipOnDrop<'a, R: ?Sized> {
+    /// Scoped child: add unused `remaining` + `pending_skip` to the parent's
+    /// `pending_skip` (length was prepaid; do not restore budget).
+    /// Disjoint from the child's `reader` reborrow of the same parent.
+    Parent(&'a mut u32),
+    /// Top-level: called with `(&mut R, pending_skip)` when skip debt remains.
+    Orphan(OrphanPendingSkip<'a, R>),
 }
 
 impl<'a, R: ?Sized> Drop for Take32<'a, R> {
     fn drop(&mut self) {
-        if let Some(parent) = self.parent_pending_skip.take() {
-            *parent = (*parent)
-                .saturating_add(self.remaining)
-                .saturating_add(self.pending_skip);
-            return;
-        }
-        let pending = ::std::mem::take(&mut self.pending_skip);
-        if pending == 0 {
-            return;
-        }
-        // Top-level take: no parent to receive skip debt.
-        if let Some(handler) = self.on_orphan_pending_skip.take() {
-            handler(self.reader, pending);
-        } else {
-            panic!(
-                "Take32 dropped with pending_skip={pending} and no parent; flush before \
-                 drop or keep iterating so next/Read drains the debt"
-            );
+        match self.skip_on_drop.take() {
+            Some(SkipOnDrop::Parent(parent)) => {
+                *parent = (*parent)
+                    .saturating_add(self.remaining)
+                    .saturating_add(self.pending_skip);
+            }
+            Some(SkipOnDrop::Orphan(handler)) => {
+                let pending = ::std::mem::take(&mut self.pending_skip);
+                if pending != 0 {
+                    handler(self.reader, pending);
+                }
+            }
+            None => {}
         }
     }
 }
@@ -96,28 +99,26 @@ fn drain_orphan_pending_skip<R: Read + ?Sized>(reader: &mut R, mut n: u32) {
 }
 
 impl<'a, R: Read + ?Sized> Take32<'a, R> {
-    /// Crate-internal: top-level take with optional orphan-`pending_skip` handler.
-    /// `None` panics on Drop if `pending_skip != 0`.
+    /// Crate-internal: top-level take with a required orphan-`pending_skip` handler.
     #[inline]
     pub(crate) fn new_with(
         reader: &'a mut R,
         len: u32,
-        on_orphan_pending_skip: Option<OrphanPendingSkip<'a, R>>,
+        on_orphan_pending_skip: OrphanPendingSkip<'a, R>,
     ) -> Self {
         Self {
             reader,
             remaining: len,
             pending_skip: 0,
-            parent_pending_skip: None,
-            on_orphan_pending_skip,
+            skip_on_drop: Some(SkipOnDrop::Orphan(on_orphan_pending_skip)),
         }
     }
 
     /// Top-level take for [`FieldIterFromRead`]: drains orphan `pending_skip` on
-    /// Drop instead of panicking.
+    /// Drop.
     #[inline]
     pub(crate) fn for_field_iter(reader: &'a mut R, len: u32) -> Self {
-        Self::new_with(reader, len, Some(Box::new(drain_orphan_pending_skip)))
+        Self::new_with(reader, len, Box::new(drain_orphan_pending_skip))
     }
 
     /// Bytes still allowed under this take's budget.
@@ -171,8 +172,7 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
             reader: &mut *self.reader,
             remaining: n,
             pending_skip: ::std::mem::take(&mut self.pending_skip),
-            parent_pending_skip: Some(&mut self.pending_skip),
-            on_orphan_pending_skip: None,
+            skip_on_drop: Some(SkipOnDrop::Parent(&mut self.pending_skip)),
         }
     }
 
@@ -593,19 +593,6 @@ mod tests {
     use crate::field::FieldValue;
 
     #[test]
-    #[should_panic(expected = "pending_skip")]
-    fn take32_drop_with_pending_skip_panics_without_handler() {
-        use super::Take32;
-        use ::std::io::Cursor;
-
-        // Crate-internal construction without orphan handler: Drop panics.
-        let mut data = Cursor::new(vec![1u8, 2, 3]);
-        let mut take = Take32::new_with(&mut data, 3, None);
-        drop(take.scope(2));
-        drop(take);
-    }
-
-    #[test]
     fn take32_with_orphan_pending_skip_callback_drains_reader() {
         use super::Take32;
         use ::std::io::{Cursor, Read};
@@ -616,11 +603,11 @@ mod tests {
             let mut take = Take32::new_with(
                 &mut data,
                 5,
-                Some(Box::new(|r, n| {
+                Box::new(|r, n| {
                     skipped = n;
                     let mut buf = vec![0u8; n as usize];
                     r.read_exact(&mut buf).unwrap();
-                })),
+                }),
             );
             drop(take.scope(3));
             assert_eq!(take.pending_skip(), 3);
