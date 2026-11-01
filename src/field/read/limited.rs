@@ -33,6 +33,11 @@ use ::std::io::{Read, Write};
 /// (or a later child that inherited the debt) drains on the next fallible read.
 /// No budget is restored.
 ///
+/// A top-level take with leftover [`pending_skip`](Self::pending_skip) and no
+/// parent panics on drop unless built with
+/// [`ReadExtProtobuf::take32_with`] / [`Take32::new_with`], which install an
+/// orphan-skip callback.
+///
 /// # Contract
 ///
 /// `remaining()` is always `<= u32::MAX` by construction. Protobuf message
@@ -49,6 +54,10 @@ pub struct Take32<'a, R: ?Sized> {
     /// parent's `pending_skip` (not to `remaining` — the length was prepaid).
     /// Disjoint from [`reader`]: both are reborrows of the parent for `'a`.
     parent_pending_skip: Option<&'a mut u32>,
+    /// Top-level only: called from [`Drop`] with `(&mut R, pending_skip)` when
+    /// there is skip debt and no parent. [`take32`](ReadExtProtobuf::take32) /
+    /// [`new`](Self::new) leave this `None` (panic instead).
+    on_orphan_pending_skip: Option<OrphanPendingSkip<'a, R>>,
 }
 
 impl<'a, R: ?Sized> Drop for Take32<'a, R> {
@@ -57,29 +66,57 @@ impl<'a, R: ?Sized> Drop for Take32<'a, R> {
             *parent = (*parent)
                 .saturating_add(self.remaining)
                 .saturating_add(self.pending_skip);
+            return;
+        }
+        let pending = ::std::mem::take(&mut self.pending_skip);
+        if pending == 0 {
+            return;
+        }
+        // Top-level take: no parent to receive skip debt.
+        if let Some(handler) = self.on_orphan_pending_skip.take() {
+            handler(self.reader, pending);
         } else {
-            // Top-level take: no parent to receive skip debt. Leaving
-            // `pending_skip` would break the full-consume contract for prepaid
-            // scoped lengths (those bytes never leave the underlying reader).
-            assert!(
-                self.pending_skip == 0,
-                "Take32 dropped with pending_skip={} and no parent; flush before drop \
-                 (or keep iterating so next/Read drains the debt)",
-                self.pending_skip
+            panic!(
+                "Take32 dropped with pending_skip={pending} and no parent; flush before \
+                 drop, keep iterating so next/Read drains the debt, or use take32_with \
+                 / Take32::new_with to handle orphan skip"
             );
         }
     }
 }
 
+type OrphanPendingSkip<'a, R> = Box<dyn FnOnce(&mut R, u32) + Send + 'a>;
+
 impl<'a, R: Read + ?Sized> Take32<'a, R> {
     /// Budgeted view of `reader` that may consume at most `len` bytes.
+    ///
+    /// Drop panics if this take still holds [`pending_skip`](Self::pending_skip)
+    /// (no parent and no orphan handler). Prefer
+    /// [`new_with`](Self::new_with) / [`ReadExtProtobuf::take32_with`] when an
+    /// early drop with skip debt must be handled.
     #[inline]
     pub fn new(reader: &'a mut R, len: u32) -> Self {
+        Self::new_with(reader, len, None)
+    }
+
+    /// Like [`new`](Self::new), with an optional orphan-`pending_skip` handler.
+    ///
+    /// If this top-level take is dropped with `pending_skip > 0`, `on_orphan`
+    /// is called as `on_orphan(reader, pending_skip)` instead of panicking.
+    /// The callback typically drains those bytes from `reader` (fallible work
+    /// does not belong in [`Drop`] itself).
+    #[inline]
+    pub fn new_with(
+        reader: &'a mut R,
+        len: u32,
+        on_orphan_pending_skip: Option<OrphanPendingSkip<'a, R>>,
+    ) -> Self {
         Self {
             reader,
             remaining: len,
             pending_skip: 0,
             parent_pending_skip: None,
+            on_orphan_pending_skip,
         }
     }
 
@@ -144,6 +181,7 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
             remaining: n,
             pending_skip: ::std::mem::take(&mut self.pending_skip),
             parent_pending_skip: Some(&mut self.pending_skip),
+            on_orphan_pending_skip: None,
         }
     }
 
@@ -239,8 +277,16 @@ where
                 return Err(ProtobufError::UnexpectedEof);
             }
             let body = read.scope(length);
-            let (payload, _consumed) = handler(tag.field_number, body)?;
-            FieldValue::Len(payload)
+            match handler(tag.field_number, body) {
+                Ok((payload, _consumed)) => FieldValue::Len(payload),
+                Err(err) => {
+                    // Body Drop already queued leftover into `read.pending_skip`.
+                    // Flush now so callers can abandon the iterator after this
+                    // error without tripping the top-level orphan-skip panic.
+                    read.flush_pending_skip()?;
+                    return Err(err);
+                }
+            }
         }
         WireType::SGroup => FieldValue::SGroup,
         WireType::EGroup => FieldValue::EGroup,
@@ -446,6 +492,10 @@ where
 pub trait ReadExtProtobuf: Read {
     /// Budgeted view of `self` that may consume at most `len` bytes.
     ///
+    /// Drop panics if the take is abandoned with leftover
+    /// [`Take32::pending_skip`]. See [`take32_with`](Self::take32_with) to
+    /// supply an orphan-skip callback instead.
+    ///
     /// # Contract
     ///
     /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
@@ -459,6 +509,31 @@ pub trait ReadExtProtobuf: Read {
             "message budget exceeds MAX_MESSAGE_SIZE"
         );
         Take32::new(self, len)
+    }
+
+    /// Like [`take32`](Self::take32), with a callback for leftover
+    /// [`Take32::pending_skip`] if this top-level take is dropped without a
+    /// parent to receive the debt.
+    ///
+    /// `on_orphan_pending_skip(reader, n)` runs from [`Drop`] when `n > 0`.
+    /// Use it to drain `n` bytes from `reader` (or otherwise make the stream
+    /// consistent). Scoped children still forward debt to their parent; this
+    /// only covers the top-level orphan case.
+    ///
+    /// # Contract
+    ///
+    /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
+    #[inline]
+    fn take32_with<'a, F>(&'a mut self, len: u32, on_orphan_pending_skip: F) -> Take32<'a, Self>
+    where
+        Self: Sized,
+        F: FnOnce(&mut Self, u32) + Send + 'a,
+    {
+        debug_assert!(
+            (len as usize) <= MAX_MESSAGE_SIZE,
+            "message budget exceeds MAX_MESSAGE_SIZE"
+        );
+        Take32::new_with(self, len, Some(Box::new(on_orphan_pending_skip)))
     }
 
     /// Read raw protobuf fields from the reader, returning an iterator.
@@ -572,6 +647,41 @@ where
 #[cfg(test)]
 mod tests {
     use crate::field::FieldValue;
+
+    #[test]
+    #[should_panic(expected = "pending_skip")]
+    fn take32_drop_with_pending_skip_panics_without_handler() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        let mut data = Cursor::new(vec![1u8, 2, 3]);
+        let mut take = data.take32(3);
+        drop(take.scope(2));
+        drop(take);
+    }
+
+    #[test]
+    fn take32_with_orphan_pending_skip_callback_drains_reader() {
+        use super::ReadExtProtobuf;
+        use ::std::io::{Cursor, Read};
+
+        let mut data = Cursor::new(vec![1u8, 2, 3, 4, 5]);
+        let mut skipped = 0u32;
+        {
+            let mut take = data.take32_with(5, |r, n| {
+                skipped = n;
+                let mut buf = vec![0u8; n as usize];
+                r.read_exact(&mut buf).unwrap();
+            });
+            drop(take.scope(3));
+            assert_eq!(take.pending_skip(), 3);
+            assert_eq!(take.remaining(), 2);
+        }
+        assert_eq!(skipped, 3);
+        let mut rest = Vec::new();
+        data.read_to_end(&mut rest).unwrap();
+        assert_eq!(rest, [4, 5]);
+    }
 
     #[test]
     fn test_read_ext_read_varint_field() {
