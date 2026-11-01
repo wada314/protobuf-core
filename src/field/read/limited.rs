@@ -74,9 +74,8 @@ impl<'a, R: ?Sized> Drop for Take32<'a, R> {
                     .saturating_add(self.pending_skip);
             }
             SkipOnDrop::Orphan(handler) => {
-                let pending = ::std::mem::take(&mut self.pending_skip);
-                if pending != 0 {
-                    handler(self.reader, pending);
+                if self.pending_skip != 0 {
+                    handler(self.reader, self.pending_skip);
                 }
             }
         }
