@@ -103,12 +103,17 @@ fn copy_len_to_vec<R: Read + ?Sized>(
 
 /// Parse one protobuf field from `read`.
 ///
-/// When the field is length-delimited, `handler` runs once for that Len body
-/// with `&mut R` and the payload `length` (`u32` from the length prefix). It
-/// returns `(payload, consumed)`; `consumed` is trusted. The caller drains any
+/// `read` is a [`Take32`] over `&mut R` (the borrow from
+/// [`ReadExtProtobuf::read_protobuf_fields`]). When the field is
+/// length-delimited, `handler` runs once for that Len body with `&mut R` and
+/// the payload `length` (`u32` from the length prefix). It returns
+/// `(payload, consumed)`; `consumed` is trusted. The caller drains any
 /// remainder via [`Take32::drain_inner`] and sets the post-Len budget with
 /// [`Take32::set_limit`]. Other wire types do not call `handler`.
-fn parse_protobuf_field_with<R, L, F>(read: &mut Take32<R>, handler: &mut F) -> Result<Field<L>>
+fn parse_protobuf_field_with<R, L, F>(
+    read: &mut Take32<&mut R>,
+    handler: &mut F,
+) -> Result<Field<L>>
 where
     R: Read,
     F: FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>,
@@ -123,7 +128,9 @@ where
             if length > read.limit() {
                 return Err(ProtobufError::UnexpectedEof);
             }
-            let (payload, consumed) = handler(tag.field_number, read.get_mut(), length)?;
+            // `Take32<&mut R>::get_mut()` is `&mut &mut R`; reborrow to `&mut R`
+            // so the handler stays tied to the root reader type.
+            let (payload, consumed) = handler(tag.field_number, &mut **read.get_mut(), length)?;
             let unread = length
                 .checked_sub(consumed)
                 .ok_or(ProtobufError::UnexpectedEof)?;
@@ -197,17 +204,18 @@ impl<R: Read> WireCursor for Take32<R> {
 
 /// Iterator for reading raw protobuf fields sequentially from a reader.
 ///
-/// Bounded by the `len` passed to [`ReadExtProtobuf::read_protobuf_fields`] via
-/// [`Take32`]. That budget is a [`u32`]; protobuf message budgets are also
-/// expected to be at most [`MAX_MESSAGE_SIZE`] (`debug_assert`ed when the
-/// iterator is built). `F` is the Len-body handler (default [`VecLenPayload`],
-/// or a `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>`).
-pub struct FieldIterFromRead<R, F = VecLenPayload> {
-    read: Take32<R>,
+/// Borrows the reader for `'a`. Bounded by the `len` passed to
+/// [`ReadExtProtobuf::read_protobuf_fields`] via [`Take32`]. That budget is a
+/// [`u32`]; protobuf message budgets are also expected to be at most
+/// [`MAX_MESSAGE_SIZE`] (`debug_assert`ed when the iterator is built). `F` is
+/// the Len-body handler (default [`VecLenPayload`], or a
+/// `FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>`).
+pub struct FieldIterFromRead<'a, R, F = VecLenPayload> {
+    read: Take32<&'a mut R>,
     handler: F,
 }
 
-impl<R: Read, F> FieldIterFromRead<R, F> {
+impl<'a, R: Read, F> FieldIterFromRead<'a, R, F> {
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
     /// Intended mainly for protobuf **group** handling: after an
@@ -260,7 +268,7 @@ impl<R: Read, F> FieldIterFromRead<R, F> {
     }
 }
 
-impl<R: Read> Iterator for FieldIterFromRead<R, VecLenPayload> {
+impl<'a, R: Read> Iterator for FieldIterFromRead<'a, R, VecLenPayload> {
     type Item = Result<Field<Vec<u8>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -274,7 +282,7 @@ impl<R: Read> Iterator for FieldIterFromRead<R, VecLenPayload> {
     }
 }
 
-impl<R, L, F> Iterator for FieldIterFromRead<R, F>
+impl<'a, R, L, F> Iterator for FieldIterFromRead<'a, R, F>
 where
     R: Read,
     F: FnMut(FieldNumber, &mut R, u32) -> Result<(L, u32)>,
@@ -307,7 +315,7 @@ where
 /// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
 ///     let data = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
 ///     let len = data.len() as u32;
-///     let reader = data;
+///     let mut reader = data;
 ///
 ///     for field in reader.read_protobuf_fields(len) {
 ///         let field = field?;
@@ -327,21 +335,21 @@ where
 pub trait ReadExtProtobuf: Read {
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
-    /// Consumes at most `len` bytes of message budget.
+    /// Borrows `self` and consumes at most `len` bytes of message budget.
     ///
     /// # Contract
     ///
     /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
-    /// This consumes the reader and returns an iterator that yields fields sequentially.
+    /// Returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
     /// Length-delimited payloads are `Vec<u8>`.
-    fn read_protobuf_fields(self, len: u32) -> FieldIterFromRead<Self>
+    fn read_protobuf_fields(&mut self, len: u32) -> FieldIterFromRead<'_, Self>
     where
         Self: Sized;
 
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
-    /// Consumes at most `len` bytes of message budget.
+    /// Borrows `self` and consumes at most `len` bytes of message budget.
     ///
     /// # Contract
     ///
@@ -358,7 +366,7 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// Nested messages can call [`read_protobuf_fields`](Self::read_protobuf_fields)
     /// / [`read_protobuf_fields_with`](Self::read_protobuf_fields_with) again on
-    /// `&mut R` with the nested payload `len` (same contract).
+    /// the same `&mut Self` with the nested payload `len` (same contract).
     ///
     /// # Examples
     ///
@@ -368,7 +376,7 @@ pub trait ReadExtProtobuf: Read {
     /// use ::protobuf_core::{FieldValue, ReadExtProtobuf};
     /// use ::std::io::Read;
     ///
-    /// let data = &[0x0A, 0x03, b'H', b'e', b'l'][..];
+    /// let mut data = &[0x0A, 0x03, b'H', b'e', b'l'][..];
     /// let len = data.len() as u32;
     /// let fields: Vec<_> = data
     ///     .read_protobuf_fields_with(len, |_n, r, body_len| {
@@ -383,7 +391,11 @@ pub trait ReadExtProtobuf: Read {
     /// };
     /// assert_eq!(&data[..], b"Hel");
     /// ```
-    fn read_protobuf_fields_with<L, F>(self, len: u32, handler: F) -> FieldIterFromRead<Self, F>
+    fn read_protobuf_fields_with<L, F>(
+        &mut self,
+        len: u32,
+        handler: F,
+    ) -> FieldIterFromRead<'_, Self, F>
     where
         Self: Sized,
         F: FnMut(FieldNumber, &mut Self, u32) -> Result<(L, u32)>;
@@ -393,7 +405,7 @@ impl<R> ReadExtProtobuf for R
 where
     R: Read,
 {
-    fn read_protobuf_fields(self, len: u32) -> FieldIterFromRead<Self>
+    fn read_protobuf_fields(&mut self, len: u32) -> FieldIterFromRead<'_, Self>
     where
         Self: Sized,
     {
@@ -407,7 +419,11 @@ where
         }
     }
 
-    fn read_protobuf_fields_with<L, F>(self, len: u32, handler: F) -> FieldIterFromRead<Self, F>
+    fn read_protobuf_fields_with<L, F>(
+        &mut self,
+        len: u32,
+        handler: F,
+    ) -> FieldIterFromRead<'_, Self, F>
     where
         Self: Sized,
         F: FnMut(FieldNumber, &mut Self, u32) -> Result<(L, u32)>,
@@ -434,7 +450,7 @@ mod tests {
 
         let data = vec![0x08, 0x96, 0x01]; // field 1: 150
         let len = data.len() as u32;
-        let reader = Cursor::new(data);
+        let mut reader = Cursor::new(data);
         let fields: Vec<_> = reader
             .read_protobuf_fields(len)
             .collect::<::std::result::Result<Vec<_>, _>>()
@@ -459,7 +475,7 @@ mod tests {
             0x12, 0x03, 0x48, 0x65, 0x6c, // field 2: "Hel"
         ];
         let len = data.len() as u32;
-        let reader = Cursor::new(data);
+        let mut reader = Cursor::new(data);
         let fields: Vec<_> = reader
             .read_protobuf_fields(len)
             .collect::<::std::result::Result<Vec<_>, _>>()
@@ -492,7 +508,7 @@ mod tests {
 
         let data = vec![0x15, 0x78, 0x56, 0x34, 0x12]; // field 2: 0x12345678 (Fixed32)
         let len = data.len() as u32;
-        let reader = Cursor::new(data);
+        let mut reader = Cursor::new(data);
         let fields: Vec<_> = reader
             .read_protobuf_fields(len)
             .collect::<::std::result::Result<Vec<_>, _>>()
@@ -514,7 +530,7 @@ mod tests {
 
         let data = vec![0x12, 0x03, 0x48, 0x65, 0x6c]; // field 2: "Hel"
         let len = data.len() as u32;
-        let reader = Cursor::new(data);
+        let mut reader = Cursor::new(data);
         let fields: Vec<_> = reader
             .read_protobuf_fields(len)
             .collect::<::std::result::Result<Vec<_>, _>>()
@@ -536,7 +552,7 @@ mod tests {
 
         let data = vec![0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]; // field 3: 0x1234567890ABCDEF (Fixed64)
         let len = data.len() as u32;
-        let reader = Cursor::new(data);
+        let mut reader = Cursor::new(data);
         let fields: Vec<_> = reader
             .read_protobuf_fields(len)
             .collect::<::std::result::Result<Vec<_>, _>>()
@@ -557,7 +573,7 @@ mod tests {
         use ::std::io::Cursor;
 
         let data = vec![];
-        let reader = Cursor::new(data);
+        let mut reader = Cursor::new(data);
         let fields: Vec<_> = reader
             .read_protobuf_fields(0)
             .collect::<::std::result::Result<Vec<_>, _>>()
@@ -995,7 +1011,7 @@ mod len_payload {
         Skip(Vec<u8>),
     }
 
-    fn parse_node(reader: impl Read, len: u32) -> crate::Result<Node> {
+    fn parse_node(mut reader: impl Read, len: u32) -> crate::Result<Node> {
         let mut node = Node::default();
         for field in reader.read_protobuf_fields_with(len, |n, r, body_len| match n.as_u32() {
             2 => {
@@ -1084,7 +1100,7 @@ mod len_payload {
         Skip(Vec<u8>),
     }
 
-    fn parse_a(reader: impl Read, len: u32) -> crate::Result<TypeA> {
+    fn parse_a(mut reader: impl Read, len: u32) -> crate::Result<TypeA> {
         let mut msg = TypeA::default();
         for field in reader.read_protobuf_fields_with(len, |n, r, body_len| match n.as_u32() {
             2 => {
@@ -1117,7 +1133,7 @@ mod len_payload {
         Ok(msg)
     }
 
-    fn parse_b(reader: impl Read, len: u32) -> crate::Result<TypeB> {
+    fn parse_b(mut reader: impl Read, len: u32) -> crate::Result<TypeB> {
         let mut msg = TypeB::default();
         for field in reader.read_protobuf_fields_with(len, |n, r, body_len| match n.as_u32() {
             2 => {

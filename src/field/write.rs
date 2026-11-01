@@ -378,7 +378,7 @@ mod tests {
 
             // Read
             let len = buffer.len() as u32;
-            let reader = buffer.as_slice();
+            let mut reader = buffer.as_slice();
             let fields: Vec<_> = reader
                 .read_protobuf_fields(len)
                 .collect::<::std::result::Result<Vec<_>, _>>()
@@ -400,7 +400,7 @@ mod tests {
 
             // Read
             let len = buffer.len() as u32;
-            let reader = buffer.as_slice();
+            let mut reader = buffer.as_slice();
             let fields: Vec<_> = reader
                 .read_protobuf_fields(len)
                 .collect::<::std::result::Result<Vec<_>, _>>()
@@ -434,7 +434,7 @@ mod tests {
 
             // Read
             let len = buffer.len() as u32;
-            let reader = buffer.as_slice();
+            let mut reader = buffer.as_slice();
             let read_fields: Vec<_> = reader
                 .read_protobuf_fields(len)
                 .collect::<::std::result::Result<Vec<_>, _>>()
