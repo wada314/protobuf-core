@@ -103,7 +103,20 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
         }
     }
 
-    /// Like [`fields`](Self::fields) with a custom Len handler.
+    /// Like [`fields`](Self::fields), but each length-delimited field is built
+    /// by `handler` instead of copying into a `Vec<u8>` ([`VecLenPayload`]).
+    ///
+    /// `handler` is invoked once per Len field with the field number and a
+    /// [`scope`](Self::scope)d body take (`remaining()` at entry is the payload
+    /// length). Return [`Ok`](Result::Ok)`(payload)` with any type `L` you want
+    /// in [`FieldValue::Len`] — for example a nested message parsed via
+    /// another `fields_with`, a custom buffer, or `()` when skipping. After it
+    /// returns, unused body bytes are discarded so this take sits at the field
+    /// boundary. Return [`Err`](Result::Err) to fail that field (leftover body
+    /// is still discarded first).
+    ///
+    /// Non-Len wire types never call `handler`. Same advance contract as
+    /// [`fields`](Self::fields).
     #[inline]
     pub fn fields_with<'s, L, F>(
         &'s mut self,
