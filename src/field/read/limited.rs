@@ -24,16 +24,12 @@ use ::std::io::{Read, Write};
 
 /// Budgeted view of `&'a mut R` whose remaining count always fits in a [`u32`].
 ///
-/// Built only inside this crate (via [`ReadExtProtobuf::read_protobuf_fields`]).
-/// Nested Len bodies use [`scope`](Self::scope): the child is `Take32<'b, R>`
-/// for the same root `R` (no `&mut` stacking).
-///
-/// Drop is infallible and does no I/O. A scoped child restores unused
-/// [`remaining`](Self::remaining) to the parent (like [`std::io::Take`]).
-/// Length-delimited handlers receive `&mut Take32`; after the closure returns,
-/// the library [`discard_remaining`](Self::discard_remaining)s so the parent
-/// cursor sits at the field boundary before the next field (or before the
-/// iterator is dropped).
+/// Built only by [`ReadExtProtobuf::read_protobuf_fields`] (top-level) or
+/// [`scope`](Self::scope) (nested Len / prepaid slice). Nested Len handlers
+/// receive `&mut Take32`; after the closure returns, the library
+/// [`discard_remaining`](Self::discard_remaining)s so the parent cursor sits at
+/// the field boundary. [`fields`](Self::fields) / [`fields_with`](Self::fields_with)
+/// borrow this take — they do not construct another `Take32`.
 ///
 /// # Contract
 ///
@@ -43,16 +39,6 @@ use ::std::io::{Read, Write};
 pub struct Take32<'a, R: ?Sized> {
     reader: &'a mut R,
     remaining: u32,
-    /// Scoped child only: restore unused `remaining` to the parent on Drop.
-    parent_remaining: Option<&'a mut u32>,
-}
-
-impl<'a, R: ?Sized> Drop for Take32<'a, R> {
-    fn drop(&mut self) {
-        if let Some(parent) = self.parent_remaining.take() {
-            *parent = (*parent).saturating_add(self.remaining);
-        }
-    }
 }
 
 impl<'a, R: Read + ?Sized> Take32<'a, R> {
@@ -63,7 +49,6 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
         Self {
             reader,
             remaining: len,
-            parent_remaining: None,
         }
     }
 
@@ -89,9 +74,9 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
     /// Scoped body view of exactly `n` bytes (prepaid).
     ///
     /// Charges `n` against this take immediately. The returned child is
-    /// `Take32<'b, R>` for the **same** root `R`. On drop, unused child
-    /// `remaining` is restored to this take (Take-like). Len parse drains the
-    /// child after the handler returns so restore is zero. Panics if
+    /// `Take32<'b, R>` for the **same** root `R`. Unused child bytes are left
+    /// for the caller (or for Len parse's post-handler
+    /// [`discard_remaining`](Self::discard_remaining)). Panics if
     /// `n > remaining()`.
     #[inline]
     pub fn scope<'b>(&'b mut self, n: u32) -> Take32<'b, R> {
@@ -104,45 +89,30 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
         Take32 {
             reader: &mut *self.reader,
             remaining: n,
-            parent_remaining: Some(&mut self.remaining),
         }
     }
 
-    /// Iterate fields from this take.
-    ///
-    /// Moves the current budget into the returned iterator (restored on Drop if
-    /// the iterator is abandoned early — like [`std::io::Take`]). Prefer this
-    /// for nested messages already bounded by [`scope`](Self::scope).
-    /// Calling [`ReadExtProtobuf::read_protobuf_fields`] on a `Take32` would
-    /// wrap another `Take32` around it and restack monomorphizations.
+    /// Iterate fields from this take (borrows `self`; does not create a new
+    /// [`Take32`]). Only consumes bytes the iterator actually reads.
     #[inline]
-    pub fn fields(&mut self) -> FieldIterFromRead<'_, R, VecLenPayload> {
-        let n = self.remaining;
-        self.remaining = 0;
-        FieldIterFromRead {
-            read: Take32 {
-                reader: &mut *self.reader,
-                remaining: n,
-                parent_remaining: Some(&mut self.remaining),
-            },
+    pub fn fields(&mut self) -> FieldIterMut<'_, 'a, R, VecLenPayload> {
+        FieldIterMut {
+            take: self,
             handler: VecLenPayload,
         }
     }
 
     /// Like [`fields`](Self::fields) with a custom Len handler.
     #[inline]
-    pub fn fields_with<L, F>(&mut self, handler: F) -> FieldIterFromRead<'_, R, F>
+    pub fn fields_with<'s, L, F>(
+        &'s mut self,
+        handler: F,
+    ) -> FieldIterMut<'s, 'a, R, F>
     where
         F: for<'t> FnMut(FieldNumber, &mut Take32<'t, R>) -> Result<L>,
     {
-        let n = self.remaining;
-        self.remaining = 0;
-        FieldIterFromRead {
-            read: Take32 {
-                reader: &mut *self.reader,
-                remaining: n,
-                parent_remaining: Some(&mut self.remaining),
-            },
+        FieldIterMut {
+            take: self,
             handler,
         }
     }
@@ -208,7 +178,7 @@ where
             }
             let mut body = read.scope(length);
             let result = handler(tag.field_number, &mut body);
-            // Always drain before body Drop restores unused budget to `read`.
+            // Drain unread body bytes so the parent sits at the field boundary.
             body.discard_remaining()?;
             match result {
                 Ok(payload) => FieldValue::Len(payload),
@@ -270,20 +240,16 @@ impl<'a, R: Read + ?Sized> WireCursor for Take32<'a, R> {
         Ok(length as usize)
     }
 }
-
 // ============================================================================
 // Field iterators
 // ============================================================================
 
-/// Iterator for reading raw protobuf fields sequentially from a reader.
+/// Iterator for reading raw protobuf fields from an owned [`Take32`].
 ///
-/// Built by [`ReadExtProtobuf::read_protobuf_fields`] (fresh take with `len`) or
-/// [`Take32::fields`] / [`Take32::fields_with`] (budget moved from an existing
-/// take, restored on Drop if abandoned early). That budget is a [`u32`];
-/// protobuf message budgets are also expected to be at most
-/// [`MAX_MESSAGE_SIZE`] (`debug_assert`ed at top-level entrances). `F` is the
-/// Len-body handler (default [`VecLenPayload`], or a
-/// `FnMut(FieldNumber, &mut Take32<'_, R>) -> Result<L>`).
+/// Built only by [`ReadExtProtobuf::read_protobuf_fields`] /
+/// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with).
+/// For an existing take, use [`Take32::fields`] / [`Take32::fields_with`]
+/// ([`FieldIterMut`]).
 pub struct FieldIterFromRead<'a, R: ?Sized, F = VecLenPayload> {
     read: Take32<'a, R>,
     handler: F,
@@ -368,6 +334,72 @@ where
             return None;
         }
         Some(parse_protobuf_field_with(&mut self.read, &mut self.handler))
+    }
+}
+
+/// Iterator for reading raw protobuf fields from a borrowed [`Take32`].
+///
+/// Returned by [`Take32::fields`] / [`Take32::fields_with`]. Does not construct
+/// a new `Take32`; only bytes the iterator reads are consumed from the take.
+pub struct FieldIterMut<'s, 't, R: ?Sized, F = VecLenPayload> {
+    take: &'s mut Take32<'t, R>,
+    handler: F,
+}
+
+impl<'s, 't, R: Read + ?Sized, F> FieldIterMut<'s, 't, R, F> {
+    /// See [`FieldIterFromRead::skip_until`].
+    pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+    {
+        WireCursor::skip_until(self.take, pred)
+    }
+
+    /// See [`FieldIterFromRead::group_body`].
+    #[inline]
+    pub fn group_body(&mut self, field_number: FieldNumber) -> GroupBody<&mut Self> {
+        GroupBody::new(self, field_number)
+    }
+
+    /// See [`FieldIterFromRead::copy_until`].
+    pub fn copy_until<P, W>(&mut self, pred: P, out: &mut W) -> Result<usize>
+    where
+        P: FnMut(Tag) -> Result<bool>,
+        W: Write,
+    {
+        WireCursor::copy_until(self.take, pred, out)
+    }
+
+    /// Bytes still allowed in this iterator's budget.
+    #[inline]
+    pub fn remaining(&self) -> u32 {
+        self.take.remaining()
+    }
+}
+
+impl<'s, 't, R: Read + ?Sized> Iterator for FieldIterMut<'s, 't, R, VecLenPayload> {
+    type Item = Result<Field<Vec<u8>>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.take.remaining() == 0 {
+            return None;
+        }
+        Some(parse_protobuf_field_with(self.take, &mut copy_len_to_vec))
+    }
+}
+
+impl<'s, 't, R, L, F> Iterator for FieldIterMut<'s, 't, R, F>
+where
+    R: Read + ?Sized,
+    F: for<'u> FnMut(FieldNumber, &mut Take32<'u, R>) -> Result<L>,
+{
+    type Item = Result<Field<L>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.take.remaining() == 0 {
+            return None;
+        }
+        Some(parse_protobuf_field_with(self.take, &mut self.handler))
     }
 }
 
@@ -574,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn scope_restores_unused_remaining_like_take() {
+    fn scope_charges_parent_budget_without_restore() {
         use super::Take32;
         use ::std::io::Cursor;
 
@@ -585,8 +617,9 @@ mod tests {
             let child = take.scope(3);
             assert_eq!(child.remaining(), 3);
         }
-        assert_eq!(take.remaining(), 5);
-        drop(take);
+        // Prepaid length stays charged on the parent (Len path discards the
+        // child before drop; abandoning a raw scope leaves the charge).
+        assert_eq!(take.remaining(), 2);
         assert_eq!(data.position(), 0);
     }
 
