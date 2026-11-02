@@ -1,12 +1,11 @@
-//! Streaming (`Read`) field iteration bounded by [`Take32`].
+//! Streaming field iteration bounded by [`Budget32`].
 //!
-//! [`Take32`] is a budgeted view of `&mut R` whose remaining count always fits
-//! in a [`u32`]. Protobuf message budgets passed to [`ReadExtProtobuf`] are
-//! additionally expected to be `<= MAX_MESSAGE_SIZE` ([`crate::MAX_MESSAGE_SIZE`],
-//! 2 GiB); that is `debug_assert`ed at the entrance.
-//!
-//! Nested Len bodies use [`Take32::scope`] so the handler sees `&mut Take32`
-//! for the same root `R` (shorter lifetime) instead of stacking `&mut` layers.
+//! [`Budget32`] is a `u32`-capped byte budget over `&mut R`. It does **not**
+//! implement [`Read`] — nested messages use [`Budget32::fields`] /
+//! [`fields_with`](Budget32::fields_with) / [`scope`](Budget32::scope), not
+//! [`ReadExtProtobuf`] (which would restack budgets). Protobuf message budgets
+//! passed to [`ReadExtProtobuf`] are expected to be `<= MAX_MESSAGE_SIZE`
+//! ([`crate::MAX_MESSAGE_SIZE`], 2 GiB); that is `debug_assert`ed at the entrance.
 
 use super::group::GroupBody;
 use super::wire::WireCursor;
@@ -14,51 +13,61 @@ use crate::field::{Field, FieldValue};
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
-use crate::wire_format::{MAX_MESSAGE_SIZE, MAX_VARINT_BYTES, WireType};
+use crate::wire_format::{
+    MAX_MESSAGE_SIZE, MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK, WireType,
+};
 use crate::{ProtobufError, Result};
 use ::std::convert::{AsMut, AsRef};
 use ::std::io::{Read, Write};
 
 // ============================================================================
-// Message budget via Take32
+// Message budget via Budget32
 // ============================================================================
 
-/// Budgeted view of `&'a mut R` whose remaining count always fits in a [`u32`].
+/// `u32`-capped byte budget over `&'a mut R` (not a [`Read`] adapter).
 ///
 /// Built only by [`ReadExtProtobuf::read_protobuf_fields`] (top-level) or
 /// [`scope`](Self::scope) (nested Len / prepaid slice). Nested Len handlers
-/// receive `&mut Take32`; after the closure returns, the library
+/// receive `&mut Budget32`; after the closure returns, the library
 /// [`discard_remaining`](Self::discard_remaining)s so the parent cursor sits at
 /// the field boundary. [`fields`](Self::fields) / [`fields_with`](Self::fields_with)
-/// borrow this take — they do not construct another `Take32`.
+/// borrow this budget — they do not construct another `Budget32`.
+///
+/// Does not implement [`Read`], so [`ReadExtProtobuf`] / [`ReadExtVarint`] /
+/// [`ReadExtTag`] cannot be called on it; use inherent [`read`](Self::read) /
+/// [`read_exact`](Self::read_exact) / [`read_varint`](Self::read_varint) and
+/// [`fields`](Self::fields)*.
 ///
 /// # Contract
 ///
 /// `remaining()` is always `<= u32::MAX` by construction. Protobuf message
 /// budgets also stay `<= MAX_MESSAGE_SIZE` at [`ReadExtProtobuf`] entrances
 /// (`debug_assert`).
-pub struct Take32<'a, R: ?Sized> {
+///
+/// [`ReadExtVarint`]: crate::ReadExtVarint
+/// [`ReadExtTag`]: crate::ReadExtTag
+pub struct Budget32<'a, R: ?Sized> {
     reader: &'a mut R,
     remaining: u32,
 }
 
-impl<'a, R: ?Sized> AsRef<Take32<'a, R>> for Take32<'a, R> {
+impl<'a, R: ?Sized> AsRef<Budget32<'a, R>> for Budget32<'a, R> {
     #[inline]
-    fn as_ref(&self) -> &Take32<'a, R> {
+    fn as_ref(&self) -> &Budget32<'a, R> {
         self
     }
 }
 
-impl<'a, R: ?Sized> AsMut<Take32<'a, R>> for Take32<'a, R> {
+impl<'a, R: ?Sized> AsMut<Budget32<'a, R>> for Budget32<'a, R> {
     #[inline]
-    fn as_mut(&mut self) -> &mut Take32<'a, R> {
+    fn as_mut(&mut self) -> &mut Budget32<'a, R> {
         self
     }
 }
 
-impl<'a, R: Read + ?Sized> Take32<'a, R> {
-    /// Crate-internal: top-level take (unused budget stays on the underlying
-    /// reader when this value is dropped — like [`std::io::Take`]).
+impl<'a, R: Read + ?Sized> Budget32<'a, R> {
+    /// Crate-internal: top-level budget (unused bytes stay on the underlying
+    /// reader when this value is dropped).
     #[inline]
     pub(crate) fn new(reader: &'a mut R, len: u32) -> Self {
         Self {
@@ -67,10 +76,75 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
         }
     }
 
-    /// Bytes still allowed under this take's budget.
+    /// Bytes still allowed under this budget.
     #[inline]
     pub fn remaining(&self) -> u32 {
         self.remaining
+    }
+
+    /// Read up to `buf.len()` bytes, capped by [`remaining`](Self::remaining).
+    ///
+    /// Returns `Ok(0)` when the budget is exhausted (soft end). Underlying
+    /// reader EOF before the budget is spent is still `Ok(0)` here; prefer
+    /// [`read_exact`](Self::read_exact) when a fixed count is required.
+    #[inline]
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        let max = buf.len().min(self.remaining as usize);
+        if max == 0 {
+            return Ok(0);
+        }
+        let n = self.reader.read(&mut buf[..max])?;
+        self.remaining -= n as u32;
+        Ok(n)
+    }
+
+    /// Read exactly `buf.len()` bytes from this budget.
+    #[inline]
+    pub fn read_exact(&mut self, mut buf: &mut [u8]) -> Result<()> {
+        while !buf.is_empty() {
+            match self.read(buf)? {
+                0 => return Err(ProtobufError::UnexpectedEof),
+                n => buf = &mut buf[n..],
+            }
+        }
+        Ok(())
+    }
+
+    /// Decode one varint from this budget (empty budget is
+    /// [`ProtobufError::UnexpectedEof`]).
+    #[inline]
+    pub fn read_varint(&mut self) -> Result<Varint> {
+        Ok(self.read_varint_with_raw(&mut [0u8; MAX_VARINT_BYTES])?.0)
+    }
+
+    /// Decode one varint, copying its wire bytes into `buf`.
+    #[inline]
+    pub fn read_varint_with_raw<'b>(
+        &'b mut self,
+        buf: &'b mut [u8; MAX_VARINT_BYTES],
+    ) -> Result<(Varint, &'b [u8])> {
+        let mut decoded_value = 0u64;
+        let mut shift = 0u32;
+        let mut n = 0usize;
+        while n < MAX_VARINT_BYTES {
+            if self.remaining == 0 {
+                return Err(ProtobufError::UnexpectedEof);
+            }
+            let mut byte = [0u8; 1];
+            self.read_exact(&mut byte)?;
+            buf[n] = byte[0];
+            n += 1;
+            let value = (byte[0] & VARINT_PAYLOAD_MASK) as u64;
+            if n == MAX_VARINT_BYTES && value > 1 {
+                return Err(ProtobufError::VarintTooLong);
+            }
+            decoded_value |= value << shift;
+            if byte[0] & VARINT_CONTINUATION_BIT == 0 {
+                return Ok((Varint::new(decoded_value.to_le_bytes()), &buf[..n]));
+            }
+            shift += 7;
+        }
+        Err(ProtobufError::VarintTooLong)
     }
 
     /// Read and discard any unused [`remaining`](Self::remaining) bytes.
@@ -79,41 +153,40 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
         let mut buf = [0u8; 256];
         while self.remaining > 0 {
             let chunk = self.remaining.min(buf.len() as u32) as usize;
-            Read::read_exact(self.reader, &mut buf[..chunk])?;
-            self.remaining -= chunk as u32;
+            self.read_exact(&mut buf[..chunk])?;
         }
         Ok(())
     }
 
     /// Scoped body view of exactly `n` bytes (prepaid).
     ///
-    /// Charges `n` against this take immediately. The returned child is
-    /// `Take32<'b, R>` for the **same** root `R`. Unused child bytes are left
+    /// Charges `n` against this budget immediately. The returned child is
+    /// `Budget32<'b, R>` for the **same** root `R`. Unused child bytes are left
     /// for the caller (or for Len parse's post-handler
     /// [`discard_remaining`](Self::discard_remaining)). Panics if
     /// `n > remaining()`.
     #[inline]
-    pub fn scope<'b>(&'b mut self, n: u32) -> Take32<'b, R> {
+    pub fn scope<'b>(&'b mut self, n: u32) -> Budget32<'b, R> {
         assert!(
             n <= self.remaining,
-            "Take32::scope length {n} exceeds remaining {}",
+            "Budget32::scope length {n} exceeds remaining {}",
             self.remaining
         );
         self.remaining -= n;
-        Take32 {
+        Budget32 {
             reader: &mut *self.reader,
             remaining: n,
         }
     }
 
-    /// Iterate fields from this take (borrows `self`; does not create a new
-    /// [`Take32`]). Consumes the wire bytes of each field the iterator has
+    /// Iterate fields from this budget (borrows `self`; does not create a new
+    /// [`Budget32`]). Consumes the wire bytes of each field the iterator has
     /// advanced over (including unread Len body bytes discarded after the
-    /// handler). Fields never yielded leave their bytes in this take.
+    /// handler). Fields never yielded leave their bytes in this budget.
     #[inline]
     pub fn fields(&mut self) -> FieldIter<'a, R, &mut Self, VecLenPayload> {
         FieldIter {
-            take: self,
+            budget: self,
             handler: VecLenPayload,
             _marker: ::std::marker::PhantomData,
         }
@@ -123,13 +196,13 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
     /// by `handler` instead of copying into a `Vec<u8>` ([`VecLenPayload`]).
     ///
     /// `handler` is invoked once per Len field with the field number and a
-    /// [`scope`](Self::scope)d body take (`remaining()` at entry is the payload
-    /// length). Return [`Ok`](Result::Ok)`(payload)` with any type `L` you want
-    /// in [`FieldValue::Len`] — for example a nested message parsed via
-    /// another `fields_with`, a custom buffer, or `()` when skipping. After it
-    /// returns, unused body bytes are discarded so this take sits at the field
-    /// boundary. Return [`Err`](Result::Err) to fail that field (leftover body
-    /// is still discarded first).
+    /// [`scope`](Self::scope)d body budget (`remaining()` at entry is the
+    /// payload length). Return [`Ok`](Result::Ok)`(payload)` with any type `L`
+    /// you want in [`FieldValue::Len`] — for example a nested message parsed
+    /// via another `fields_with`, a custom buffer, or `()` when skipping. After
+    /// it returns, unused body bytes are discarded so this budget sits at the
+    /// field boundary. Return [`Err`](Result::Err) to fail that field (leftover
+    /// body is still discarded first).
     ///
     /// Non-Len wire types never call `handler`. Same advance contract as
     /// [`fields`](Self::fields).
@@ -139,26 +212,13 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
         handler: F,
     ) -> FieldIter<'a, R, &'s mut Self, F>
     where
-        F: for<'t> FnMut(FieldNumber, &mut Take32<'t, R>) -> Result<L>,
+        F: for<'t> FnMut(FieldNumber, &mut Budget32<'t, R>) -> Result<L>,
     {
         FieldIter {
-            take: self,
+            budget: self,
             handler,
             _marker: ::std::marker::PhantomData,
         }
-    }
-}
-
-impl<'a, R: Read + ?Sized> Read for Take32<'a, R> {
-    #[inline]
-    fn read(&mut self, buf: &mut [u8]) -> ::std::io::Result<usize> {
-        let max = buf.len().min(self.remaining as usize);
-        if max == 0 {
-            return Ok(0);
-        }
-        let n = self.reader.read(&mut buf[..max])?;
-        self.remaining -= n as u32;
-        Ok(n)
     }
 }
 
@@ -166,9 +226,9 @@ impl<'a, R: Read + ?Sized> Read for Take32<'a, R> {
 /// body into a new `Vec<u8>`.
 ///
 /// Custom handlers are ordinary
-/// `FnMut(FieldNumber, &mut Take32<'_, R>) -> Result<L>` closures passed to
+/// `FnMut(FieldNumber, &mut Budget32<'_, R>) -> Result<L>` closures passed to
 /// [`ReadExtProtobuf::read_protobuf_fields_with`] — there is no separate handler
-/// trait on the public API. The body take is already scoped to the Len length
+/// trait on the public API. The body budget is already scoped to the Len length
 /// (`remaining()` at entry). After the closure returns, unused body bytes are
 /// discarded by the library before the next field.
 #[derive(Debug, Default, Clone, Copy)]
@@ -178,7 +238,7 @@ pub struct VecLenPayload;
 #[inline]
 fn copy_len_to_vec<R: Read + ?Sized>(
     _field_number: FieldNumber,
-    reader: &mut Take32<'_, R>,
+    reader: &mut Budget32<'_, R>,
 ) -> Result<Vec<u8>> {
     let len = reader.remaining();
     let mut buf = vec![0u8; len as usize];
@@ -189,13 +249,13 @@ fn copy_len_to_vec<R: Read + ?Sized>(
 /// Parse one protobuf field from `read`.
 ///
 /// When the field is length-delimited, `handler` runs once on a
-/// [`Take32::scope`] of the payload length (`&mut` body). After the handler
-/// returns, unused body bytes are [`Take32::discard_remaining`]ed. Other wire
+/// [`Budget32::scope`] of the payload length (`&mut` body). After the handler
+/// returns, unused body bytes are [`Budget32::discard_remaining`]ed. Other wire
 /// types do not call `handler`.
-fn parse_protobuf_field_with<R, L, F>(read: &mut Take32<'_, R>, handler: &mut F) -> Result<Field<L>>
+fn parse_protobuf_field_with<R, L, F>(read: &mut Budget32<'_, R>, handler: &mut F) -> Result<Field<L>>
 where
     R: Read + ?Sized,
-    F: for<'t> FnMut(FieldNumber, &mut Take32<'t, R>) -> Result<L>,
+    F: for<'t> FnMut(FieldNumber, &mut Budget32<'t, R>) -> Result<L>,
 {
     let tag = WireCursor::read_tag(read)?;
     let value = match tag.wire_type {
@@ -225,7 +285,7 @@ where
     })
 }
 
-impl<'a, R: Read + ?Sized> WireCursor for Take32<'a, R> {
+impl<'a, R: Read + ?Sized> WireCursor for Budget32<'a, R> {
     #[inline]
     fn remaining(&self) -> u32 {
         self.remaining
@@ -236,14 +296,13 @@ impl<'a, R: Read + ?Sized> WireCursor for Take32<'a, R> {
         &'b mut self,
         buf: &'b mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'b [u8])> {
-        use crate::varint::ReadExtVarint;
-        ReadExtVarint::read_varint_with_raw(self, buf)
+        Budget32::read_varint_with_raw(self, buf)
     }
 
     #[inline]
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         let mut bytes = [0u8; N];
-        Read::read_exact(self, &mut bytes)?;
+        self.read_exact(&mut bytes)?;
         Ok(bytes)
     }
 
@@ -252,7 +311,7 @@ impl<'a, R: Read + ?Sized> WireCursor for Take32<'a, R> {
         let mut buf = [0u8; 256];
         while length > 0 {
             let n = length.min(buf.len() as u32) as usize;
-            Read::read_exact(self, &mut buf[..n])?;
+            self.read_exact(&mut buf[..n])?;
             length -= n as u32;
         }
         Ok(())
@@ -264,7 +323,7 @@ impl<'a, R: Read + ?Sized> WireCursor for Take32<'a, R> {
         let mut buf = [0u8; 256];
         while left > 0 {
             let n = left.min(buf.len() as u32) as usize;
-            Read::read_exact(self, &mut buf[..n])?;
+            self.read_exact(&mut buf[..n])?;
             out.write_all(&buf[..n])?;
             left -= n as u32;
         }
@@ -275,20 +334,20 @@ impl<'a, R: Read + ?Sized> WireCursor for Take32<'a, R> {
 // Field iterators
 // ============================================================================
 
-/// Iterator for reading raw protobuf fields from a [`Take32`] holder.
+/// Iterator for reading raw protobuf fields from a [`Budget32`] holder.
 ///
-/// `T` is typically an owned [`Take32`] (from
-/// [`ReadExtProtobuf::read_protobuf_fields`]) or `&mut Take32` (from
-/// [`Take32::fields`] / [`fields_with`](Take32::fields_with)). Bound with
-/// [`AsRef`] / [`AsMut`]`<Take32<'a, R>>` so both holders share one iterator
-/// type. [`Take32`] implements those for itself; `&mut Take32` picks them up
+/// `T` is typically an owned [`Budget32`] (from
+/// [`ReadExtProtobuf::read_protobuf_fields`]) or `&mut Budget32` (from
+/// [`Budget32::fields`] / [`fields_with`](Budget32::fields_with)). Bound with
+/// [`AsRef`] / [`AsMut`]`<Budget32<'a, R>>` so both holders share one iterator
+/// type. [`Budget32`] implements those for itself; `&mut Budget32` picks them up
 /// through the standard library blanket over `T: AsMut` / `AsRef`.
 ///
 /// Consumes the wire bytes of each field it has advanced over (including unread
-/// Len body bytes discarded after the handler). With a borrowed take, fields
-/// never yielded leave their bytes in that take.
+/// Len body bytes discarded after the handler). With a borrowed budget, fields
+/// never yielded leave their bytes in that budget.
 pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
-    take: T,
+    budget: T,
     handler: F,
     _marker: ::std::marker::PhantomData<&'a mut R>,
 }
@@ -296,7 +355,7 @@ pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
 impl<'a, R, T, F> FieldIter<'a, R, T, F>
 where
     R: Read + ?Sized,
-    T: AsRef<Take32<'a, R>> + AsMut<Take32<'a, R>>,
+    T: AsRef<Budget32<'a, R>> + AsMut<Budget32<'a, R>>,
 {
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
@@ -311,7 +370,7 @@ where
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        WireCursor::skip_until(self.take.as_mut(), pred)
+        WireCursor::skip_until(self.budget.as_mut(), pred)
     }
 
     /// Iterate fields until the matching end-group for `field_number`.
@@ -340,29 +399,29 @@ where
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
-        WireCursor::copy_until(self.take.as_mut(), pred, out)
+        WireCursor::copy_until(self.budget.as_mut(), pred, out)
     }
 
     /// Bytes still allowed in this iterator's budget.
     #[inline]
     pub fn remaining(&self) -> u32 {
-        self.take.as_ref().remaining()
+        self.budget.as_ref().remaining()
     }
 }
 
 impl<'a, R, T> Iterator for FieldIter<'a, R, T, VecLenPayload>
 where
     R: Read + ?Sized,
-    T: AsRef<Take32<'a, R>> + AsMut<Take32<'a, R>>,
+    T: AsRef<Budget32<'a, R>> + AsMut<Budget32<'a, R>>,
 {
     type Item = Result<Field<Vec<u8>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.take.as_ref().remaining() == 0 {
+        if self.budget.as_ref().remaining() == 0 {
             return None;
         }
         Some(parse_protobuf_field_with(
-            self.take.as_mut(),
+            self.budget.as_mut(),
             &mut copy_len_to_vec,
         ))
     }
@@ -371,17 +430,17 @@ where
 impl<'a, R, T, L, F> Iterator for FieldIter<'a, R, T, F>
 where
     R: Read + ?Sized,
-    T: AsRef<Take32<'a, R>> + AsMut<Take32<'a, R>>,
-    F: for<'t> FnMut(FieldNumber, &mut Take32<'t, R>) -> Result<L>,
+    T: AsRef<Budget32<'a, R>> + AsMut<Budget32<'a, R>>,
+    F: for<'t> FnMut(FieldNumber, &mut Budget32<'t, R>) -> Result<L>,
 {
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.take.as_ref().remaining() == 0 {
+        if self.budget.as_ref().remaining() == 0 {
             return None;
         }
         Some(parse_protobuf_field_with(
-            self.take.as_mut(),
+            self.budget.as_mut(),
             &mut self.handler,
         ))
     }
@@ -398,8 +457,8 @@ where
 /// payloads default to `Vec<u8>` via [`VecLenPayload`].
 /// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
 /// supplies a custom
-/// `FnMut(FieldNumber, &mut Take32<'_, Self>) -> Result<L>`
-/// (field number, scoped body take → payload).
+/// `FnMut(FieldNumber, &mut Budget32<'_, Self>) -> Result<L>`
+/// (field number, scoped body budget → payload).
 /// It does not provide semantic interpretation - that is the caller's responsibility.
 ///
 /// # Example
@@ -437,7 +496,7 @@ pub trait ReadExtProtobuf: Read {
     /// Returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
     /// Length-delimited payloads are `Vec<u8>`.
-    fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, Take32<'_, Self>>
+    fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, Budget32<'_, Self>>
     where
         Self: Sized;
 
@@ -450,17 +509,17 @@ pub trait ReadExtProtobuf: Read {
     /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
     ///
     /// `handler` is called once for each length-delimited field with the field
-    /// number and a [`Take32::scope`] of the Len body (`remaining()` at entry is
+    /// number and a [`Budget32::scope`] of the Len body (`remaining()` at entry is
     /// the payload length). Return [`Ok`](Result::Ok)`(payload)` with any payload
     /// type `L`. After the closure returns, unused body bytes are discarded so
     /// the parent cursor is at the field boundary. Return [`Err`](Result::Err)
     /// to fail the field (body leftover is still discarded first).
     ///
-    /// Nested messages should call [`Take32::fields`] /
-    /// [`Take32::fields_with`] on that body (keeps `R` fixed). Do
-    /// **not** call [`read_protobuf_fields`](Self::read_protobuf_fields) on a
-    /// `Take32` itself — that wraps another take and can restack
-    /// monomorphizations.
+    /// Nested messages should call [`Budget32::fields`] /
+    /// [`Budget32::fields_with`] on that body (keeps `R` fixed).
+    /// [`Budget32`] does not implement [`Read`], so
+    /// [`read_protobuf_fields`](Self::read_protobuf_fields) is not available
+    /// on it.
     ///
     /// # Examples
     ///
@@ -468,7 +527,6 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// ```
     /// use ::protobuf_core::{FieldValue, ReadExtProtobuf};
-    /// use ::std::io::Read;
     ///
     /// let mut data = &[0x0A, 0x03, b'H', b'e', b'l'][..];
     /// let len = data.len() as u32;
@@ -490,17 +548,17 @@ pub trait ReadExtProtobuf: Read {
         &mut self,
         len: u32,
         handler: F,
-    ) -> FieldIter<'_, Self, Take32<'_, Self>, F>
+    ) -> FieldIter<'_, Self, Budget32<'_, Self>, F>
     where
         Self: Sized,
-        F: for<'t> FnMut(FieldNumber, &mut Take32<'t, Self>) -> Result<L>;
+        F: for<'t> FnMut(FieldNumber, &mut Budget32<'t, Self>) -> Result<L>;
 }
 
 impl<R> ReadExtProtobuf for R
 where
     R: Read,
 {
-    fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, Take32<'_, Self>>
+    fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, Budget32<'_, Self>>
     where
         Self: Sized,
     {
@@ -509,7 +567,7 @@ where
             "message budget exceeds MAX_MESSAGE_SIZE"
         );
         FieldIter {
-            take: Take32::new(self, len),
+            budget: Budget32::new(self, len),
             handler: VecLenPayload,
             _marker: ::std::marker::PhantomData,
         }
@@ -519,17 +577,17 @@ where
         &mut self,
         len: u32,
         handler: F,
-    ) -> FieldIter<'_, Self, Take32<'_, Self>, F>
+    ) -> FieldIter<'_, Self, Budget32<'_, Self>, F>
     where
         Self: Sized,
-        F: for<'t> FnMut(FieldNumber, &mut Take32<'t, Self>) -> Result<L>,
+        F: for<'t> FnMut(FieldNumber, &mut Budget32<'t, Self>) -> Result<L>,
     {
         debug_assert!(
             (len as usize) <= MAX_MESSAGE_SIZE,
             "message budget exceeds MAX_MESSAGE_SIZE"
         );
         FieldIter {
-            take: Take32::new(self, len),
+            budget: Budget32::new(self, len),
             handler,
             _marker: ::std::marker::PhantomData,
         }
@@ -539,11 +597,12 @@ where
 #[cfg(test)]
 mod tests {
     use crate::field::FieldValue;
+    use ::std::io::Read;
 
     #[test]
     fn unread_len_body_is_discarded_before_next_field() {
         use super::ReadExtProtobuf;
-        use ::std::io::{Cursor, Read};
+        use ::std::io::Cursor;
 
         let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
         let mut reader = Cursor::new(message);
@@ -570,7 +629,7 @@ mod tests {
     #[test]
     fn abandon_after_partial_len_leaves_cursor_at_field_end() {
         use super::ReadExtProtobuf;
-        use ::std::io::{Cursor, Read};
+        use ::std::io::Cursor;
 
         let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
         let mut reader = Cursor::new(message);
@@ -593,11 +652,11 @@ mod tests {
 
     #[test]
     fn scope_charges_parent_budget_without_restore() {
-        use super::Take32;
+        use super::Budget32;
         use ::std::io::Cursor;
 
         let mut data = Cursor::new(vec![1u8, 2, 3, 4, 5]);
-        let mut take = Take32::new(&mut data, 5);
+        let mut take = Budget32::new(&mut data, 5);
         assert_eq!(take.remaining(), 5);
         {
             let child = take.scope(3);
@@ -750,7 +809,7 @@ mod tests {
     #[test]
     fn test_read_ext_respects_len_budget() {
         use super::ReadExtProtobuf;
-        use ::std::io::{Cursor, Read};
+        use ::std::io::Cursor;
 
         // Two fields; budget covers only the first.
         let data = vec![
@@ -796,20 +855,14 @@ mod tests {
         use crate::ProtobufError;
         use ::std::io::Cursor;
 
-        // Mid-field truncation with budget == input.len(): fixed-width paths
-        // surface as IoError via `Read::read_exact`; Len that claims more than
-        // the remaining Take32 limit fails as UnexpectedEof.
-        use ::std::io::ErrorKind;
-
+        // Mid-field truncation with budget == input.len(): Budget32::read_exact
+        // maps short reads to UnexpectedEof (fixed-width and Len alike).
         let fixed_err = Cursor::new([0x0D, 0x01, 0x02, 0x03])
             .read_protobuf_fields(4)
             .next()
             .unwrap()
             .unwrap_err();
-        assert!(matches!(
-            fixed_err,
-            ProtobufError::IoError(ref err) if err.kind() == ErrorKind::UnexpectedEof
-        ));
+        assert!(matches!(fixed_err, ProtobufError::UnexpectedEof));
 
         let len_err = Cursor::new([0x0A, 0x05, b'a', b'b'])
             .read_protobuf_fields(4)
@@ -822,7 +875,7 @@ mod tests {
 
 #[cfg(test)]
 mod len_payload {
-    use super::{ReadExtProtobuf, Take32};
+    use super::{Budget32, ReadExtProtobuf};
     use crate::varint::Varint;
     use crate::{Field, FieldNumber, FieldValue, ProtobufError};
     use ::std::io::{Cursor, Read};
@@ -834,7 +887,7 @@ mod len_payload {
 
     fn read_bytes_payload<R: Read + ?Sized>(
         _n: FieldNumber,
-        reader: &mut Take32<'_, R>,
+        reader: &mut Budget32<'_, R>,
     ) -> crate::Result<Bytes> {
         let len = reader.remaining();
         let mut data = vec![0; len as usize];
@@ -1074,7 +1127,7 @@ mod len_payload {
 
         fn decode_len<R: Read + ?Sized>(
             field_number: FieldNumber,
-            reader: &mut Take32<'_, R>,
+            reader: &mut Budget32<'_, R>,
         ) -> crate::Result<LenValue> {
             let len = reader.remaining();
             match field_number.as_u32() {
@@ -1155,8 +1208,8 @@ mod len_payload {
 
     /// Dummy self-recursive message: `Node { value, child: Option<Node> }`.
     ///
-    /// Decode walks a fixed root `R` via [`Take32::fields_with`]: each nested
-    /// Len body is already a `Take32<'_, R>` from [`Take32::scope`], so
+    /// Decode walks a fixed root `R` via [`Budget32::fields_with`]: each nested
+    /// Len body is already a `Budget32<'_, R>` from [`Budget32::scope`], so
     /// monomorphization does not stack `&mut` layers.
     #[derive(Debug, Default, PartialEq)]
     struct Node {
@@ -1170,7 +1223,7 @@ mod len_payload {
         Skip(Vec<u8>),
     }
 
-    fn parse_node<R: Read + ?Sized>(take: &mut Take32<'_, R>) -> crate::Result<Node> {
+    fn parse_node<R: Read + ?Sized>(take: &mut Budget32<'_, R>) -> crate::Result<Node> {
         let mut node = Node::default();
         for field in take.fields_with(|n, body| {
             let body_len = body.remaining();
@@ -1203,7 +1256,7 @@ mod len_payload {
     }
 
     /// Top-level entrance via [`ReadExtProtobuf`]; nested bodies stay on
-    /// [`Take32::fields_with`] / [`parse_node`].
+    /// [`Budget32::fields_with`] / [`parse_node`].
     fn parse_node_from_read<R: Read>(reader: &mut R, len: u32) -> crate::Result<Node> {
         let mut node = Node::default();
         for field in reader.read_protobuf_fields_with(len, |n, body| {
@@ -1237,7 +1290,7 @@ mod len_payload {
     }
 
     #[test]
-    fn direct_recursive_node_via_take32_scope() {
+    fn direct_recursive_node_via_budget32_scope() {
         // Node { value=1, child: Node { value=2, child: Node { value=3 } } }
         // Node3 = 08 03
         // Node2 = 08 02 | 12 02 | 08 03
@@ -1267,7 +1320,7 @@ mod len_payload {
     }
 
     /// Indirect recursion: `TypeA` contains `TypeB`, `TypeB` contains `TypeA`.
-    /// Same fixed-`R` [`Take32`] pattern as [`direct_recursive_node_via_take32_scope`].
+    /// Same fixed-`R` [`Budget32`] pattern as [`direct_recursive_node_via_budget32_scope`].
     #[derive(Debug, Default, PartialEq)]
     struct TypeA {
         mark: u64,
@@ -1292,7 +1345,7 @@ mod len_payload {
         Skip(Vec<u8>),
     }
 
-    fn parse_a<R: Read + ?Sized>(take: &mut Take32<'_, R>) -> crate::Result<TypeA> {
+    fn parse_a<R: Read + ?Sized>(take: &mut Budget32<'_, R>) -> crate::Result<TypeA> {
         let mut msg = TypeA::default();
         for field in take.fields_with(|n, body| {
             let body_len = body.remaining();
@@ -1324,7 +1377,7 @@ mod len_payload {
         Ok(msg)
     }
 
-    fn parse_b<R: Read + ?Sized>(take: &mut Take32<'_, R>) -> crate::Result<TypeB> {
+    fn parse_b<R: Read + ?Sized>(take: &mut Budget32<'_, R>) -> crate::Result<TypeB> {
         let mut msg = TypeB::default();
         for field in take.fields_with(|n, body| {
             let body_len = body.remaining();
@@ -1389,7 +1442,7 @@ mod len_payload {
     }
 
     #[test]
-    fn indirect_recursive_a_b_via_take32_scope() {
+    fn indirect_recursive_a_b_via_budget32_scope() {
         // A { mark=1, b: B { mark=2, a: A { mark=3 } } }
         // Inner A = 08 03
         // B      = 08 02 | 12 02 | 08 03
