@@ -212,20 +212,30 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
     }
 
     /// Like [`fields`](Self::fields), but each length-delimited field is built
-    /// by `handler` instead of copying into a `Vec<u8>` ([`VecLenPayload`]).
+    /// by `handler` instead of [`VecLenPayload`].
     ///
-    /// `handler` receives the Len body **by value** (`remaining()` at entry is
-    /// the payload length). Return [`Ok`](Result::Ok)`(payload)` with any type
-    /// `L` in [`FieldValue::Len`]. After it returns, leftover body bytes are
-    /// discarded so the parent sits at the field boundary. Return
-    /// [`Err`](Result::Err) to fail that field (leftover is still discarded
-    /// first). Do not try to move the `LenBody` out of the closure (HRTB).
+    /// Takes a closure for argument-type inference; it implements
+    /// [`LenHandler`] via the blanket. For a custom [`LenHandler`] type, use
+    /// [`fields_handler`](Self::fields_handler). The body is passed **by
+    /// value** (`remaining()` at entry is the payload length). After return,
+    /// leftover body bytes are discarded. Do not move the `LenBody` out
+    /// (HRTB).
     ///
     /// Non-Len wire types never call `handler`.
     #[inline]
     pub fn fields_with<L, F>(self, handler: F) -> FieldIter<'a, R, Self, F>
     where
         F: for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>,
+    {
+        self.fields_handler(handler)
+    }
+
+    /// Like [`fields_with`](Self::fields_with), but accepts any [`LenHandler`]
+    /// (including [`VecLenPayload`] and custom types).
+    #[inline]
+    pub fn fields_handler<F>(self, handler: F) -> FieldIter<'a, R, Self, F>
+    where
+        F: LenHandler<R>,
     {
         FieldIter {
             body: self,
@@ -241,9 +251,9 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
     /// [`Drop`] writes leftover into a local slot), unused body bytes are
     /// discarded. Other wire types do not call `handler`.
     #[inline]
-    fn parse_field_with<L, F>(&mut self, handler: &mut F) -> Result<Field<L>>
+    fn parse_field_with<F>(&mut self, handler: &mut F) -> Result<Field<F::Payload>>
     where
-        F: for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>,
+        F: LenHandler<R>,
     {
         let tag = WireCursor::read_tag(self)?;
         let value = match tag.wire_type {
@@ -256,7 +266,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
                     return Err(ProtobufError::UnexpectedEof);
                 }
                 let mut left = 0;
-                let result = handler(tag.field_number, self.scope(length, &mut left));
+                let result = handler.handle(tag.field_number, self.scope(length, &mut left));
                 // `LenBody` Drop wrote unread count into `left`.
                 discard_reader_bytes(self.reader, left)?;
                 match result {
@@ -381,28 +391,62 @@ fn discard_reader_bytes<R: Read + ?Sized>(reader: &mut R, mut left: u32) -> Resu
     Ok(())
 }
 
-/// Default Len handler for [`ReadExtProtobuf::read_protobuf_fields`]: copy each
-/// body into a new `Vec<u8>`.
+/// Builds a Len field payload from a scoped [`LenBody`].
 ///
-/// Custom handlers are ordinary
-/// `FnMut(FieldNumber, LenBody<'_, R>) -> Result<L>` closures passed to
-/// [`ReadExtProtobuf::read_protobuf_fields_with`] — there is no separate handler
-/// trait on the public API. The body is already scoped to the Len length
-/// (`remaining()` at entry). After the closure returns, unused body bytes are
-/// discarded by the library before the next field.
+/// Used by [`FieldIter`]. Closures
+/// `FnMut(FieldNumber, LenBody<'_, R>) -> Result<L>` implement this via a
+/// blanket impl. [`VecLenPayload`] is the default for
+/// [`ReadExtProtobuf::read_protobuf_fields`] / [`LenBody::fields`].
+pub trait LenHandler<R: ?Sized> {
+    /// Payload stored in [`FieldValue::Len`].
+    type Payload;
+
+    /// Consume the Len body (by value) into a payload.
+    ///
+    /// `body.remaining()` at entry is the payload length. After return, the
+    /// library discards any unread body bytes.
+    fn handle(
+        &mut self,
+        field_number: FieldNumber,
+        body: LenBody<'_, R>,
+    ) -> Result<Self::Payload>;
+}
+
+impl<R, L, F> LenHandler<R> for F
+where
+    R: Read + ?Sized,
+    F: for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>,
+{
+    type Payload = L;
+
+    #[inline]
+    fn handle(
+        &mut self,
+        field_number: FieldNumber,
+        body: LenBody<'_, R>,
+    ) -> Result<Self::Payload> {
+        self(field_number, body)
+    }
+}
+
+/// Default [`LenHandler`]: copy each Len body into a new `Vec<u8>`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct VecLenPayload;
 
-/// Copy one Len body into a `Vec<u8>` (used by [`VecLenPayload`]).
-#[inline]
-fn copy_len_to_vec<R: Read + ?Sized>(
-    _field_number: FieldNumber,
-    body: LenBody<'_, R>,
-) -> Result<Vec<u8>> {
-    let len = body.remaining();
-    let mut buf = vec![0u8; len as usize];
-    body.into_read().read_exact(&mut buf)?;
-    Ok(buf)
+impl<R: Read + ?Sized> LenHandler<R> for VecLenPayload {
+    type Payload = Vec<u8>;
+
+    #[inline]
+    fn handle(
+        &mut self,
+        _field_number: FieldNumber,
+        body: LenBody<'_, R>,
+    ) -> Result<Self::Payload> {
+        let len = body.remaining();
+        let mut buf = vec![0u8; len as usize];
+        body.into_read().read_exact(&mut buf)?;
+        Ok(buf)
+    }
 }
 
 impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
@@ -527,28 +571,13 @@ where
     }
 }
 
-impl<'a, R, T> Iterator for FieldIter<'a, R, T, VecLenPayload>
+impl<'a, R, T, F> Iterator for FieldIter<'a, R, T, F>
 where
     R: Read + ?Sized,
     T: AsRef<LenBody<'a, R>> + AsMut<LenBody<'a, R>>,
+    F: LenHandler<R>,
 {
-    type Item = Result<Field<Vec<u8>>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.body.as_ref().remaining() == 0 {
-            return None;
-        }
-        Some(self.body.as_mut().parse_field_with(&mut copy_len_to_vec))
-    }
-}
-
-impl<'a, R, T, L, F> Iterator for FieldIter<'a, R, T, F>
-where
-    R: Read + ?Sized,
-    T: AsRef<LenBody<'a, R>> + AsMut<LenBody<'a, R>>,
-    F: for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>,
-{
-    type Item = Result<Field<L>>;
+    type Item = Result<Field<F::Payload>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.body.as_ref().remaining() == 0 {
@@ -568,9 +597,7 @@ where
 /// Each method takes an explicit message byte budget `len` (`u32`). Length-delimited
 /// payloads default to `Vec<u8>` via [`VecLenPayload`].
 /// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
-/// supplies a custom
-/// `FnMut(FieldNumber, LenBody<'_, Self>) -> Result<L>`
-/// (field number, Len body by value → payload).
+/// takes any [`LenHandler`] (closures implement it via blanket).
 /// It does not provide semantic interpretation - that is the caller's responsibility.
 ///
 /// # Example
@@ -620,13 +647,12 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
     ///
-    /// `handler` is called once for each length-delimited field with the field
-    /// number and a [`LenBody`] **by value** (`remaining()` at entry is the
-    /// payload length; HRTB so the body cannot escape). Return
-    /// [`Ok`](Result::Ok)`(payload)` with any payload type `L`. After the
-    /// closure returns, unused body bytes are discarded so the parent cursor is
-    /// at the field boundary. Return [`Err`](Result::Err) to fail the field
-    /// (body leftover is still discarded first).
+    /// `handler` is called once for each length-delimited field. Takes a
+    /// closure for argument-type inference ([`LenHandler`] via blanket). For a
+    /// custom [`LenHandler`] type, use
+    /// [`read_protobuf_fields_handler`](Self::read_protobuf_fields_handler).
+    /// The Len body is passed **by value** (`remaining()` at entry is the
+    /// payload length). After return, unused body bytes are discarded.
     ///
     /// Nested messages should call [`LenBody::fields`] /
     /// [`LenBody::fields_with`] on that body (consumes it; keeps `R` fixed).
@@ -664,6 +690,17 @@ pub trait ReadExtProtobuf: Read {
     where
         Self: Sized,
         F: for<'t> FnMut(FieldNumber, LenBody<'t, Self>) -> Result<L>;
+
+    /// Like [`read_protobuf_fields_with`](Self::read_protobuf_fields_with), but
+    /// accepts any [`LenHandler`].
+    fn read_protobuf_fields_handler<F>(
+        &mut self,
+        len: u32,
+        handler: F,
+    ) -> FieldIter<'_, Self, LenBody<'_, Self>, F>
+    where
+        Self: Sized,
+        F: LenHandler<Self>;
 }
 
 impl<R> ReadExtProtobuf for R
@@ -693,6 +730,18 @@ where
     where
         Self: Sized,
         F: for<'t> FnMut(FieldNumber, LenBody<'t, Self>) -> Result<L>,
+    {
+        self.read_protobuf_fields_handler(len, handler)
+    }
+
+    fn read_protobuf_fields_handler<F>(
+        &mut self,
+        len: u32,
+        handler: F,
+    ) -> FieldIter<'_, Self, LenBody<'_, Self>, F>
+    where
+        Self: Sized,
+        F: LenHandler<Self>,
     {
         debug_assert!(
             (len as usize) <= MAX_MESSAGE_SIZE,
