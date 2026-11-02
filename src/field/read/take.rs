@@ -61,12 +61,11 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
     /// Read and discard any unused [`remaining`](Self::remaining) bytes.
     #[inline]
     pub fn discard_remaining(&mut self) -> Result<()> {
-        let mut left = ::std::mem::take(&mut self.remaining);
         let mut buf = [0u8; 256];
-        while left > 0 {
-            let chunk = left.min(buf.len() as u32) as usize;
+        while self.remaining > 0 {
+            let chunk = self.remaining.min(buf.len() as u32) as usize;
             Read::read_exact(self.reader, &mut buf[..chunk])?;
-            left -= chunk as u32;
+            self.remaining -= chunk as u32;
         }
         Ok(())
     }
