@@ -10,10 +10,10 @@
 //! or as a [`Read`] with a `u32` `len` budget ([`ReadExtProtobuf`]).
 
 mod group;
-mod limited;
+mod take;
 mod slice;
 pub(crate) mod wire;
 
 pub use self::group::{GroupBody, until_group_ends};
-pub use self::limited::{FieldIterFromRead, FieldIterMut, ReadExtProtobuf, Take32, VecLenPayload};
+pub use self::take::{FieldIterFromRead, FieldIterMut, ReadExtProtobuf, Take32, VecLenPayload};
 pub use self::slice::{AsRefExtProtobuf, FieldIterFromSlice};
