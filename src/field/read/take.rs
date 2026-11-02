@@ -16,7 +16,7 @@ use crate::tag::Tag;
 use crate::varint::Varint;
 use crate::wire_format::{MAX_MESSAGE_SIZE, MAX_VARINT_BYTES, WireType};
 use crate::{ProtobufError, Result};
-use ::std::borrow::BorrowMut;
+use ::std::convert::{AsMut, AsRef};
 use ::std::io::{Read, Write};
 
 // ============================================================================
@@ -40,6 +40,20 @@ use ::std::io::{Read, Write};
 pub struct Take32<'a, R: ?Sized> {
     reader: &'a mut R,
     remaining: u32,
+}
+
+impl<'a, R: ?Sized> AsRef<Take32<'a, R>> for Take32<'a, R> {
+    #[inline]
+    fn as_ref(&self) -> &Take32<'a, R> {
+        self
+    }
+}
+
+impl<'a, R: ?Sized> AsMut<Take32<'a, R>> for Take32<'a, R> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut Take32<'a, R> {
+        self
+    }
 }
 
 impl<'a, R: Read + ?Sized> Take32<'a, R> {
@@ -266,8 +280,9 @@ impl<'a, R: Read + ?Sized> WireCursor for Take32<'a, R> {
 /// `T` is typically an owned [`Take32`] ([`FieldIterFromRead`], from
 /// [`ReadExtProtobuf::read_protobuf_fields`]) or `&mut Take32`
 /// ([`FieldIterMut`], from [`Take32::fields`] / [`fields_with`](Take32::fields_with)).
-/// Bound with [`BorrowMut`]`<Take32<'a, R>>` so both holders share one iterator
-/// type (`BorrowMut` blankets `T` and `&mut T`; [`AsMut`] does not).
+/// Bound with [`AsRef`] / [`AsMut`]`<Take32<'a, R>>` so both holders share one
+/// iterator type. [`Take32`] implements those for itself; `&mut Take32` picks
+/// them up through the standard library blanket over `T: AsMut` / `AsRef`.
 ///
 /// Consumes the wire bytes of each field it has advanced over (including unread
 /// Len body bytes discarded after the handler). With a borrowed take, fields
@@ -288,7 +303,7 @@ pub type FieldIterMut<'s, 'a, R, F = VecLenPayload> = FieldIter<'a, R, &'s mut T
 impl<'a, R, T, F> FieldIter<'a, R, T, F>
 where
     R: Read + ?Sized,
-    T: BorrowMut<Take32<'a, R>>,
+    T: AsRef<Take32<'a, R>> + AsMut<Take32<'a, R>>,
 {
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
@@ -303,7 +318,7 @@ where
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        WireCursor::skip_until(self.take.borrow_mut(), pred)
+        WireCursor::skip_until(self.take.as_mut(), pred)
     }
 
     /// Iterate fields until the matching end-group for `field_number`.
@@ -332,29 +347,29 @@ where
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
-        WireCursor::copy_until(self.take.borrow_mut(), pred, out)
+        WireCursor::copy_until(self.take.as_mut(), pred, out)
     }
 
     /// Bytes still allowed in this iterator's budget.
     #[inline]
     pub fn remaining(&self) -> u32 {
-        self.take.borrow().remaining()
+        self.take.as_ref().remaining()
     }
 }
 
 impl<'a, R, T> Iterator for FieldIter<'a, R, T, VecLenPayload>
 where
     R: Read + ?Sized,
-    T: BorrowMut<Take32<'a, R>>,
+    T: AsRef<Take32<'a, R>> + AsMut<Take32<'a, R>>,
 {
     type Item = Result<Field<Vec<u8>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.take.borrow().remaining() == 0 {
+        if self.take.as_ref().remaining() == 0 {
             return None;
         }
         Some(parse_protobuf_field_with(
-            self.take.borrow_mut(),
+            self.take.as_mut(),
             &mut copy_len_to_vec,
         ))
     }
@@ -363,17 +378,17 @@ where
 impl<'a, R, T, L, F> Iterator for FieldIter<'a, R, T, F>
 where
     R: Read + ?Sized,
-    T: BorrowMut<Take32<'a, R>>,
+    T: AsRef<Take32<'a, R>> + AsMut<Take32<'a, R>>,
     F: for<'t> FnMut(FieldNumber, &mut Take32<'t, R>) -> Result<L>,
 {
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.take.borrow().remaining() == 0 {
+        if self.take.as_ref().remaining() == 0 {
             return None;
         }
         Some(parse_protobuf_field_with(
-            self.take.borrow_mut(),
+            self.take.as_mut(),
             &mut self.handler,
         ))
     }
