@@ -41,8 +41,9 @@ use ::std::io::{Read, Write};
 ///
 /// Not a [`Read`] adapter — [`ReadExtProtobuf`] / [`ReadExtVarint`] /
 /// [`ReadExtTag`] do not apply; use inherent [`read`](Self::read) /
-/// [`read_exact`](Self::read_exact), consuming [`varints`](Self::varints), and
-/// [`fields`](Self::fields)*.
+/// [`read_exact`](Self::read_exact), consuming packed
+/// [`varints`](Self::varints) / [`fixed32s`](Self::fixed32s) /
+/// [`fixed64s`](Self::fixed64s), and [`fields`](Self::fields)*.
 ///
 /// # Contract
 ///
@@ -169,6 +170,26 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         VarintIterFromLenBody { body: self }
     }
 
+    /// Iterate packed `I32` values from this body (consumes `self`).
+    ///
+    /// Each item is four little-endian wire bytes (`fixed32` / `sfixed32` /
+    /// `float`). Soft-stops when remaining is exhausted; a partial trailing
+    /// element is [`ProtobufError::UnexpectedEof`].
+    #[inline]
+    pub fn fixed32s(self) -> FixedIterFromLenBody<'a, R, 4> {
+        FixedIterFromLenBody { body: self }
+    }
+
+    /// Iterate packed `I64` values from this body (consumes `self`).
+    ///
+    /// Each item is eight little-endian wire bytes (`fixed64` / `sfixed64` /
+    /// `double`). Soft-stops when remaining is exhausted; a partial trailing
+    /// element is [`ProtobufError::UnexpectedEof`].
+    #[inline]
+    pub fn fixed64s(self) -> FixedIterFromLenBody<'a, R, 8> {
+        FixedIterFromLenBody { body: self }
+    }
+
     /// Child body of exactly `n` bytes (prepaid).
     ///
     /// Charges `n` against this body immediately. On child [`Drop`], leftover
@@ -251,6 +272,28 @@ impl<'a, R: Read + ?Sized> Iterator for VarintIterFromLenBody<'a, R> {
                 .read_varint_with_raw(&mut [0u8; MAX_VARINT_BYTES])
                 .map(|(v, _)| v),
         )
+    }
+}
+
+/// Iterator of packed fixed-width values from a consumed [`LenBody`].
+///
+/// Returned by [`LenBody::fixed32s`] (`N = 4`) and [`LenBody::fixed64s`]
+/// (`N = 8`). Soft-stops at body end; a partial trailing element is
+/// [`ProtobufError::UnexpectedEof`].
+pub struct FixedIterFromLenBody<'a, R: ?Sized, const N: usize> {
+    body: LenBody<'a, R>,
+}
+
+impl<'a, R: Read + ?Sized, const N: usize> Iterator for FixedIterFromLenBody<'a, R, N> {
+    type Item = Result<[u8; N]>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.body.remaining() == 0 {
+            return None;
+        }
+        let mut bytes = [0u8; N];
+        Some(self.body.read_exact(&mut bytes).map(|()| bytes))
     }
 }
 
@@ -738,6 +781,71 @@ mod tests {
             panic!("expected len");
         };
         assert_eq!(vals, &[1, 150, 2]);
+    }
+
+    #[test]
+    fn packed_fixed32s_via_fixed32s_iterator() {
+        use super::ReadExtProtobuf;
+        use crate::FieldValue;
+        use ::std::io::Cursor;
+
+        // field 1, Len, packed fixed32 1, 2
+        let message = [
+            0x0A, 0x08, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+        ];
+        let fields: Vec<_> = Cursor::new(message)
+            .read_protobuf_fields_with(message.len() as u32, |_n, body| {
+                body.fixed32s()
+                    .map(|v| v.map(u32::from_le_bytes))
+                    .collect::<crate::Result<Vec<_>>>()
+            })
+            .collect::<crate::Result<_>>()
+            .unwrap();
+        let FieldValue::Len(vals) = &fields[0].value else {
+            panic!("expected len");
+        };
+        assert_eq!(vals, &[1, 2]);
+    }
+
+    #[test]
+    fn packed_fixed64s_via_fixed64s_iterator() {
+        use super::ReadExtProtobuf;
+        use crate::FieldValue;
+        use ::std::io::Cursor;
+
+        // field 1, Len, packed fixed64 1, 2
+        let message = [
+            0x0A, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        let fields: Vec<_> = Cursor::new(message)
+            .read_protobuf_fields_with(message.len() as u32, |_n, body| {
+                body.fixed64s()
+                    .map(|v| v.map(u64::from_le_bytes))
+                    .collect::<crate::Result<Vec<_>>>()
+            })
+            .collect::<crate::Result<_>>()
+            .unwrap();
+        let FieldValue::Len(vals) = &fields[0].value else {
+            panic!("expected len");
+        };
+        assert_eq!(vals, &[1, 2]);
+    }
+
+    #[test]
+    fn packed_fixed32s_truncated_mid_element_is_error() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        // Len claims 5 bytes for fixed32 elements → trailing partial
+        let message = [0x0A, 0x05, 0x01, 0x00, 0x00, 0x00, 0x02];
+        let err = Cursor::new(message)
+            .read_protobuf_fields_with(message.len() as u32, |_n, body| {
+                body.fixed32s().collect::<crate::Result<Vec<_>>>()
+            })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap_err();
+        assert!(matches!(err, crate::ProtobufError::UnexpectedEof));
     }
 
     #[test]
