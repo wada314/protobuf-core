@@ -259,6 +259,45 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             _marker: ::std::marker::PhantomData,
         }
     }
+
+    /// Parse one protobuf field from this body.
+    ///
+    /// When the field is length-delimited, `handler` runs once with a child
+    /// [`LenBody`] by value for the payload length. After it returns (and
+    /// [`Drop`] writes leftover into a local slot), unused body bytes are
+    /// discarded. Other wire types do not call `handler`.
+    #[inline]
+    fn parse_field_with<L, F>(&mut self, handler: &mut F) -> Result<Field<L>>
+    where
+        F: for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>,
+    {
+        let tag = WireCursor::read_tag(self)?;
+        let value = match tag.wire_type {
+            WireType::Varint => FieldValue::Varint(WireCursor::read_varint(self)?),
+            WireType::Int32 => FieldValue::I32(WireCursor::read_fixed(self)?),
+            WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(self)?),
+            WireType::Len => {
+                let length = WireCursor::read_varint(self)?.try_to_uint32()?;
+                if length > self.remaining() {
+                    return Err(ProtobufError::UnexpectedEof);
+                }
+                let mut left = 0;
+                let result = handler(tag.field_number, self.scope(length, &mut left));
+                // `LenBody` Drop wrote unread count into `left`.
+                discard_reader_bytes(self.reader, left)?;
+                match result {
+                    Ok(payload) => FieldValue::Len(payload),
+                    Err(err) => return Err(err),
+                }
+            }
+            WireType::SGroup => FieldValue::SGroup,
+            WireType::EGroup => FieldValue::EGroup,
+        };
+        Ok(Field {
+            field_number: tag.field_number,
+            value,
+        })
+    }
 }
 
 /// [`Read`] view of a consumed [`LenBody`].
@@ -363,45 +402,6 @@ fn copy_len_to_vec<R: Read + ?Sized>(
     let mut buf = vec![0u8; len as usize];
     body.read_exact(&mut buf)?;
     Ok(buf)
-}
-
-/// Parse one protobuf field from `body`.
-///
-/// When the field is length-delimited, `handler` runs once with a child
-/// [`LenBody`] by value for the payload length. After it returns (and
-/// [`LenBody`] [`Drop`] writes leftover into a local slot), unused body bytes
-/// are discarded. Other wire types do not call `handler`.
-fn parse_protobuf_field_with<R, L, F>(body: &mut LenBody<'_, R>, handler: &mut F) -> Result<Field<L>>
-where
-    R: Read + ?Sized,
-    F: for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>,
-{
-    let tag = WireCursor::read_tag(body)?;
-    let value = match tag.wire_type {
-        WireType::Varint => FieldValue::Varint(WireCursor::read_varint(body)?),
-        WireType::Int32 => FieldValue::I32(WireCursor::read_fixed(body)?),
-        WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(body)?),
-        WireType::Len => {
-            let length = WireCursor::read_varint(body)?.try_to_uint32()?;
-            if length > body.remaining() {
-                return Err(ProtobufError::UnexpectedEof);
-            }
-            let mut left = 0;
-            let result = handler(tag.field_number, body.scope(length, &mut left));
-            // `LenBody` Drop wrote unread count into `left`.
-            discard_reader_bytes(body.reader, left)?;
-            match result {
-                Ok(payload) => FieldValue::Len(payload),
-                Err(err) => return Err(err),
-            }
-        }
-        WireType::SGroup => FieldValue::SGroup,
-        WireType::EGroup => FieldValue::EGroup,
-    };
-    Ok(Field {
-        field_number: tag.field_number,
-        value,
-    })
 }
 
 impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
@@ -537,10 +537,7 @@ where
         if self.body.as_ref().remaining() == 0 {
             return None;
         }
-        Some(parse_protobuf_field_with(
-            self.body.as_mut(),
-            &mut copy_len_to_vec,
-        ))
+        Some(self.body.as_mut().parse_field_with(&mut copy_len_to_vec))
     }
 }
 
@@ -556,10 +553,7 @@ where
         if self.body.as_ref().remaining() == 0 {
             return None;
         }
-        Some(parse_protobuf_field_with(
-            self.body.as_mut(),
-            &mut self.handler,
-        ))
+        Some(self.body.as_mut().parse_field_with(&mut self.handler))
     }
 }
 
