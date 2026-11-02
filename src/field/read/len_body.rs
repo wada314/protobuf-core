@@ -262,31 +262,31 @@ fn copy_len_to_vec<R: Read + ?Sized>(
     Ok(buf)
 }
 
-/// Parse one protobuf field from `read`.
+/// Parse one protobuf field from `body`.
 ///
-/// When the field is length-delimited, `handler` runs once with a [`LenBody`]
-/// by value for the payload length. After it returns (and [`LenBody`] [`Drop`]
-/// writes leftover into a local slot), unused body bytes are discarded. Other
-/// wire types do not call `handler`.
-fn parse_protobuf_field_with<R, L, F>(read: &mut LenBody<'_, R>, handler: &mut F) -> Result<Field<L>>
+/// When the field is length-delimited, `handler` runs once with a child
+/// [`LenBody`] by value for the payload length. After it returns (and
+/// [`LenBody`] [`Drop`] writes leftover into a local slot), unused body bytes
+/// are discarded. Other wire types do not call `handler`.
+fn parse_protobuf_field_with<R, L, F>(body: &mut LenBody<'_, R>, handler: &mut F) -> Result<Field<L>>
 where
     R: Read + ?Sized,
     F: for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>,
 {
-    let tag = WireCursor::read_tag(read)?;
+    let tag = WireCursor::read_tag(body)?;
     let value = match tag.wire_type {
-        WireType::Varint => FieldValue::Varint(WireCursor::read_varint(read)?),
-        WireType::Int32 => FieldValue::I32(WireCursor::read_fixed(read)?),
-        WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(read)?),
+        WireType::Varint => FieldValue::Varint(WireCursor::read_varint(body)?),
+        WireType::Int32 => FieldValue::I32(WireCursor::read_fixed(body)?),
+        WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(body)?),
         WireType::Len => {
-            let length = WireCursor::read_varint(read)?.try_to_uint32()?;
-            if length > read.remaining() {
+            let length = WireCursor::read_varint(body)?.try_to_uint32()?;
+            if length > body.remaining() {
                 return Err(ProtobufError::UnexpectedEof);
             }
             let mut left = 0;
-            let result = handler(tag.field_number, read.scope(length, &mut left));
+            let result = handler(tag.field_number, body.scope(length, &mut left));
             // `LenBody` Drop wrote unread count into `left`.
-            discard_reader_bytes(read.reader, left)?;
+            discard_reader_bytes(body.reader, left)?;
             match result {
                 Ok(payload) => FieldValue::Len(payload),
                 Err(err) => return Err(err),
