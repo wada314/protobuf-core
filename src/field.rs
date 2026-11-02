@@ -30,8 +30,8 @@ pub(crate) mod read;
 pub(crate) mod write;
 
 pub use self::read::{
-    AsRefExtProtobuf, FieldIterFromRead, FieldIterFromSlice, FieldIterMut, GroupBody, ReadExtProtobuf, Take32,
-    VecLenPayload, until_group_ends,
+    AsRefExtProtobuf, FieldIter, FieldIterFromRead, FieldIterFromSlice, FieldIterMut, GroupBody,
+    ReadExtProtobuf, Take32, VecLenPayload, until_group_ends,
 };
 pub use self::write::WriteExtProtobuf;
 
