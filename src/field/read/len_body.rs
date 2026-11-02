@@ -102,32 +102,6 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         self.remaining
     }
 
-    /// Read up to `buf.len()` bytes, capped by [`remaining`](Self::remaining).
-    ///
-    /// Returns `Ok(0)` when remaining is exhausted (soft end).
-    #[inline]
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let max = buf.len().min(self.remaining as usize);
-        if max == 0 {
-            return Ok(0);
-        }
-        let n = self.reader.read(&mut buf[..max])?;
-        self.remaining -= n as u32;
-        Ok(n)
-    }
-
-    /// Read exactly `buf.len()` bytes from this body.
-    #[inline]
-    fn read_exact(&mut self, mut buf: &mut [u8]) -> Result<()> {
-        while !buf.is_empty() {
-            match self.read(buf)? {
-                0 => return Err(ProtobufError::UnexpectedEof),
-                n => buf = &mut buf[n..],
-            }
-        }
-        Ok(())
-    }
-
     /// Decode one varint from this body (empty body is
     /// [`ProtobufError::UnexpectedEof`]).
     #[inline]
@@ -143,7 +117,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
                 return Err(ProtobufError::UnexpectedEof);
             }
             let mut byte = [0u8; 1];
-            self.read_exact(&mut byte)?;
+            read_body_exact(self, &mut byte)?;
             buf[n] = byte[0];
             n += 1;
             let value = (byte[0] & VARINT_PAYLOAD_MASK) as u64;
@@ -364,8 +338,35 @@ impl<'a, R: Read + ?Sized, const N: usize> Iterator for FixedIterFromLenBody<'a,
             return None;
         }
         let mut bytes = [0u8; N];
-        Some(self.body.read_exact(&mut bytes).map(|()| bytes))
+        Some(read_body_exact(&mut self.body, &mut bytes).map(|()| bytes))
     }
+}
+
+/// Read up to `buf.len()` bytes from `body`, capped by remaining (soft `Ok(0)`).
+#[inline]
+fn read_body<R: Read + ?Sized>(body: &mut LenBody<'_, R>, buf: &mut [u8]) -> Result<usize> {
+    let max = buf.len().min(body.remaining as usize);
+    if max == 0 {
+        return Ok(0);
+    }
+    let n = body.reader.read(&mut buf[..max])?;
+    body.remaining -= n as u32;
+    Ok(n)
+}
+
+/// Read exactly `buf.len()` bytes from `body`.
+#[inline]
+fn read_body_exact<R: Read + ?Sized>(
+    body: &mut LenBody<'_, R>,
+    mut buf: &mut [u8],
+) -> Result<()> {
+    while !buf.is_empty() {
+        match read_body(body, buf)? {
+            0 => return Err(ProtobufError::UnexpectedEof),
+            n => buf = &mut buf[n..],
+        }
+    }
+    Ok(())
 }
 
 /// Discard exactly `left` bytes from `reader`.
@@ -396,11 +397,11 @@ pub struct VecLenPayload;
 #[inline]
 fn copy_len_to_vec<R: Read + ?Sized>(
     _field_number: FieldNumber,
-    mut body: LenBody<'_, R>,
+    body: LenBody<'_, R>,
 ) -> Result<Vec<u8>> {
     let len = body.remaining();
     let mut buf = vec![0u8; len as usize];
-    body.read_exact(&mut buf)?;
+    body.into_read().read_exact(&mut buf)?;
     Ok(buf)
 }
 
@@ -421,7 +422,7 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
     #[inline]
     fn read_fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
         let mut bytes = [0u8; N];
-        self.read_exact(&mut bytes)?;
+        read_body_exact(self, &mut bytes)?;
         Ok(bytes)
     }
 
@@ -430,7 +431,7 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
         let mut buf = [0u8; 256];
         while length > 0 {
             let n = length.min(buf.len() as u32) as usize;
-            self.read_exact(&mut buf[..n])?;
+            read_body_exact(self, &mut buf[..n])?;
             length -= n as u32;
         }
         Ok(())
@@ -442,7 +443,7 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
         let mut buf = [0u8; 256];
         while left > 0 {
             let n = left.min(buf.len() as u32) as usize;
-            self.read_exact(&mut buf[..n])?;
+            read_body_exact(self, &mut buf[..n])?;
             out.write_all(&buf[..n])?;
             left -= n as u32;
         }
@@ -720,9 +721,9 @@ mod tests {
         {
             let mut fields = reader.read_protobuf_fields_with(
                 message.len() as u32,
-                |_n, mut body| -> crate::Result<u8> {
+                |_n, body| -> crate::Result<u8> {
                     let mut one = [0u8; 1];
-                    body.read_exact(&mut one)?;
+                    body.into_read().read_exact(&mut one)?;
                     Ok(one[0])
                 },
             );
@@ -747,9 +748,9 @@ mod tests {
         {
             let mut fields = reader.read_protobuf_fields_with(
                 message.len() as u32,
-                |_n, mut body| -> crate::Result<u8> {
+                |_n, body| -> crate::Result<u8> {
                     let mut one = [0u8; 1];
-                    body.read_exact(&mut one)?;
+                    body.into_read().read_exact(&mut one)?;
                     Ok(one[0])
                 },
             );
@@ -771,10 +772,10 @@ mod tests {
         assert_eq!(take.remaining(), 5);
         let mut left = 0;
         {
-            let mut child = take.scope(3, &mut left);
+            let child = take.scope(3, &mut left);
             assert_eq!(child.remaining(), 3);
             let mut one = [0u8; 1];
-            child.read_exact(&mut one).unwrap();
+            child.into_read().read_exact(&mut one).unwrap();
             assert_eq!(one, [1]);
         }
         // Parent charged 3; Drop reported 2 unread in the child.
@@ -1060,8 +1061,8 @@ mod tests {
         use crate::ProtobufError;
         use ::std::io::Cursor;
 
-        // Mid-field truncation with budget == input.len(): LenBody::read_exact
-        // maps short reads to UnexpectedEof (fixed-width and Len alike).
+        // Mid-field truncation with budget == input.len(): body reads map
+        // short fixed/Len payloads to UnexpectedEof.
         let fixed_err = Cursor::new([0x0D, 0x01, 0x02, 0x03])
             .read_protobuf_fields(4)
             .next()
@@ -1273,11 +1274,11 @@ mod len_payload {
         let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
 
         let from_read = Cursor::new(message)
-            .read_protobuf_fields_with(message.len() as u32, |_n, mut r| {
+            .read_protobuf_fields_with(message.len() as u32, |_n, r| {
                 let body_len = r.remaining();
                 let n = body_len as usize;
                 let mut data = vec![0xAB; n + 4];
-                r.read_exact(&mut data[..n])?;
+                r.into_read().read_exact(&mut data[..n])?;
                 Ok(Spare { data })
             })
             .collect::<crate::Result<Vec<_>>>()
@@ -1291,9 +1292,9 @@ mod len_payload {
         // drained so the following varint field is still visible.
         let message = [0x0A, 0x03, b'H', b'e', b'l', 0x10, 0x01];
         let fields = Cursor::new(message)
-            .read_protobuf_fields_with(message.len() as u32, |_n, mut r| {
+            .read_protobuf_fields_with(message.len() as u32, |_n, r| {
                 let mut one = [0u8; 1];
-                r.read_exact(&mut one)?;
+                r.into_read().read_exact(&mut one)?;
                 Ok(one[0])
             })
             .collect::<crate::Result<Vec<_>>>()
@@ -1332,17 +1333,17 @@ mod len_payload {
 
         fn decode_len<R: Read + ?Sized>(
             field_number: FieldNumber,
-            mut reader: LenBody<'_, R>,
+            reader: LenBody<'_, R>,
         ) -> crate::Result<LenValue> {
             let len = reader.remaining();
             match field_number.as_u32() {
                 2 => {
                     let mut child = Child::default();
                     let nested = reader
-                        .fields_with(|_n, mut inner| {
+                        .fields_with(|_n, inner| {
                             let inner_len = inner.remaining();
                             let mut bytes = vec![0u8; inner_len as usize];
-                            inner.read_exact(&mut bytes)?;
+                            inner.into_read().read_exact(&mut bytes)?;
                             Ok(LenValue::Bytes(bytes))
                         })
                         .collect::<crate::Result<Vec<_>>>()?;
@@ -1357,7 +1358,7 @@ mod len_payload {
                 }
                 _ => {
                     let mut bytes = vec![0u8; len as usize];
-                    reader.read_exact(&mut bytes)?;
+                    reader.into_read().read_exact(&mut bytes)?;
                     Ok(LenValue::Bytes(bytes))
                 }
             }
@@ -1429,13 +1430,13 @@ mod len_payload {
 
     fn parse_node<R: Read + ?Sized>(body: LenBody<'_, R>) -> crate::Result<Node> {
         let mut node = Node::default();
-        for field in body.fields_with(|n, mut nested| {
+        for field in body.fields_with(|n, nested| {
             let body_len = nested.remaining();
             match n.as_u32() {
                 2 => Ok(NodeLen::Child(parse_node(nested)?)),
                 _ => {
                     let mut buf = vec![0u8; body_len as usize];
-                    nested.read_exact(&mut buf)?;
+                    nested.into_read().read_exact(&mut buf)?;
                     Ok(NodeLen::Skip(buf))
                 }
             }
@@ -1463,13 +1464,13 @@ mod len_payload {
     /// [`LenBody::fields_with`] / [`parse_node`].
     fn parse_node_from_read<R: Read>(reader: &mut R, len: u32) -> crate::Result<Node> {
         let mut node = Node::default();
-        for field in reader.read_protobuf_fields_with(len, |n, mut body| {
+        for field in reader.read_protobuf_fields_with(len, |n, body| {
             let body_len = body.remaining();
             match n.as_u32() {
                 2 => Ok(NodeLen::Child(parse_node(body)?)),
                 _ => {
                     let mut buf = vec![0u8; body_len as usize];
-                    body.read_exact(&mut buf)?;
+                    body.into_read().read_exact(&mut buf)?;
                     Ok(NodeLen::Skip(buf))
                 }
             }
@@ -1551,13 +1552,13 @@ mod len_payload {
 
     fn parse_a<R: Read + ?Sized>(body: LenBody<'_, R>) -> crate::Result<TypeA> {
         let mut msg = TypeA::default();
-        for field in body.fields_with(|n, mut nested| {
+        for field in body.fields_with(|n, nested| {
             let body_len = nested.remaining();
             match n.as_u32() {
                 2 => Ok(ALen::B(parse_b(nested)?)),
                 _ => {
                     let mut buf = vec![0u8; body_len as usize];
-                    nested.read_exact(&mut buf)?;
+                    nested.into_read().read_exact(&mut buf)?;
                     Ok(ALen::Skip(buf))
                 }
             }
@@ -1583,13 +1584,13 @@ mod len_payload {
 
     fn parse_b<R: Read + ?Sized>(body: LenBody<'_, R>) -> crate::Result<TypeB> {
         let mut msg = TypeB::default();
-        for field in body.fields_with(|n, mut nested| {
+        for field in body.fields_with(|n, nested| {
             let body_len = nested.remaining();
             match n.as_u32() {
                 2 => Ok(BLen::A(parse_a(nested)?)),
                 _ => {
                     let mut buf = vec![0u8; body_len as usize];
-                    nested.read_exact(&mut buf)?;
+                    nested.into_read().read_exact(&mut buf)?;
                     Ok(BLen::Skip(buf))
                 }
             }
@@ -1615,13 +1616,13 @@ mod len_payload {
 
     fn parse_a_from_read<R: Read>(reader: &mut R, len: u32) -> crate::Result<TypeA> {
         let mut msg = TypeA::default();
-        for field in reader.read_protobuf_fields_with(len, |n, mut body| {
+        for field in reader.read_protobuf_fields_with(len, |n, body| {
             let body_len = body.remaining();
             match n.as_u32() {
                 2 => Ok(ALen::B(parse_b(body)?)),
                 _ => {
                     let mut buf = vec![0u8; body_len as usize];
-                    body.read_exact(&mut buf)?;
+                    body.into_read().read_exact(&mut buf)?;
                     Ok(ALen::Skip(buf))
                 }
             }
