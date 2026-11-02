@@ -41,7 +41,7 @@ use ::std::io::{Read, Write};
 ///
 /// Not a [`Read`] adapter — [`ReadExtProtobuf`] / [`ReadExtVarint`] /
 /// [`ReadExtTag`] do not apply; use inherent [`read`](Self::read) /
-/// [`read_exact`](Self::read_exact) / [`read_varint`](Self::read_varint) and
+/// [`read_exact`](Self::read_exact), consuming [`varints`](Self::varints), and
 /// [`fields`](Self::fields)*.
 ///
 /// # Contract
@@ -128,16 +128,10 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         Ok(())
     }
 
-    /// Decode one varint from this body (empty budget is
+    /// Decode one varint from this body (empty body is
     /// [`ProtobufError::UnexpectedEof`]).
     #[inline]
-    pub fn read_varint(&mut self) -> Result<Varint> {
-        Ok(self.read_varint_with_raw(&mut [0u8; MAX_VARINT_BYTES])?.0)
-    }
-
-    /// Decode one varint, copying its wire bytes into `buf`.
-    #[inline]
-    pub fn read_varint_with_raw<'b>(
+    fn read_varint_with_raw<'b>(
         &'b mut self,
         buf: &'b mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'b [u8])> {
@@ -163,6 +157,16 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             shift += 7;
         }
         Err(ProtobufError::VarintTooLong)
+    }
+
+    /// Iterate packed varints from this body (consumes `self`).
+    ///
+    /// Soft-stops when [`remaining`](Self::remaining) is exhausted. A truncated
+    /// mid-varint is [`ProtobufError::UnexpectedEof`]. While this iterator is
+    /// live, the body cannot be reinterpreted as fields or raw bytes.
+    #[inline]
+    pub fn varints(self) -> VarintIterFromLenBody<'a, R> {
+        VarintIterFromLenBody { body: self }
     }
 
     /// Child body of exactly `n` bytes (prepaid).
@@ -223,6 +227,30 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             handler,
             _marker: ::std::marker::PhantomData,
         }
+    }
+}
+
+/// Iterator of packed varints from a consumed [`LenBody`].
+///
+/// Returned by [`LenBody::varints`]. Soft-stops at body end; truncated
+/// mid-varint is [`ProtobufError::UnexpectedEof`].
+pub struct VarintIterFromLenBody<'a, R: ?Sized> {
+    body: LenBody<'a, R>,
+}
+
+impl<'a, R: Read + ?Sized> Iterator for VarintIterFromLenBody<'a, R> {
+    type Item = Result<Varint>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.body.remaining() == 0 {
+            return None;
+        }
+        Some(
+            self.body
+                .read_varint_with_raw(&mut [0u8; MAX_VARINT_BYTES])
+                .map(|(v, _)| v),
+        )
     }
 }
 
@@ -688,6 +716,28 @@ mod tests {
         assert_eq!(take.remaining(), 2);
         drop(take);
         assert_eq!(data.position(), 3);
+    }
+
+    #[test]
+    fn packed_varints_via_varints_iterator() {
+        use super::ReadExtProtobuf;
+        use crate::FieldValue;
+        use ::std::io::Cursor;
+
+        // field 1, Len, packed varints 1, 150, 2
+        let message = [0x0A, 0x04, 0x01, 0x96, 0x01, 0x02];
+        let fields: Vec<_> = Cursor::new(message)
+            .read_protobuf_fields_with(message.len() as u32, |_n, body| {
+                body.varints()
+                    .map(|v| v.map(|x| x.to_uint64()))
+                    .collect::<crate::Result<Vec<_>>>()
+            })
+            .collect::<crate::Result<_>>()
+            .unwrap();
+        let FieldValue::Len(vals) = &fields[0].value else {
+            panic!("expected len");
+        };
+        assert_eq!(vals, &[1, 150, 2]);
     }
 
     #[test]
