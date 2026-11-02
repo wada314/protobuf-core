@@ -5,10 +5,11 @@
 //! [`remaining`](LenBody::remaining). The handler signature is HRTB so the body
 //! cannot escape the closure; on [`Drop`] any leftover count is written back to
 //! a caller slot, then the library discards those bytes (Len fields) or leaves
-//! them on the underlying reader (top-level). It does **not** implement
-//! [`Read`] — re-enter with [`LenBody::fields`] /
-//! [`fields_with`](LenBody::fields_with), not [`ReadExtProtobuf`]. Top-level
-//! message `len` is expected to be `<= MAX_MESSAGE_SIZE`
+//! them on the underlying reader (top-level). [`LenBody`] itself does **not**
+//! implement [`Read`]; bytes/string copy uses consuming
+//! [`as_read`](LenBody::as_read), and nested decode uses
+//! [`fields`](LenBody::fields) / [`fields_with`](LenBody::fields_with).
+//! Top-level message `len` is expected to be `<= MAX_MESSAGE_SIZE`
 //! ([`crate::MAX_MESSAGE_SIZE`], 2 GiB); that is `debug_assert`ed at the entrance.
 
 use super::group::GroupBody;
@@ -39,9 +40,9 @@ use ::std::io::{Read, Write};
 /// [`fields`](Self::fields) / [`fields_with`](Self::fields_with) (consuming
 /// `self`).
 ///
-/// Not a [`Read`] adapter — [`ReadExtProtobuf`] / [`ReadExtVarint`] /
-/// [`ReadExtTag`] do not apply; use inherent [`read`](Self::read) /
-/// [`read_exact`](Self::read_exact), consuming packed
+/// Does not implement [`Read`] itself (so field/varint extension traits do not
+/// attach directly). Modes that consume `self`:
+/// [`as_read`](Self::as_read) (bytes/string via [`LenBodyRead`]),
 /// [`varints`](Self::varints) / [`fixed32s`](Self::fixed32s) /
 /// [`fixed64s`](Self::fixed64s), and [`fields`](Self::fields)*.
 ///
@@ -103,11 +104,9 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
 
     /// Read up to `buf.len()` bytes, capped by [`remaining`](Self::remaining).
     ///
-    /// Returns `Ok(0)` when remaining is exhausted (soft end). Underlying
-    /// reader EOF before remaining is spent is still `Ok(0)` here; prefer
-    /// [`read_exact`](Self::read_exact) when a fixed count is required.
+    /// Returns `Ok(0)` when remaining is exhausted (soft end).
     #[inline]
-    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         let max = buf.len().min(self.remaining as usize);
         if max == 0 {
             return Ok(0);
@@ -119,7 +118,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
 
     /// Read exactly `buf.len()` bytes from this body.
     #[inline]
-    pub fn read_exact(&mut self, mut buf: &mut [u8]) -> Result<()> {
+    fn read_exact(&mut self, mut buf: &mut [u8]) -> Result<()> {
         while !buf.is_empty() {
             match self.read(buf)? {
                 0 => return Err(ProtobufError::UnexpectedEof),
@@ -158,6 +157,17 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             shift += 7;
         }
         Err(ProtobufError::VarintTooLong)
+    }
+
+    /// Treat this body as a byte stream (consumes `self`).
+    ///
+    /// For `string` / `bytes` (or any opaque Len payload) copy via
+    /// [`Read`](std::io::Read) helpers (`read_exact`, `read_to_end`, …). Soft
+    /// EOF when [`remaining`](Self::remaining) is exhausted. Prefer
+    /// [`fields`](Self::fields)* / packed iterators for structured decode.
+    #[inline]
+    pub fn as_read(self) -> LenBodyRead<'a, R> {
+        LenBodyRead { body: self }
     }
 
     /// Iterate packed varints from this body (consumes `self`).
@@ -248,6 +258,28 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             handler,
             _marker: ::std::marker::PhantomData,
         }
+    }
+}
+
+/// [`Read`] view of a consumed [`LenBody`].
+///
+/// Returned by [`LenBody::as_read`]. Caps reads by the body's remaining
+/// budget (soft `Ok(0)` when exhausted), like a `u32`-bounded
+/// [`std::io::Take`].
+pub struct LenBodyRead<'a, R: ?Sized> {
+    body: LenBody<'a, R>,
+}
+
+impl<'a, R: Read + ?Sized> Read for LenBodyRead<'a, R> {
+    #[inline]
+    fn read(&mut self, buf: &mut [u8]) -> ::std::io::Result<usize> {
+        let max = buf.len().min(self.body.remaining as usize);
+        if max == 0 {
+            return Ok(0);
+        }
+        let n = self.body.reader.read(&mut buf[..max])?;
+        self.body.remaining -= n as u32;
+        Ok(n)
     }
 }
 
@@ -603,9 +635,7 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// Nested messages should call [`LenBody::fields`] /
     /// [`LenBody::fields_with`] on that body (consumes it; keeps `R` fixed).
-    /// [`LenBody`] does not implement [`Read`], so
-    /// [`read_protobuf_fields`](Self::read_protobuf_fields) is not available
-    /// on it.
+    /// For `bytes` / `string`, use [`LenBody::as_read`] and [`Read`] helpers.
     ///
     /// # Examples
     ///
@@ -613,14 +643,15 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// ```
     /// use ::protobuf_core::{FieldValue, ReadExtProtobuf};
+    /// use ::std::io::Read;
     ///
     /// let mut data = &[0x0A, 0x03, b'H', b'e', b'l'][..];
     /// let len = data.len() as u32;
     /// let fields: Vec<_> = data
-    ///     .read_protobuf_fields_with(len, |_n, mut body| {
+    ///     .read_protobuf_fields_with(len, |_n, body| {
     ///         let body_len = body.remaining();
     ///         let mut buf = vec![0u8; body_len as usize];
-    ///         body.read_exact(&mut buf)?;
+    ///         body.as_read().read_exact(&mut buf)?;
     ///         Ok(buf.into_boxed_slice())
     ///     })
     ///     .collect::<Result<Vec<_>, _>>()
@@ -1067,11 +1098,11 @@ mod len_payload {
 
     fn read_bytes_payload<R: Read + ?Sized>(
         _n: FieldNumber,
-        mut reader: LenBody<'_, R>,
+        reader: LenBody<'_, R>,
     ) -> crate::Result<Bytes> {
         let len = reader.remaining();
         let mut data = vec![0; len as usize];
-        reader.read_exact(&mut data)?;
+        reader.as_read().read_exact(&mut data)?;
         Ok(Bytes(data))
     }
 
@@ -1123,10 +1154,10 @@ mod len_payload {
 
     fn assert_box(message: &[u8], expected: &[u8]) {
         let from_read = Cursor::new(message.to_vec())
-            .read_protobuf_fields_with(message.len() as u32, |_n, mut r| {
+            .read_protobuf_fields_with(message.len() as u32, |_n, r| {
                 let body_len = r.remaining();
                 let mut buf = vec![0u8; body_len as usize];
-                r.read_exact(&mut buf)?;
+                r.as_read().read_exact(&mut buf)?;
                 Ok(buf.into_boxed_slice())
             })
             .next()
@@ -1179,10 +1210,10 @@ mod len_payload {
         let len = message.len() as u32;
 
         let from_read = Cursor::new(message)
-            .read_protobuf_fields_with(len, |_n, mut r| {
+            .read_protobuf_fields_with(len, |_n, r| {
                 let body_len = r.remaining();
                 let mut data = vec![0; body_len as usize];
-                r.read_exact(&mut data)?;
+                r.as_read().read_exact(&mut data)?;
                 Ok(Tagged { id, data })
             })
             .collect::<crate::Result<Vec<_>>>()
