@@ -132,9 +132,8 @@ pub(crate) mod varint;
 pub(crate) mod wire_format;
 
 pub use self::field::{
-    AsRefExtProtobuf, Field, FieldIter, FieldIterFromRead, FieldIterFromSlice, FieldIterMut,
-    FieldValue, GroupBody, ReadExtProtobuf, Take32, VecLenPayload, WriteExtProtobuf,
-    until_group_ends,
+    AsRefExtProtobuf, Field, FieldIter, FieldIterFromSlice, FieldValue, GroupBody,
+    ReadExtProtobuf, Take32, VecLenPayload, WriteExtProtobuf, until_group_ends,
 };
 pub use self::field_number::FieldNumber;
 pub use self::tag::{ReadExtTag, Tag};

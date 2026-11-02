@@ -15,7 +15,5 @@ mod slice;
 pub(crate) mod wire;
 
 pub use self::group::{GroupBody, until_group_ends};
-pub use self::take::{
-    FieldIter, FieldIterFromRead, FieldIterMut, ReadExtProtobuf, Take32, VecLenPayload,
-};
+pub use self::take::{FieldIter, ReadExtProtobuf, Take32, VecLenPayload};
 pub use self::slice::{AsRefExtProtobuf, FieldIterFromSlice};

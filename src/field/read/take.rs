@@ -111,7 +111,7 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
     /// advanced over (including unread Len body bytes discarded after the
     /// handler). Fields never yielded leave their bytes in this take.
     #[inline]
-    pub fn fields(&mut self) -> FieldIterMut<'_, 'a, R, VecLenPayload> {
+    pub fn fields(&mut self) -> FieldIter<'a, R, &mut Self, VecLenPayload> {
         FieldIter {
             take: self,
             handler: VecLenPayload,
@@ -137,7 +137,7 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
     pub fn fields_with<'s, L, F>(
         &'s mut self,
         handler: F,
-    ) -> FieldIterMut<'s, 'a, R, F>
+    ) -> FieldIter<'a, R, &'s mut Self, F>
     where
         F: for<'t> FnMut(FieldNumber, &mut Take32<'t, R>) -> Result<L>,
     {
@@ -277,12 +277,12 @@ impl<'a, R: Read + ?Sized> WireCursor for Take32<'a, R> {
 
 /// Iterator for reading raw protobuf fields from a [`Take32`] holder.
 ///
-/// `T` is typically an owned [`Take32`] ([`FieldIterFromRead`], from
-/// [`ReadExtProtobuf::read_protobuf_fields`]) or `&mut Take32`
-/// ([`FieldIterMut`], from [`Take32::fields`] / [`fields_with`](Take32::fields_with)).
-/// Bound with [`AsRef`] / [`AsMut`]`<Take32<'a, R>>` so both holders share one
-/// iterator type. [`Take32`] implements those for itself; `&mut Take32` picks
-/// them up through the standard library blanket over `T: AsMut` / `AsRef`.
+/// `T` is typically an owned [`Take32`] (from
+/// [`ReadExtProtobuf::read_protobuf_fields`]) or `&mut Take32` (from
+/// [`Take32::fields`] / [`fields_with`](Take32::fields_with)). Bound with
+/// [`AsRef`] / [`AsMut`]`<Take32<'a, R>>` so both holders share one iterator
+/// type. [`Take32`] implements those for itself; `&mut Take32` picks them up
+/// through the standard library blanket over `T: AsMut` / `AsRef`.
 ///
 /// Consumes the wire bytes of each field it has advanced over (including unread
 /// Len body bytes discarded after the handler). With a borrowed take, fields
@@ -292,13 +292,6 @@ pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
     handler: F,
     _marker: ::std::marker::PhantomData<&'a mut R>,
 }
-
-/// Owned-[`Take32`] field iterator from [`ReadExtProtobuf::read_protobuf_fields`].
-pub type FieldIterFromRead<'a, R, F = VecLenPayload> = FieldIter<'a, R, Take32<'a, R>, F>;
-
-/// Borrowed-[`Take32`] field iterator from [`Take32::fields`] /
-/// [`Take32::fields_with`].
-pub type FieldIterMut<'s, 'a, R, F = VecLenPayload> = FieldIter<'a, R, &'s mut Take32<'a, R>, F>;
 
 impl<'a, R, T, F> FieldIter<'a, R, T, F>
 where
@@ -444,7 +437,7 @@ pub trait ReadExtProtobuf: Read {
     /// Returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
     /// Length-delimited payloads are `Vec<u8>`.
-    fn read_protobuf_fields(&mut self, len: u32) -> FieldIterFromRead<'_, Self>
+    fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, Take32<'_, Self>>
     where
         Self: Sized;
 
@@ -497,7 +490,7 @@ pub trait ReadExtProtobuf: Read {
         &mut self,
         len: u32,
         handler: F,
-    ) -> FieldIterFromRead<'_, Self, F>
+    ) -> FieldIter<'_, Self, Take32<'_, Self>, F>
     where
         Self: Sized,
         F: for<'t> FnMut(FieldNumber, &mut Take32<'t, Self>) -> Result<L>;
@@ -507,7 +500,7 @@ impl<R> ReadExtProtobuf for R
 where
     R: Read,
 {
-    fn read_protobuf_fields(&mut self, len: u32) -> FieldIterFromRead<'_, Self>
+    fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, Take32<'_, Self>>
     where
         Self: Sized,
     {
@@ -526,7 +519,7 @@ where
         &mut self,
         len: u32,
         handler: F,
-    ) -> FieldIterFromRead<'_, Self, F>
+    ) -> FieldIter<'_, Self, Take32<'_, Self>, F>
     where
         Self: Sized,
         F: for<'t> FnMut(FieldNumber, &mut Take32<'t, Self>) -> Result<L>,

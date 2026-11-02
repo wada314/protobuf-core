@@ -30,8 +30,8 @@ pub(crate) mod read;
 pub(crate) mod write;
 
 pub use self::read::{
-    AsRefExtProtobuf, FieldIter, FieldIterFromRead, FieldIterFromSlice, FieldIterMut, GroupBody,
-    ReadExtProtobuf, Take32, VecLenPayload, until_group_ends,
+    AsRefExtProtobuf, FieldIter, FieldIterFromSlice, GroupBody, ReadExtProtobuf, Take32,
+    VecLenPayload, until_group_ends,
 };
 pub use self::write::WriteExtProtobuf;
 
@@ -54,7 +54,7 @@ pub use self::write::WriteExtProtobuf;
 /// [`skip_until`](crate::FieldIterFromSlice::skip_until) +
 /// [`until_group_ends`](crate::until_group_ends), preserve it with
 /// [`take_until`](crate::FieldIterFromSlice::take_until) (slice) or
-/// [`copy_until`](crate::FieldIterFromRead::copy_until) (Read), parse the body
+/// [`copy_until`](crate::FieldIter::copy_until) (Read), parse the body
 /// with [`group_body`](crate::FieldIterFromSlice::group_body) /
 /// [`GroupBody`], or read nested fields until a matching `EGroup` before
 /// the next top-level field.

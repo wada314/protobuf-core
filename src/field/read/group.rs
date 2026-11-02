@@ -10,8 +10,8 @@ use crate::{ProtobufError, Result};
 /// the matching end-group tag is reached.
 ///
 /// Pass this to [`FieldIterFromSlice::skip_until`] /
-/// [`FieldIterFromRead::skip_until`] / [`FieldIterFromSlice::take_until`] /
-/// [`FieldIterFromRead::copy_until`] after the start-group tag for
+/// [`FieldIter::skip_until`] / [`FieldIterFromSlice::take_until`] /
+/// [`FieldIter::copy_until`] after the start-group tag for
 /// `field_number` has already been consumed. Nested groups are tracked with
 /// an explicit field-number stack inside the returned closure.
 ///
@@ -44,7 +44,7 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 /// Field-iterator adapter that stops at the matching end-group tag.
 ///
 /// Returned by [`FieldIterFromSlice::group_body`] /
-/// [`FieldIterFromRead::group_body`]. Call after the start-group tag for
+/// [`FieldIter::group_body`]. Call after the start-group tag for
 /// `field_number` has already been consumed.
 ///
 /// # Termination
