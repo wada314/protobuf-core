@@ -92,7 +92,9 @@ impl<'a, R: Read + ?Sized> Take32<'a, R> {
     }
 
     /// Iterate fields from this take (borrows `self`; does not create a new
-    /// [`Take32`]). Only consumes bytes the iterator actually reads.
+    /// [`Take32`]). Consumes the wire bytes of each field the iterator has
+    /// advanced over (including unread Len body bytes discarded after the
+    /// handler). Fields never yielded leave their bytes in this take.
     #[inline]
     pub fn fields(&mut self) -> FieldIterMut<'_, 'a, R, VecLenPayload> {
         FieldIterMut {
@@ -339,7 +341,9 @@ where
 /// Iterator for reading raw protobuf fields from a borrowed [`Take32`].
 ///
 /// Returned by [`Take32::fields`] / [`Take32::fields_with`]. Does not construct
-/// a new `Take32`; only bytes the iterator reads are consumed from the take.
+/// a new `Take32`. Consumes the wire bytes of each field it has advanced over
+/// (including unread Len body bytes discarded after the handler); fields never
+/// yielded leave their bytes in the borrowed take.
 pub struct FieldIterMut<'s, 't, R: ?Sized, F = VecLenPayload> {
     take: &'s mut Take32<'t, R>,
     handler: F,
