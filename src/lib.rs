@@ -91,9 +91,9 @@
 //!   (slices, arrays, etc.). The slice length is the bound (no extra `len` arg).
 //!   - Output: [`Field<&[u8]>`] — Len values are borrowed `&[u8]` slices (zero-copy)
 //! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types with an explicit
-//!   `u32` message byte budget `len` (via [`Budget32`])
+//!   `u32` message byte budget `len` (via [`LenBody`])
 //!   - Output: [`Field<Vec<u8>>`] by default, or [`Field<L>`] from a Len handler
-//!     `FnMut(FieldNumber, &mut Budget32<'_, R>) -> Result<L>`
+//!     `FnMut(FieldNumber, &mut LenBody<'_, R>) -> Result<L>`
 //!
 //! Field iterators expose `skip_until`, slice `take_until`, Read `copy_until`,
 //! and [`group_body`](FieldIterFromSlice::group_body) /
@@ -133,7 +133,7 @@ pub(crate) mod wire_format;
 
 pub use self::field::{
     AsRefExtProtobuf, Field, FieldIter, FieldIterFromSlice, FieldValue, GroupBody,
-    ReadExtProtobuf, Budget32, VecLenPayload, WriteExtProtobuf, until_group_ends,
+    ReadExtProtobuf, LenBody, VecLenPayload, WriteExtProtobuf, until_group_ends,
 };
 pub use self::field_number::FieldNumber;
 pub use self::tag::{ReadExtTag, Tag};

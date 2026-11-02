@@ -1,11 +1,12 @@
-//! Streaming field iteration bounded by [`Budget32`].
+//! Streaming field iteration over a [`LenBody`].
 //!
-//! [`Budget32`] is a `u32`-capped byte budget over `&mut R`. It does **not**
-//! implement [`Read`] — nested messages use [`Budget32::fields`] /
-//! [`fields_with`](Budget32::fields_with) / [`scope`](Budget32::scope), not
-//! [`ReadExtProtobuf`] (which would restack budgets). Protobuf message budgets
-//! passed to [`ReadExtProtobuf`] are expected to be `<= MAX_MESSAGE_SIZE`
-//! ([`crate::MAX_MESSAGE_SIZE`], 2 GiB); that is `debug_assert`ed at the entrance.
+//! [`LenBody`] is what Len handlers / nested message parsers receive: a view of
+//! the delimited payload (or top-level message) over `&mut R` with a `u32`
+//! [`remaining`](LenBody::remaining). It does **not** implement [`Read`] —
+//! re-enter with [`LenBody::fields`] / [`fields_with`](LenBody::fields_with) /
+//! [`scope`](LenBody::scope), not [`ReadExtProtobuf`]. Top-level message `len`
+//! is expected to be `<= MAX_MESSAGE_SIZE` ([`crate::MAX_MESSAGE_SIZE`], 2 GiB);
+//! that is `debug_assert`ed at the entrance.
 
 use super::group::GroupBody;
 use super::wire::WireCursor;
@@ -21,53 +22,54 @@ use ::std::convert::{AsMut, AsRef};
 use ::std::io::{Read, Write};
 
 // ============================================================================
-// Message budget via Budget32
+// Len / message body view
 // ============================================================================
 
-/// `u32`-capped byte budget over `&'a mut R` (not a [`Read`] adapter).
+/// Body of a length-delimited field (or the top-level message), over `&'a mut R`.
 ///
-/// Built only by [`ReadExtProtobuf::read_protobuf_fields`] (top-level) or
-/// [`scope`](Self::scope) (nested Len / prepaid slice). Nested Len handlers
-/// receive `&mut Budget32`; after the closure returns, the library
-/// [`discard_remaining`](Self::discard_remaining)s so the parent cursor sits at
-/// the field boundary. [`fields`](Self::fields) / [`fields_with`](Self::fields_with)
-/// borrow this budget — they do not construct another `Budget32`.
+/// This is the type Len handlers see: `FnMut(FieldNumber, &mut LenBody<'_, R>)`.
+/// [`remaining`](Self::remaining) at entry is the payload length. After the
+/// handler returns, the library [`discard_remaining`](Self::discard_remaining)s
+/// so the parent sits at the field boundary. Nested messages call
+/// [`fields`](Self::fields) / [`fields_with`](Self::fields_with) on this value
+/// (no new `LenBody` from those methods). Built only by
+/// [`ReadExtProtobuf::read_protobuf_fields`] (top-level) or [`scope`](Self::scope).
 ///
-/// Does not implement [`Read`], so [`ReadExtProtobuf`] / [`ReadExtVarint`] /
-/// [`ReadExtTag`] cannot be called on it; use inherent [`read`](Self::read) /
+/// Not a [`Read`] adapter — [`ReadExtProtobuf`] / [`ReadExtVarint`] /
+/// [`ReadExtTag`] do not apply; use inherent [`read`](Self::read) /
 /// [`read_exact`](Self::read_exact) / [`read_varint`](Self::read_varint) and
 /// [`fields`](Self::fields)*.
 ///
 /// # Contract
 ///
-/// `remaining()` is always `<= u32::MAX` by construction. Protobuf message
-/// budgets also stay `<= MAX_MESSAGE_SIZE` at [`ReadExtProtobuf`] entrances
+/// `remaining()` always fits in [`u32`] by construction. Top-level message
+/// lengths also stay `<= MAX_MESSAGE_SIZE` at [`ReadExtProtobuf`] entrances
 /// (`debug_assert`).
 ///
 /// [`ReadExtVarint`]: crate::ReadExtVarint
 /// [`ReadExtTag`]: crate::ReadExtTag
-pub struct Budget32<'a, R: ?Sized> {
+pub struct LenBody<'a, R: ?Sized> {
     reader: &'a mut R,
     remaining: u32,
 }
 
-impl<'a, R: ?Sized> AsRef<Budget32<'a, R>> for Budget32<'a, R> {
+impl<'a, R: ?Sized> AsRef<LenBody<'a, R>> for LenBody<'a, R> {
     #[inline]
-    fn as_ref(&self) -> &Budget32<'a, R> {
+    fn as_ref(&self) -> &LenBody<'a, R> {
         self
     }
 }
 
-impl<'a, R: ?Sized> AsMut<Budget32<'a, R>> for Budget32<'a, R> {
+impl<'a, R: ?Sized> AsMut<LenBody<'a, R>> for LenBody<'a, R> {
     #[inline]
-    fn as_mut(&mut self) -> &mut Budget32<'a, R> {
+    fn as_mut(&mut self) -> &mut LenBody<'a, R> {
         self
     }
 }
 
-impl<'a, R: Read + ?Sized> Budget32<'a, R> {
-    /// Crate-internal: top-level budget (unused bytes stay on the underlying
-    /// reader when this value is dropped).
+impl<'a, R: Read + ?Sized> LenBody<'a, R> {
+    /// Crate-internal: top-level message body (unused bytes stay on the
+    /// underlying reader when this value is dropped).
     #[inline]
     pub(crate) fn new(reader: &'a mut R, len: u32) -> Self {
         Self {
@@ -76,7 +78,7 @@ impl<'a, R: Read + ?Sized> Budget32<'a, R> {
         }
     }
 
-    /// Bytes still allowed under this budget.
+    /// Bytes still allowed in this body.
     #[inline]
     pub fn remaining(&self) -> u32 {
         self.remaining
@@ -84,8 +86,8 @@ impl<'a, R: Read + ?Sized> Budget32<'a, R> {
 
     /// Read up to `buf.len()` bytes, capped by [`remaining`](Self::remaining).
     ///
-    /// Returns `Ok(0)` when the budget is exhausted (soft end). Underlying
-    /// reader EOF before the budget is spent is still `Ok(0)` here; prefer
+    /// Returns `Ok(0)` when remaining is exhausted (soft end). Underlying
+    /// reader EOF before remaining is spent is still `Ok(0)` here; prefer
     /// [`read_exact`](Self::read_exact) when a fixed count is required.
     #[inline]
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
@@ -98,7 +100,7 @@ impl<'a, R: Read + ?Sized> Budget32<'a, R> {
         Ok(n)
     }
 
-    /// Read exactly `buf.len()` bytes from this budget.
+    /// Read exactly `buf.len()` bytes from this body.
     #[inline]
     pub fn read_exact(&mut self, mut buf: &mut [u8]) -> Result<()> {
         while !buf.is_empty() {
@@ -110,7 +112,7 @@ impl<'a, R: Read + ?Sized> Budget32<'a, R> {
         Ok(())
     }
 
-    /// Decode one varint from this budget (empty budget is
+    /// Decode one varint from this body (empty budget is
     /// [`ProtobufError::UnexpectedEof`]).
     #[inline]
     pub fn read_varint(&mut self) -> Result<Varint> {
@@ -160,33 +162,33 @@ impl<'a, R: Read + ?Sized> Budget32<'a, R> {
 
     /// Scoped body view of exactly `n` bytes (prepaid).
     ///
-    /// Charges `n` against this budget immediately. The returned child is
-    /// `Budget32<'b, R>` for the **same** root `R`. Unused child bytes are left
+    /// Charges `n` against this body immediately. The returned child is
+    /// `LenBody<'b, R>` for the **same** root `R`. Unused child bytes are left
     /// for the caller (or for Len parse's post-handler
     /// [`discard_remaining`](Self::discard_remaining)). Panics if
     /// `n > remaining()`.
     #[inline]
-    pub fn scope<'b>(&'b mut self, n: u32) -> Budget32<'b, R> {
+    pub fn scope<'b>(&'b mut self, n: u32) -> LenBody<'b, R> {
         assert!(
             n <= self.remaining,
-            "Budget32::scope length {n} exceeds remaining {}",
+            "LenBody::scope length {n} exceeds remaining {}",
             self.remaining
         );
         self.remaining -= n;
-        Budget32 {
+        LenBody {
             reader: &mut *self.reader,
             remaining: n,
         }
     }
 
-    /// Iterate fields from this budget (borrows `self`; does not create a new
-    /// [`Budget32`]). Consumes the wire bytes of each field the iterator has
+    /// Iterate fields from this body (borrows `self`; does not create a new
+    /// [`LenBody`]). Consumes the wire bytes of each field the iterator has
     /// advanced over (including unread Len body bytes discarded after the
-    /// handler). Fields never yielded leave their bytes in this budget.
+    /// handler). Fields never yielded leave their bytes in this body.
     #[inline]
     pub fn fields(&mut self) -> FieldIter<'a, R, &mut Self, VecLenPayload> {
         FieldIter {
-            budget: self,
+            body: self,
             handler: VecLenPayload,
             _marker: ::std::marker::PhantomData,
         }
@@ -196,11 +198,11 @@ impl<'a, R: Read + ?Sized> Budget32<'a, R> {
     /// by `handler` instead of copying into a `Vec<u8>` ([`VecLenPayload`]).
     ///
     /// `handler` is invoked once per Len field with the field number and a
-    /// [`scope`](Self::scope)d body budget (`remaining()` at entry is the
+    /// [`scope`](Self::scope)d body (`remaining()` at entry is the
     /// payload length). Return [`Ok`](Result::Ok)`(payload)` with any type `L`
     /// you want in [`FieldValue::Len`] — for example a nested message parsed
     /// via another `fields_with`, a custom buffer, or `()` when skipping. After
-    /// it returns, unused body bytes are discarded so this budget sits at the
+    /// it returns, unused body bytes are discarded so this body sits at the
     /// field boundary. Return [`Err`](Result::Err) to fail that field (leftover
     /// body is still discarded first).
     ///
@@ -212,10 +214,10 @@ impl<'a, R: Read + ?Sized> Budget32<'a, R> {
         handler: F,
     ) -> FieldIter<'a, R, &'s mut Self, F>
     where
-        F: for<'t> FnMut(FieldNumber, &mut Budget32<'t, R>) -> Result<L>,
+        F: for<'t> FnMut(FieldNumber, &mut LenBody<'t, R>) -> Result<L>,
     {
         FieldIter {
-            budget: self,
+            body: self,
             handler,
             _marker: ::std::marker::PhantomData,
         }
@@ -226,9 +228,9 @@ impl<'a, R: Read + ?Sized> Budget32<'a, R> {
 /// body into a new `Vec<u8>`.
 ///
 /// Custom handlers are ordinary
-/// `FnMut(FieldNumber, &mut Budget32<'_, R>) -> Result<L>` closures passed to
+/// `FnMut(FieldNumber, &mut LenBody<'_, R>) -> Result<L>` closures passed to
 /// [`ReadExtProtobuf::read_protobuf_fields_with`] — there is no separate handler
-/// trait on the public API. The body budget is already scoped to the Len length
+/// trait on the public API. The body is already scoped to the Len length
 /// (`remaining()` at entry). After the closure returns, unused body bytes are
 /// discarded by the library before the next field.
 #[derive(Debug, Default, Clone, Copy)]
@@ -238,7 +240,7 @@ pub struct VecLenPayload;
 #[inline]
 fn copy_len_to_vec<R: Read + ?Sized>(
     _field_number: FieldNumber,
-    reader: &mut Budget32<'_, R>,
+    reader: &mut LenBody<'_, R>,
 ) -> Result<Vec<u8>> {
     let len = reader.remaining();
     let mut buf = vec![0u8; len as usize];
@@ -249,13 +251,13 @@ fn copy_len_to_vec<R: Read + ?Sized>(
 /// Parse one protobuf field from `read`.
 ///
 /// When the field is length-delimited, `handler` runs once on a
-/// [`Budget32::scope`] of the payload length (`&mut` body). After the handler
-/// returns, unused body bytes are [`Budget32::discard_remaining`]ed. Other wire
+/// [`LenBody::scope`] of the payload length (`&mut` body). After the handler
+/// returns, unused body bytes are [`LenBody::discard_remaining`]ed. Other wire
 /// types do not call `handler`.
-fn parse_protobuf_field_with<R, L, F>(read: &mut Budget32<'_, R>, handler: &mut F) -> Result<Field<L>>
+fn parse_protobuf_field_with<R, L, F>(read: &mut LenBody<'_, R>, handler: &mut F) -> Result<Field<L>>
 where
     R: Read + ?Sized,
-    F: for<'t> FnMut(FieldNumber, &mut Budget32<'t, R>) -> Result<L>,
+    F: for<'t> FnMut(FieldNumber, &mut LenBody<'t, R>) -> Result<L>,
 {
     let tag = WireCursor::read_tag(read)?;
     let value = match tag.wire_type {
@@ -285,7 +287,7 @@ where
     })
 }
 
-impl<'a, R: Read + ?Sized> WireCursor for Budget32<'a, R> {
+impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
     #[inline]
     fn remaining(&self) -> u32 {
         self.remaining
@@ -296,7 +298,7 @@ impl<'a, R: Read + ?Sized> WireCursor for Budget32<'a, R> {
         &'b mut self,
         buf: &'b mut [u8; MAX_VARINT_BYTES],
     ) -> Result<(Varint, &'b [u8])> {
-        Budget32::read_varint_with_raw(self, buf)
+        LenBody::read_varint_with_raw(self, buf)
     }
 
     #[inline]
@@ -334,20 +336,20 @@ impl<'a, R: Read + ?Sized> WireCursor for Budget32<'a, R> {
 // Field iterators
 // ============================================================================
 
-/// Iterator for reading raw protobuf fields from a [`Budget32`] holder.
+/// Iterator for reading raw protobuf fields from a [`LenBody`] holder.
 ///
-/// `T` is typically an owned [`Budget32`] (from
-/// [`ReadExtProtobuf::read_protobuf_fields`]) or `&mut Budget32` (from
-/// [`Budget32::fields`] / [`fields_with`](Budget32::fields_with)). Bound with
-/// [`AsRef`] / [`AsMut`]`<Budget32<'a, R>>` so both holders share one iterator
-/// type. [`Budget32`] implements those for itself; `&mut Budget32` picks them up
+/// `T` is typically an owned [`LenBody`] (from
+/// [`ReadExtProtobuf::read_protobuf_fields`]) or `&mut LenBody` (from
+/// [`LenBody::fields`] / [`fields_with`](LenBody::fields_with)). Bound with
+/// [`AsRef`] / [`AsMut`]`<LenBody<'a, R>>` so both holders share one iterator
+/// type. [`LenBody`] implements those for itself; `&mut LenBody` picks them up
 /// through the standard library blanket over `T: AsMut` / `AsRef`.
 ///
 /// Consumes the wire bytes of each field it has advanced over (including unread
-/// Len body bytes discarded after the handler). With a borrowed budget, fields
-/// never yielded leave their bytes in that budget.
+/// Len body bytes discarded after the handler). With a borrowed LenBody, fields
+/// never yielded leave their bytes in that LenBody.
 pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
-    budget: T,
+    body: T,
     handler: F,
     _marker: ::std::marker::PhantomData<&'a mut R>,
 }
@@ -355,7 +357,7 @@ pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
 impl<'a, R, T, F> FieldIter<'a, R, T, F>
 where
     R: Read + ?Sized,
-    T: AsRef<Budget32<'a, R>> + AsMut<Budget32<'a, R>>,
+    T: AsRef<LenBody<'a, R>> + AsMut<LenBody<'a, R>>,
 {
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
@@ -370,7 +372,7 @@ where
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        WireCursor::skip_until(self.budget.as_mut(), pred)
+        WireCursor::skip_until(self.body.as_mut(), pred)
     }
 
     /// Iterate fields until the matching end-group for `field_number`.
@@ -399,29 +401,29 @@ where
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
-        WireCursor::copy_until(self.budget.as_mut(), pred, out)
+        WireCursor::copy_until(self.body.as_mut(), pred, out)
     }
 
     /// Bytes still allowed in this iterator's budget.
     #[inline]
     pub fn remaining(&self) -> u32 {
-        self.budget.as_ref().remaining()
+        self.body.as_ref().remaining()
     }
 }
 
 impl<'a, R, T> Iterator for FieldIter<'a, R, T, VecLenPayload>
 where
     R: Read + ?Sized,
-    T: AsRef<Budget32<'a, R>> + AsMut<Budget32<'a, R>>,
+    T: AsRef<LenBody<'a, R>> + AsMut<LenBody<'a, R>>,
 {
     type Item = Result<Field<Vec<u8>>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.budget.as_ref().remaining() == 0 {
+        if self.body.as_ref().remaining() == 0 {
             return None;
         }
         Some(parse_protobuf_field_with(
-            self.budget.as_mut(),
+            self.body.as_mut(),
             &mut copy_len_to_vec,
         ))
     }
@@ -430,17 +432,17 @@ where
 impl<'a, R, T, L, F> Iterator for FieldIter<'a, R, T, F>
 where
     R: Read + ?Sized,
-    T: AsRef<Budget32<'a, R>> + AsMut<Budget32<'a, R>>,
-    F: for<'t> FnMut(FieldNumber, &mut Budget32<'t, R>) -> Result<L>,
+    T: AsRef<LenBody<'a, R>> + AsMut<LenBody<'a, R>>,
+    F: for<'t> FnMut(FieldNumber, &mut LenBody<'t, R>) -> Result<L>,
 {
     type Item = Result<Field<L>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.budget.as_ref().remaining() == 0 {
+        if self.body.as_ref().remaining() == 0 {
             return None;
         }
         Some(parse_protobuf_field_with(
-            self.budget.as_mut(),
+            self.body.as_mut(),
             &mut self.handler,
         ))
     }
@@ -457,8 +459,8 @@ where
 /// payloads default to `Vec<u8>` via [`VecLenPayload`].
 /// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
 /// supplies a custom
-/// `FnMut(FieldNumber, &mut Budget32<'_, Self>) -> Result<L>`
-/// (field number, scoped body budget → payload).
+/// `FnMut(FieldNumber, &mut LenBody<'_, Self>) -> Result<L>`
+/// (field number, scoped LenBody → payload).
 /// It does not provide semantic interpretation - that is the caller's responsibility.
 ///
 /// # Example
@@ -496,7 +498,7 @@ pub trait ReadExtProtobuf: Read {
     /// Returns an iterator that yields fields sequentially.
     /// Each field contains raw bytes that must be interpreted by the caller.
     /// Length-delimited payloads are `Vec<u8>`.
-    fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, Budget32<'_, Self>>
+    fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, LenBody<'_, Self>>
     where
         Self: Sized;
 
@@ -509,15 +511,15 @@ pub trait ReadExtProtobuf: Read {
     /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
     ///
     /// `handler` is called once for each length-delimited field with the field
-    /// number and a [`Budget32::scope`] of the Len body (`remaining()` at entry is
+    /// number and a [`LenBody::scope`] of the Len body (`remaining()` at entry is
     /// the payload length). Return [`Ok`](Result::Ok)`(payload)` with any payload
     /// type `L`. After the closure returns, unused body bytes are discarded so
     /// the parent cursor is at the field boundary. Return [`Err`](Result::Err)
     /// to fail the field (body leftover is still discarded first).
     ///
-    /// Nested messages should call [`Budget32::fields`] /
-    /// [`Budget32::fields_with`] on that body (keeps `R` fixed).
-    /// [`Budget32`] does not implement [`Read`], so
+    /// Nested messages should call [`LenBody::fields`] /
+    /// [`LenBody::fields_with`] on that body (keeps `R` fixed).
+    /// [`LenBody`] does not implement [`Read`], so
     /// [`read_protobuf_fields`](Self::read_protobuf_fields) is not available
     /// on it.
     ///
@@ -548,17 +550,17 @@ pub trait ReadExtProtobuf: Read {
         &mut self,
         len: u32,
         handler: F,
-    ) -> FieldIter<'_, Self, Budget32<'_, Self>, F>
+    ) -> FieldIter<'_, Self, LenBody<'_, Self>, F>
     where
         Self: Sized,
-        F: for<'t> FnMut(FieldNumber, &mut Budget32<'t, Self>) -> Result<L>;
+        F: for<'t> FnMut(FieldNumber, &mut LenBody<'t, Self>) -> Result<L>;
 }
 
 impl<R> ReadExtProtobuf for R
 where
     R: Read,
 {
-    fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, Budget32<'_, Self>>
+    fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, LenBody<'_, Self>>
     where
         Self: Sized,
     {
@@ -567,7 +569,7 @@ where
             "message budget exceeds MAX_MESSAGE_SIZE"
         );
         FieldIter {
-            budget: Budget32::new(self, len),
+            body: LenBody::new(self, len),
             handler: VecLenPayload,
             _marker: ::std::marker::PhantomData,
         }
@@ -577,17 +579,17 @@ where
         &mut self,
         len: u32,
         handler: F,
-    ) -> FieldIter<'_, Self, Budget32<'_, Self>, F>
+    ) -> FieldIter<'_, Self, LenBody<'_, Self>, F>
     where
         Self: Sized,
-        F: for<'t> FnMut(FieldNumber, &mut Budget32<'t, Self>) -> Result<L>,
+        F: for<'t> FnMut(FieldNumber, &mut LenBody<'t, Self>) -> Result<L>,
     {
         debug_assert!(
             (len as usize) <= MAX_MESSAGE_SIZE,
             "message budget exceeds MAX_MESSAGE_SIZE"
         );
         FieldIter {
-            budget: Budget32::new(self, len),
+            body: LenBody::new(self, len),
             handler,
             _marker: ::std::marker::PhantomData,
         }
@@ -652,11 +654,11 @@ mod tests {
 
     #[test]
     fn scope_charges_parent_budget_without_restore() {
-        use super::Budget32;
+        use super::LenBody;
         use ::std::io::Cursor;
 
         let mut data = Cursor::new(vec![1u8, 2, 3, 4, 5]);
-        let mut take = Budget32::new(&mut data, 5);
+        let mut take = LenBody::new(&mut data, 5);
         assert_eq!(take.remaining(), 5);
         {
             let child = take.scope(3);
@@ -855,7 +857,7 @@ mod tests {
         use crate::ProtobufError;
         use ::std::io::Cursor;
 
-        // Mid-field truncation with budget == input.len(): Budget32::read_exact
+        // Mid-field truncation with budget == input.len(): LenBody::read_exact
         // maps short reads to UnexpectedEof (fixed-width and Len alike).
         let fixed_err = Cursor::new([0x0D, 0x01, 0x02, 0x03])
             .read_protobuf_fields(4)
@@ -875,7 +877,7 @@ mod tests {
 
 #[cfg(test)]
 mod len_payload {
-    use super::{Budget32, ReadExtProtobuf};
+    use super::{LenBody, ReadExtProtobuf};
     use crate::varint::Varint;
     use crate::{Field, FieldNumber, FieldValue, ProtobufError};
     use ::std::io::{Cursor, Read};
@@ -887,7 +889,7 @@ mod len_payload {
 
     fn read_bytes_payload<R: Read + ?Sized>(
         _n: FieldNumber,
-        reader: &mut Budget32<'_, R>,
+        reader: &mut LenBody<'_, R>,
     ) -> crate::Result<Bytes> {
         let len = reader.remaining();
         let mut data = vec![0; len as usize];
@@ -1127,7 +1129,7 @@ mod len_payload {
 
         fn decode_len<R: Read + ?Sized>(
             field_number: FieldNumber,
-            reader: &mut Budget32<'_, R>,
+            reader: &mut LenBody<'_, R>,
         ) -> crate::Result<LenValue> {
             let len = reader.remaining();
             match field_number.as_u32() {
@@ -1208,8 +1210,8 @@ mod len_payload {
 
     /// Dummy self-recursive message: `Node { value, child: Option<Node> }`.
     ///
-    /// Decode walks a fixed root `R` via [`Budget32::fields_with`]: each nested
-    /// Len body is already a `Budget32<'_, R>` from [`Budget32::scope`], so
+    /// Decode walks a fixed root `R` via [`LenBody::fields_with`]: each nested
+    /// Len body is already a `LenBody<'_, R>` from [`LenBody::scope`], so
     /// monomorphization does not stack `&mut` layers.
     #[derive(Debug, Default, PartialEq)]
     struct Node {
@@ -1223,7 +1225,7 @@ mod len_payload {
         Skip(Vec<u8>),
     }
 
-    fn parse_node<R: Read + ?Sized>(take: &mut Budget32<'_, R>) -> crate::Result<Node> {
+    fn parse_node<R: Read + ?Sized>(take: &mut LenBody<'_, R>) -> crate::Result<Node> {
         let mut node = Node::default();
         for field in take.fields_with(|n, body| {
             let body_len = body.remaining();
@@ -1256,7 +1258,7 @@ mod len_payload {
     }
 
     /// Top-level entrance via [`ReadExtProtobuf`]; nested bodies stay on
-    /// [`Budget32::fields_with`] / [`parse_node`].
+    /// [`LenBody::fields_with`] / [`parse_node`].
     fn parse_node_from_read<R: Read>(reader: &mut R, len: u32) -> crate::Result<Node> {
         let mut node = Node::default();
         for field in reader.read_protobuf_fields_with(len, |n, body| {
@@ -1290,7 +1292,7 @@ mod len_payload {
     }
 
     #[test]
-    fn direct_recursive_node_via_budget32_scope() {
+    fn direct_recursive_node_via_len_body_scope() {
         // Node { value=1, child: Node { value=2, child: Node { value=3 } } }
         // Node3 = 08 03
         // Node2 = 08 02 | 12 02 | 08 03
@@ -1320,7 +1322,7 @@ mod len_payload {
     }
 
     /// Indirect recursion: `TypeA` contains `TypeB`, `TypeB` contains `TypeA`.
-    /// Same fixed-`R` [`Budget32`] pattern as [`direct_recursive_node_via_budget32_scope`].
+    /// Same fixed-`R` [`LenBody`] pattern as [`direct_recursive_node_via_len_body_scope`].
     #[derive(Debug, Default, PartialEq)]
     struct TypeA {
         mark: u64,
@@ -1345,7 +1347,7 @@ mod len_payload {
         Skip(Vec<u8>),
     }
 
-    fn parse_a<R: Read + ?Sized>(take: &mut Budget32<'_, R>) -> crate::Result<TypeA> {
+    fn parse_a<R: Read + ?Sized>(take: &mut LenBody<'_, R>) -> crate::Result<TypeA> {
         let mut msg = TypeA::default();
         for field in take.fields_with(|n, body| {
             let body_len = body.remaining();
@@ -1377,7 +1379,7 @@ mod len_payload {
         Ok(msg)
     }
 
-    fn parse_b<R: Read + ?Sized>(take: &mut Budget32<'_, R>) -> crate::Result<TypeB> {
+    fn parse_b<R: Read + ?Sized>(take: &mut LenBody<'_, R>) -> crate::Result<TypeB> {
         let mut msg = TypeB::default();
         for field in take.fields_with(|n, body| {
             let body_len = body.remaining();
@@ -1442,7 +1444,7 @@ mod len_payload {
     }
 
     #[test]
-    fn indirect_recursive_a_b_via_budget32_scope() {
+    fn indirect_recursive_a_b_via_len_body_scope() {
         // A { mark=1, b: B { mark=2, a: A { mark=3 } } }
         // Inner A = 08 03
         // B      = 08 02 | 12 02 | 08 03
