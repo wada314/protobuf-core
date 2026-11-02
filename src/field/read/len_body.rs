@@ -34,9 +34,10 @@ use ::std::io::{Read, Write};
 /// `for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>` (HRTB so it cannot
 /// escape the closure). [`remaining`](Self::remaining) at entry is the payload
 /// length. On [`Drop`], leftover `remaining` is written to an optional caller
-/// slot; for Len fields the library then discards that many bytes from the
-/// reader. Nested messages call [`fields`](Self::fields) /
-/// [`fields_with`](Self::fields_with) (consuming `self`).
+/// slot (see [`scope`](Self::scope)); for Len fields the library then discards
+/// that many bytes from the reader. Nested messages call
+/// [`fields`](Self::fields) / [`fields_with`](Self::fields_with) (consuming
+/// `self`).
 ///
 /// Not a [`Read`] adapter — [`ReadExtProtobuf`] / [`ReadExtVarint`] /
 /// [`ReadExtTag`] do not apply; use inherent [`read`](Self::read) /
@@ -54,23 +55,15 @@ use ::std::io::{Read, Write};
 pub struct LenBody<'a, R: ?Sized> {
     reader: &'a mut R,
     remaining: u32,
-    /// When set, [`Drop`] writes leftover [`remaining`](Self::remaining) here
-    /// (`=` or `+=` when [`refund_on_drop`](Self::refund_on_drop)).
+    /// When set, [`Drop`] does `*remaining_out = remaining` (Len [`scope`] slot).
     remaining_out: Option<&'a mut u32>,
-    /// If true, [`Drop`] does `*remaining_out += remaining` (scoped child refund).
-    /// If false, [`Drop`] does `*remaining_out = remaining` (Len-handler slot).
-    refund_on_drop: bool,
 }
 
 impl<'a, R: ?Sized> Drop for LenBody<'a, R> {
     #[inline]
     fn drop(&mut self) {
         if let Some(ref mut out) = self.remaining_out {
-            if self.refund_on_drop {
-                **out += self.remaining;
-            } else {
-                **out = self.remaining;
-            }
+            **out = self.remaining;
         }
     }
 }
@@ -98,7 +91,6 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             reader,
             remaining: len,
             remaining_out: None,
-            refund_on_drop: false,
         }
     }
 
@@ -173,24 +165,25 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         Err(ProtobufError::VarintTooLong)
     }
 
-    /// Scoped child of exactly `n` bytes (prepaid, refund on child [`Drop`]).
+    /// Child body of exactly `n` bytes (prepaid).
     ///
-    /// Charges `n` against this body immediately. Unused child bytes are added
-    /// back to this body's [`remaining`](Self::remaining) when the child is
-    /// dropped (no I/O). Panics if `n > remaining()`.
+    /// Charges `n` against this body immediately. On child [`Drop`], leftover
+    /// unread count is written to `leftover` (no I/O). The caller must then
+    /// discard that many bytes from the underlying reader (Len parse does this).
+    /// Panics if `n > remaining()`.
     #[inline]
-    pub fn scope<'b>(&'b mut self, n: u32) -> LenBody<'b, R> {
+    pub(crate) fn scope<'b>(&'b mut self, n: u32, leftover: &'b mut u32) -> LenBody<'b, R> {
         assert!(
             n <= self.remaining,
             "LenBody::scope length {n} exceeds remaining {}",
             self.remaining
         );
         self.remaining -= n;
+        *leftover = n;
         LenBody {
             reader: &mut *self.reader,
             remaining: n,
-            remaining_out: Some(&mut self.remaining),
-            refund_on_drop: true,
+            remaining_out: Some(leftover),
         }
     }
 
@@ -290,18 +283,9 @@ where
             if length > read.remaining() {
                 return Err(ProtobufError::UnexpectedEof);
             }
-            read.remaining -= length;
-            let mut left = length;
-            let result = handler(
-                tag.field_number,
-                LenBody {
-                    reader: &mut *read.reader,
-                    remaining: length,
-                    remaining_out: Some(&mut left),
-                    refund_on_drop: false,
-                },
-            );
-            // `LenBody` Drop wrote leftover into `left`.
+            let mut left = 0;
+            let result = handler(tag.field_number, read.scope(length, &mut left));
+            // `LenBody` Drop wrote unread count into `left`.
             discard_reader_bytes(read.reader, left)?;
             match result {
                 Ok(payload) => FieldValue::Len(payload),
@@ -682,21 +666,28 @@ mod tests {
     }
 
     #[test]
-    fn scope_refunds_parent_remaining_on_drop() {
-        use super::LenBody;
+    fn scope_writes_leftover_on_drop() {
+        use super::{discard_reader_bytes, LenBody};
         use ::std::io::Cursor;
 
         let mut data = Cursor::new(vec![1u8, 2, 3, 4, 5]);
         let mut take = LenBody::new(&mut data, 5);
         assert_eq!(take.remaining(), 5);
+        let mut left = 0;
         {
-            let child = take.scope(3);
+            let mut child = take.scope(3, &mut left);
             assert_eq!(child.remaining(), 3);
+            let mut one = [0u8; 1];
+            child.read_exact(&mut one).unwrap();
+            assert_eq!(one, [1]);
         }
-        // Scoped child Drop refunds unused remaining (no I/O).
-        assert_eq!(take.remaining(), 5);
+        // Parent charged 3; Drop reported 2 unread in the child.
+        assert_eq!(take.remaining(), 2);
+        assert_eq!(left, 2);
+        discard_reader_bytes(take.reader, left).unwrap();
+        assert_eq!(take.remaining(), 2);
         drop(take);
-        assert_eq!(data.position(), 0);
+        assert_eq!(data.position(), 3);
     }
 
     #[test]
@@ -1239,7 +1230,7 @@ mod len_payload {
     /// Dummy self-recursive message: `Node { value, child: Option<Node> }`.
     ///
     /// Decode walks a fixed root `R` via [`LenBody::fields_with`]: each nested
-    /// Len body is already a `LenBody<'_, R>` from [`LenBody::scope`], so
+    /// Len body is already a `LenBody<'_, R>` from the Len handler, so
     /// monomorphization does not stack `&mut` layers.
     #[derive(Debug, Default, PartialEq)]
     struct Node {
