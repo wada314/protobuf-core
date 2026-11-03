@@ -81,12 +81,6 @@ fn try_read_varint_with_raw<'a, R: Read>(
 
 /// Extension trait for reading varints from [`Read`] instances.
 ///
-/// - [`read_varint_with_raw()`](Self::read_varint_with_raw) /
-///   [`read_varint()`](Self::read_varint) — empty or truncated input is
-///   [`UnexpectedEof`](ProtobufError::UnexpectedEof)
-/// - [`read_varints()`](Self::read_varints) — stops when no bytes remain;
-///   truncated mid-varint is [`UnexpectedEof`](ProtobufError::UnexpectedEof)
-///
 /// # Performance Note
 ///
 /// When reading from file handles or network streams, consider wrapping the reader
