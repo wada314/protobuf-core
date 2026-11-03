@@ -36,8 +36,8 @@ use ::std::io::{Read, Write};
 /// `for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>` (HRTB so it cannot
 /// escape the closure). [`remaining`](Self::remaining) at entry is the payload
 /// length. On [`Drop`], leftover `remaining` is written to an optional caller
-/// slot (see [`scope`](Self::scope); no I/O). For Len fields the library then
-/// discards that many bytes from the reader on the fallible path. Nested
+/// slot when nested under a parent body (no I/O). For Len fields the library
+/// then discards that many bytes from the reader on the fallible path. Nested
 /// messages call [`fields`](Self::fields) / [`fields_with`](Self::fields_with)
 /// (consuming `self`).
 ///
@@ -554,9 +554,9 @@ where
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
     /// Intended mainly for protobuf **group** handling: after an
-    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
-    /// discard the body through the matching end tag (see
-    /// [`FieldIterFromSlice::skip_until`] for a runnable example).
+    /// [`FieldValue::SGroup`] was consumed, pair with [`crate::until_group_ends`]
+    /// to discard the body through the matching end tag (see
+    /// [`crate::FieldIterFromSlice::skip_until`] for a runnable example).
     ///
     /// Length-delimited payloads are discarded without allocating. The byte
     /// budget is this iterator's remaining count.
@@ -580,10 +580,11 @@ where
     /// Copy fields to `out` until `pred` returns `Ok(true)`.
     ///
     /// Intended mainly for protobuf **group** preserve on a stream: after an
-    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
-    /// tee the body and matching end tag (start tag already consumed — write
+    /// [`FieldValue::SGroup`] was consumed, pair with [`crate::until_group_ends`]
+    /// to tee the body and matching end tag (start tag already consumed — write
     /// it yourself first if the preserve blob needs it). For zero-copy
-    /// preserve from a slice, use [`FieldIterFromSlice::take_until`] instead.
+    /// preserve from a slice, use [`crate::FieldIterFromSlice::take_until`]
+    /// instead.
     ///
     /// Same stop semantics as [`skip_until`](Self::skip_until). Writes exact
     /// wire bytes (including non-canonical varints). Returns the number of
