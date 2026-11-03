@@ -48,6 +48,9 @@ assert_eq!(field.field_number.as_u32(), 2);
 assert_matches!(field.value, FieldValue::Len(s) if s == b"hi");
 ```
 
+To bring every read/write extension trait into scope at once (without short
+type names like `Field` / `Tag`), use `use protobuf_core::ext::*;`.
+
 For a streaming `std::io::Read` (you pass the message length yourself), see
 `ReadExtProtobuf` on [docs.rs](https://docs.rs/protobuf-core). Groups,
 nested messages, and custom Len handlers are documented there too.

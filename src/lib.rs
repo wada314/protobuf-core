@@ -126,6 +126,12 @@
 //! - [`ReadExtVarint`]: Read varints from `std::io::Read`
 //! - [`WriteExtVarint`]: Write varints
 //!
+//! ## Extension trait import
+//!
+//! All of the traits above are also gathered in [`ext`]. Prefer
+//! `use protobuf_core::ext::*;` when you want every read/write extension method
+//! in scope without importing short type names like [`Field`] or [`Tag`].
+//!
 //! ## Constants
 //!
 //! The library also provides various constants related to the protobuf wire format:
@@ -133,6 +139,8 @@
 //! - Field number limits: [`MIN_FIELD_NUMBER`], [`MAX_FIELD_NUMBER`]
 //! - Size limits: [`MAX_MESSAGE_SIZE`], [`MAX_STRING_SIZE`], [`MAX_VARINT_BYTES`]
 //! - Wire format constants: [`FIXED32_BYTES`], [`FIXED64_BYTES`], etc.
+
+pub mod ext;
 
 pub(crate) mod field;
 pub(crate) mod field_number;
