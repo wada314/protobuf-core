@@ -186,9 +186,11 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
 /// Extension trait for reading raw Protocol Buffer fields from slice types
 ///
 /// This trait provides low-level utilities for reading field-by-field from a byte slice.
-/// It returns borrowed references (`Field<&'a [u8]>`) suitable for slice sources.
-/// The slice length is the bound; there is no extra `len` argument.
-/// It does not provide semantic interpretation - that is the caller's responsibility.
+/// Each yield is a <code>[Field]&lt;&[u8]&gt;</code> value: scalars own their
+/// payload, and only the length-delimited variant holds a borrow into the source
+/// slice. This trait only splits the slice into raw fields (numbers and wire
+/// bytes). Building a message — choosing which fields mean what, decoding their
+/// values, and assembling your own struct — is up to you.
 ///
 /// # Example
 /// ```
@@ -203,11 +205,11 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
 /// # Ok::<(), protobuf_core::ProtobufError>(())
 /// ```
 pub trait AsRefExtProtobuf: AsRef<[u8]> {
-    /// Read raw protobuf fields from the slice, returning an iterator
+    /// Read raw protobuf fields from the slice, returning an iterator.
     ///
-    /// This returns an iterator that yields fields sequentially.
-    /// Each field contains raw bytes that must be interpreted by the caller.
-    /// Returns borrowed references (`Field<&'a [u8]>`).
+    /// Yields <code>[Field]&lt;&[u8]&gt;</code> values. Only
+    /// [`FieldValue::Len`](crate::FieldValue::Len) borrows from the source
+    /// slice; other variants carry owned payloads.
     ///
     /// This method is available for all types implementing `AsRef<[u8]>`.
     fn read_protobuf_fields(&self) -> FieldIterFromSlice<'_> {
