@@ -670,8 +670,8 @@ pub trait ReadExtProtobuf: Read {
     ///   `len`-byte window still on `self` (the tail is not skipped for you).
     /// - If `self` ends before those `len` bytes are finished, the next read is
     ///   [`UnexpectedEof`](crate::ProtobufError::UnexpectedEof) (including a
-    ///   truncated mid-field). After any [`Err`], further `next()` is [`None`];
-    ///   abandon the iterator — `self` may already be out of sync.
+    ///   truncated mid-field). After any [`Err`], abandon the iterator —
+    ///   `self` may already be out of sync.
     fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, LenBody<'_, Self>>
     where
         Self: Sized;
