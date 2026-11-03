@@ -1,12 +1,8 @@
 //! Extension traits for reading and writing protobuf wire data.
 //!
 //! Use `use protobuf_core::ext::*;` to bring every I/O extension trait into
-//! scope in one import. This module intentionally does **not** re-export short
-//! type names such as [`Field`](crate::Field) or [`Tag`](crate::Tag); import
-//! those from the crate root when you need them in signatures.
-//!
-//! The same traits are also re-exported at the crate root for individual
-//! imports.
+//! scope in one import. The same traits are also re-exported at the crate
+//! root for individual imports.
 //!
 //! # Example
 //!

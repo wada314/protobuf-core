@@ -13,7 +13,7 @@ Breaking for any caller of the removed varint/tag partial-resume API, of `Tag::t
 
 ### Added
 
-- `ext` module — re-exports the I/O extension traits (`AsRefExtProtobuf`, `ReadExtProtobuf`, `ReadExtTag`, `ReadExtVarint`, `WriteExtProtobuf`, `WriteExtVarint`) for a single `use protobuf_core::ext::*;`. Does not re-export short type names (`Field`, `Tag`, …); those stay at the crate root. Additive; crate-root trait re-exports are unchanged.
+- `ext` module — re-exports the I/O extension traits (`AsRefExtProtobuf`, `ReadExtProtobuf`, `ReadExtTag`, `ReadExtVarint`, `WriteExtProtobuf`, `WriteExtVarint`) for a single `use protobuf_core::ext::*;`. Additive; crate-root trait re-exports are unchanged.
 - `ReadExtVarint::read_varint_with_raw` — decodes a varint and returns its wire encoding as-is (even if non-canonical). The caller-provided `[u8; MAX_VARINT_BYTES]` is scratch the implementor may use; the returned `raw` slice need not point into it. Complete-read stack is `with_raw` → `read_varint`. `read_varints` soft-stops on empty input via a private `try_read_varint_with_raw` (`Ok(None)`); truncated mid-varint is `UnexpectedEof`.
 - `FieldIterFromSlice::take_until(pred)` — after an `SGroup` tag was consumed, returns a zero-copy `&[u8]` span of the group body through the matching `EGroup` (use with `until_group_ends`). Exact wire bytes.
 - `FieldIter::copy_until(pred, out)` — same stop semantics as `skip_until` for streaming input; tees exact wire bytes to `out` (including non-canonical varints).

@@ -77,10 +77,6 @@
 //! use protobuf_core::ext::*;
 //! ```
 //!
-//! That module does not re-export short type names such as [`Field`] or
-//! [`Tag`]. Import those from the crate root when you need them in
-//! signatures.
-//!
 //! ## Core Types
 //!
 //! ### Fields
