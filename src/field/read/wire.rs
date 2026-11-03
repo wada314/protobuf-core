@@ -68,7 +68,7 @@ pub(crate) trait WireCursor {
     /// and wire types surface as [`ProtobufError`].
     #[inline(always)]
     fn read_tag(&mut self) -> Result<Tag> {
-        Tag::from_encoded(self.read_varint()?)
+        Tag::from_varint(self.read_varint()?)
     }
 
     /// Skip one complete field and return its tag.
@@ -131,7 +131,7 @@ pub(crate) trait WireCursor {
         let mut buf = [0u8; MAX_VARINT_BYTES];
         let (tag_varint, tag_raw) = self.read_varint_with_raw(&mut buf)?;
         written += write_all_len(out, tag_raw)?;
-        let tag = Tag::from_encoded(tag_varint)?;
+        let tag = Tag::from_varint(tag_varint)?;
         match tag.wire_type {
             WireType::Varint => {
                 let (_, value_raw) = self.read_varint_with_raw(&mut buf)?;

@@ -82,7 +82,7 @@ where
             field_number: field.field_number,
             wire_type,
         };
-        let tag_varint = tag.to_encoded();
+        let tag_varint = tag.to_varint();
         bytes_written += self.write_varint(&tag_varint)?;
 
         // Write value (group tags have no payload)

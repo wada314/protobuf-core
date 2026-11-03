@@ -219,7 +219,7 @@ impl<L> Field<L> {
             field_number: self.field_number,
             wire_type,
         };
-        let tag_varint = tag.to_encoded();
+        let tag_varint = tag.to_varint();
         let tag_size = tag_varint.varint_size();
 
         // Value size
