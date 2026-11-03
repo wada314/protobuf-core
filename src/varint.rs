@@ -14,10 +14,10 @@ mod read;
 // Read helpers for `read_varints` (re-exported at the crate root).
 #[allow(unused_imports)]
 pub use read::{ReadExtVarint, VarintIterFromRead};
-/// A deserialized varint value.
+/// A decoded varint value.
 ///
-/// This type represents the decoded 8-byte value from serialized bytes
-/// to protobuf integer types.
+/// Holds the integer after varint decoding, not the on-wire encoding.
+/// Convert to/from protobuf integer types with the `from_*` / `to_*` methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Varint([u8; 8]);
 

@@ -85,8 +85,7 @@
 //! ### Basic Types
 //!
 //! - [`Tag`]: Represents a protobuf tag (field number + wire type)
-//! - [`Varint`]: Represents a deserialized varint value (8-byte internal
-//!   representation)
+//! - [`Varint`]: The decoded integer value of a varint (not the on-wire bytes)
 //! - [`FieldNumber`]: A validated field number (range: 1 to 2^29 - 1)
 //! - [`WireType`]: Represents the protobuf wire type (`Varint`, `Int64`, `Len`,
 //!   `SGroup`, `EGroup`, `Int32`)
