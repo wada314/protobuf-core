@@ -1,17 +1,17 @@
 //! Streaming field iteration over a [`LenBody`].
 //!
-//! [`LenBody`] is what Len handlers receive **by value**: the delimited payload
-//! (or top-level message) over `&mut R` with a `u32`
-//! [`len()`](LenBody::len). The handler signature is HRTB so the body
-//! cannot escape the closure; on [`Drop`] any leftover count is written back to
-//! a caller slot (no I/O in [`Drop`]). For Len fields the library then discards
-//! that many bytes on the fallible parse path; top-level unused budget stays on
-//! the underlying reader. [`LenBody`] itself does **not** implement [`Read`];
-//! bytes/string copy uses consuming [`into_read()`](LenBody::into_read), and
-//! nested decode uses [`fields()`](LenBody::fields) /
-//! [`fields_with()`](LenBody::fields_with). Top-level message `len` is expected
-//! to be `<= MAX_MESSAGE_SIZE` ([`MAX_MESSAGE_SIZE`], 2 GiB); that is
-//! `debug_assert`ed at the entrance (not enforced in release).
+//! [`LenBody`] is a delimited payload (or top-level message) over `&mut R`
+//! with a `u32` [`len()`](LenBody::len). Its lifetime keeps it from being
+//! returned out of a Len-building closure. On [`Drop`] any leftover count is
+//! written back to a caller slot (no I/O in [`Drop`]). For Len fields the
+//! library then discards that many bytes on the fallible parse path; top-level
+//! unused budget stays on the underlying reader. [`LenBody`] itself does
+//! **not** implement [`Read`]; bytes/string copy uses consuming
+//! [`into_read()`](LenBody::into_read), and nested decode uses
+//! [`fields()`](LenBody::fields) / [`fields_with()`](LenBody::fields_with).
+//! Top-level message `len` is expected to be `<= MAX_MESSAGE_SIZE`
+//! ([`MAX_MESSAGE_SIZE`], 2 GiB); that is `debug_assert`ed at the entrance
+//! (not enforced in release).
 
 use super::group::GroupBody;
 #[cfg(doc)]
@@ -38,12 +38,11 @@ use ::std::io::{Read, Write};
 
 /// Body of a length-delimited field (or the top-level message), over `&'a mut R`.
 ///
-/// Len handlers take this **by value**:
-/// `for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>` (HRTB so it cannot
-/// escape the closure). [`len()`](Self::len) at entry is the payload
-/// length. On [`Drop`], the leftover count from `len()` is written to an optional caller
-/// slot when nested under a parent body (no I/O). For Len fields the library
-/// then discards that many bytes from the reader on the fallible path. Nested
+/// The lifetime on this type keeps it from being returned out of a Len-building
+/// closure. [`len()`](Self::len) is the payload length. On [`Drop`],
+/// the leftover count from `len()` is written to an optional caller slot when
+/// nested under a parent body (no I/O). For Len fields the library then
+/// discards that many bytes from the reader on the fallible path. Nested
 /// messages call [`fields()`](Self::fields) / [`fields_with()`](Self::fields_with)
 /// (consuming `self`).
 ///
@@ -104,7 +103,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
 
     /// Length of this body in bytes.
     ///
-    /// At handler entry this is the Len payload size. Prefer consuming
+    /// This is the Len payload size. Prefer consuming
     /// [`into_read()`](Self::into_read) / [`fields()`](Self::fields) / packed
     /// iterators rather than reading through this value in place.
     #[inline]
@@ -231,9 +230,9 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
     /// Like [`fields()`](Self::fields), but each length-delimited field is built
     /// by `handler` instead of [`VecLenPayload`].
     ///
-    /// The body is passed **by value** (`len()` at entry is the payload
-    /// length). After return, leftover body bytes are discarded. Do not move
-    /// the `LenBody` out (HRTB). Non-Len wire types never call `handler`.
+    /// [`len()`](LenBody::len) is the payload length. After return, leftover
+    /// body bytes are discarded. The body's lifetime keeps it from being moved
+    /// out of `handler`. Non-Len wire types never call `handler`.
     /// Custom stateful handlers can wrap as
     /// `|n, body| my_handler.handle(n, body)`.
     #[inline]
@@ -252,10 +251,10 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
     /// Parse one protobuf field from this body.
     ///
     /// When the field is length-delimited, `handler` runs once with a child
-    /// [`LenBody`] by value for the payload length. After it returns (and
-    /// [`Drop`] writes leftover into a local slot), unused body bytes are
-    /// discarded. Handler errors are preferred over discard I/O errors. Other
-    /// wire types do not call `handler`.
+    /// [`LenBody`] for the payload length. After it returns (and [`Drop`]
+    /// writes leftover into a local slot), unused body bytes are discarded.
+    /// Handler errors are preferred over discard I/O errors. Other wire types
+    /// do not call `handler`.
     #[inline]
     fn parse_field_with<F>(&mut self, handler: &mut F) -> Result<Field<F::Payload>>
     where
@@ -420,10 +419,10 @@ pub trait LenHandler<R: ?Sized> {
     /// Payload stored in [`FieldValue::Len`].
     type Payload;
 
-    /// Consume the Len body (by value) into a payload.
+    /// Consume the Len body into a payload.
     ///
-    /// `body.len()` at entry is the payload length. After return, the
-    /// library discards any unread body bytes.
+    /// `body.len()` is the payload length. After return, the library discards
+    /// any unread body bytes.
     fn handle(&mut self, field_number: FieldNumber, body: LenBody<'_, R>) -> Result<Self::Payload>;
 }
 
