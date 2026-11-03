@@ -65,6 +65,22 @@
 //! buffer.write_protobuf_field(&field).unwrap();
 //! ```
 //!
+//! ## Extension traits ([`ext`])
+//!
+//! Read and write APIs are extension traits
+//! ([`AsRefExtProtobuf`], [`ReadExtProtobuf`], [`ReadExtTag`],
+//! [`ReadExtVarint`], [`WriteExtProtobuf`], [`WriteExtVarint`]). They are
+//! re-exported at the crate root, and also gathered in [`ext`] so one import
+//! covers every extension method:
+//!
+//! ```rust
+//! use protobuf_core::ext::*;
+//! ```
+//!
+//! That module does not re-export short type names such as [`Field`] or
+//! [`Tag`]. Import those from the crate root when you need them in
+//! signatures.
+//!
 //! ## Core Types
 //!
 //! ### Fields
@@ -125,12 +141,6 @@
 //! - [`ReadExtTag`]: Read tags from `std::io::Read`
 //! - [`ReadExtVarint`]: Read varints from `std::io::Read`
 //! - [`WriteExtVarint`]: Write varints
-//!
-//! ## Extension trait import
-//!
-//! All of the traits above are also gathered in [`ext`]. Prefer
-//! `use protobuf_core::ext::*;` when you want every read/write extension method
-//! in scope without importing short type names like [`Field`] or [`Tag`].
 //!
 //! ## Constants
 //!

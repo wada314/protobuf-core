@@ -48,9 +48,6 @@ assert_eq!(field.field_number.as_u32(), 2);
 assert_matches!(field.value, FieldValue::Len(s) if s == b"hi");
 ```
 
-To bring every read/write extension trait into scope at once (without short
-type names like `Field` / `Tag`), use `use protobuf_core::ext::*;`.
-
 For a streaming `std::io::Read` (you pass the message length yourself), see
 `ReadExtProtobuf` on [docs.rs](https://docs.rs/protobuf-core). Groups,
 nested messages, and custom Len handlers are documented there too.
@@ -70,6 +67,20 @@ fn main() -> Result<(), protobuf_core::ProtobufError> {
     Ok(())
 }
 ```
+
+## Extension traits (`ext`)
+
+Read and write APIs are extension traits (`AsRefExtProtobuf`,
+`ReadExtProtobuf`, `ReadExtTag`, `ReadExtVarint`, `WriteExtProtobuf`,
+`WriteExtVarint`). They are re-exported at the crate root, and also gathered
+in `protobuf_core::ext` so one import covers every extension method:
+
+```rust
+use protobuf_core::ext::*;
+```
+
+That module does not re-export short type names such as `Field` or `Tag`.
+Import those from the crate root when you need them in signatures.
 
 ## Design Philosophy
 
