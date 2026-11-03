@@ -179,9 +179,8 @@ impl<L> FieldValue<L> {
 /// The caller must interpret the value based on the message schema.
 ///
 /// `L` is the type for length-delimited values ([`FieldValue::Len`]):
-/// `&[u8]` from a slice read, `Vec<u8>` by default from `Read`
-/// ([`crate::VecLenPayload`]), or a custom type from
-/// [`crate::ReadExtProtobuf::read_protobuf_fields_with()`].
+/// `&[u8]` from a slice read, `Vec<u8>` by default from `Read`, or a custom
+/// type from [`ReadExtProtobuf::read_protobuf_fields_with()`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
     pub field_number: FieldNumber,
