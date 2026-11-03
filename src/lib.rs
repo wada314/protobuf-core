@@ -32,24 +32,18 @@
 //!
 //! ```rust
 //! use assert_matches::assert_matches;
-//! use protobuf_core::{AsRefExtProtobuf, Field, FieldValue};
+//! use protobuf_core::{AsRefExtProtobuf, FieldValue};
 //!
 //! // field 1 varint = 150, field 2 string = "hi"
 //! let bytes: &[u8] = &[0x08, 0x96, 0x01, 0x12, 0x02, b'h', b'i'];
 //!
 //! let mut fields = bytes.read_protobuf_fields();
 //!
-//! let field: Field<&[u8]> = {
-//!     let Some(Ok(field)) = fields.next() else { unreachable!() };
-//!     field
-//! };
+//! let Some(Ok(field)) = fields.next() else { unreachable!() };
 //! assert_eq!(field.field_number.as_u32(), 1);
 //! assert_matches!(field.value, FieldValue::Varint(v) if v.to_uint64() == 150);
 //!
-//! let field: Field<&[u8]> = {
-//!     let Some(Ok(field)) = fields.next() else { unreachable!() };
-//!     field
-//! };
+//! let Some(Ok(field)) = fields.next() else { unreachable!() };
 //! assert_eq!(field.field_number.as_u32(), 2);
 //! // Strings (and bytes / nested messages) arrive as Len(&[u8]).
 //! assert_matches!(field.value, FieldValue::Len(s) if s == b"hi");
