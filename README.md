@@ -25,31 +25,29 @@ This library provides common definitions, constants, enums, and basic logic for 
 
 ### Reading Fields
 
-`AsRefExtProtobuf::read_protobuf_fields` returns a `FieldIterFromSlice`: an
-`Iterator` whose item is `Result<Field<&[u8]>, ProtobufError>`. Each `Field`
-has public fields `field_number: FieldNumber` and `value: FieldValue<L>`
-(`L = &[u8]` here — Len payloads borrow the input).
+Give the library a byte slice. It walks the message one field at a time.
+Each field has a number and a raw value (small integer, fixed-width bytes,
+or a length-delimited blob that still borrows from your slice).
 
 ```rust
 use protobuf_core::{
     AsRefExtProtobuf, Field, FieldIterFromSlice, FieldValue, Result,
 };
 
-let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1 varint: 150
+let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1 = 150
 
-// Iterator type (slice entrance; no extra `len` — the slice is the bound).
+// Returns an iterator over Result<Field<&[u8]>, ProtobufError>.
 let mut iter: FieldIterFromSlice<'_> = bytes.read_protobuf_fields();
 
-// Item = Result<Field<&[u8]>, ProtobufError>
 let field: Field<&[u8]> = iter.next().unwrap().unwrap();
 assert_eq!(field.field_number.as_u32(), 1);
 match field.value {
     FieldValue::Varint(v) => assert_eq!(v.to_uint64(), 150),
-    FieldValue::I32(_) | FieldValue::I64(_) | FieldValue::Len(_)
-    | FieldValue::SGroup | FieldValue::EGroup => unreachable!(),
+    // Other variants: I32 / I64 / Len(&[u8]) / SGroup / EGroup
+    _ => unreachable!(),
 }
 
-// Or collect the whole message:
+// Collect every field in the message:
 let fields: Vec<Field<&[u8]>> = bytes
     .read_protobuf_fields()
     .collect::<Result<Vec<_>>>()
@@ -57,24 +55,9 @@ let fields: Vec<Field<&[u8]>> = bytes
 assert_eq!(fields.len(), 1);
 ```
 
-The example above is the slice path. `ReadExtProtobuf::read_protobuf_fields(len)` / `read_protobuf_fields_with(len, handler)` take an explicit `u32` message byte budget and are the only public streaming field entrances (`LenBody` is built inside those methods; there is no public constructor). Their iterator is `FieldIter` and default Len payloads are owned `Vec<u8>` via `VecLenPayload`. Lower-level `ReadExtVarint` / `ReadExtTag` methods do not take `len`; they read until that reader's EOF (or the caller's bound such as `std::io::Take`). The `*_with` handler is a closure ([`LenHandler`] via blanket); `*_handler` takes any `LenHandler` directly. Len body by value; `remaining()` is the payload length. After the closure returns, unused body bytes are discarded. Nested messages call consuming `LenBody::fields` / `fields_with` (same root `R`); `bytes` / `string` use consuming `LenBody::into_read`; packed scalars use `varints` / `fixed32s` / `fixed64s`. Byte iterators are not supported; use a slice or a `Read` (with `len` for field APIs).
-
-Deprecated group wire types (`SGroup` / `EGroup`) are returned as tag-only `FieldValue` variants. The group body stays on the cursor; discard via `skip_until` + `until_group_ends`, preserve via slice `take_until` / Read `copy_until` with the same predicate, or parse with `group_body` — the start tag is already consumed, so write it yourself first when building an unknown-field blob. Prefer `until_group_ends` for skip/preserve (full field-number stack); `group_body` is depth-only and does not check nested end-group numbers — nest another `group_body` when you see an inner `SGroup`.
-
-```rust
-use protobuf_core::{AsRefExtProtobuf, FieldValue, WriteExtProtobuf, until_group_ends};
-
-let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
-let mut fields = bytes.as_slice().read_protobuf_fields();
-let start = fields.next().unwrap().unwrap();
-assert!(matches!(start.value, FieldValue::SGroup));
-
-let mut preserved = Vec::new();
-preserved.write_protobuf_field(&start).unwrap();
-let body = fields.take_until(until_group_ends(start.field_number)).unwrap();
-preserved.extend_from_slice(body);
-assert_eq!(&preserved[..], &bytes[..bytes.len() - 2]);
-```
+For a streaming `std::io::Read` (you pass the message length yourself), see
+`ReadExtProtobuf` on [docs.rs](https://docs.rs/protobuf-core). Groups,
+nested messages, and custom Len handlers are documented there too.
 
 ### Writing Fields
 

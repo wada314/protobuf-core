@@ -26,37 +26,38 @@
 //!
 //! ### Reading Fields
 //!
-//! [`AsRefExtProtobuf::read_protobuf_fields`] returns a [`FieldIterFromSlice`]:
-//! an [`Iterator`] whose item is [`Result`]`<`[`Field`]`<&'a [u8]>>`.
-//! Each [`Field`] has public fields `field_number: FieldNumber` and
-//! `value: FieldValue<L>` (`L = &[u8]` here — Len payloads borrow the input).
+//! Give the library a byte slice. It walks the message one field at a time.
+//! Each field has a number and a raw value (small integer, fixed-width bytes,
+//! or a length-delimited blob that still borrows from your slice).
 //!
 //! ```rust
 //! use protobuf_core::{
 //!     AsRefExtProtobuf, Field, FieldIterFromSlice, FieldValue, Result,
 //! };
 //!
-//! let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1 varint: 150
+//! let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1 = 150
 //!
-//! // Iterator type (slice entrance; no extra `len` — the slice is the bound).
+//! // Returns an iterator over Result<Field<&[u8]>, ProtobufError>.
 //! let mut iter: FieldIterFromSlice<'_> = bytes.read_protobuf_fields();
 //!
-//! // Item = Result<Field<&[u8]>, ProtobufError>
 //! let field: Field<&[u8]> = iter.next().unwrap().unwrap();
 //! assert_eq!(field.field_number.as_u32(), 1);
 //! match field.value {
 //!     FieldValue::Varint(v) => assert_eq!(v.to_uint64(), 150),
-//!     FieldValue::I32(_) | FieldValue::I64(_) | FieldValue::Len(_)
-//!     | FieldValue::SGroup | FieldValue::EGroup => unreachable!(),
+//!     // Other variants: I32 / I64 / Len(&[u8]) / SGroup / EGroup
+//!     _ => unreachable!(),
 //! }
 //!
-//! // Or collect the rest of the message:
+//! // Collect every field in the message:
 //! let fields: Vec<Field<&[u8]>> = bytes
 //!     .read_protobuf_fields()
 //!     .collect::<Result<Vec<_>>>()
 //!     .unwrap();
 //! assert_eq!(fields.len(), 1);
 //! ```
+//!
+//! For a streaming [`std::io::Read`] (with an explicit message length), see
+//! [`ReadExtProtobuf`] below.
 //!
 //! ### Writing Fields
 //!
