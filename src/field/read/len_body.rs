@@ -2,7 +2,7 @@
 //!
 //! A [`LenBody`] is a bounded view of length-delimited (or top-level message)
 //! bytes on a [`Read`]. Choose how to consume it:
-//! [`into_read()`](LenBody::into_read) for opaque bytes/string,
+//! [`into_read()`](LenBody::into_read) for opaque `Bytes` / `String`,
 //! [`fields()`](LenBody::fields) / [`fields_with()`](LenBody::fields_with) for
 //! nested messages, or [`varints()`](LenBody::varints) /
 //! [`fixed32s()`](LenBody::fixed32s) / [`fixed64s()`](LenBody::fixed64s) for
@@ -37,7 +37,7 @@ use ::std::io::{Read, Write};
 /// The lifetime keeps this value from being returned out of that closure.
 ///
 /// Consume `self` with one of:
-/// - [`into_read()`](Self::into_read) — opaque bytes / string
+/// - [`into_read()`](Self::into_read) — opaque `Bytes` / `String`
 /// - [`fields()`](Self::fields) / [`fields_with()`](Self::fields_with) — nested message
 /// - [`varints()`](Self::varints) / [`fixed32s()`](Self::fixed32s) /
 ///   [`fixed64s()`](Self::fixed64s) — packed repeats
@@ -126,7 +126,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
 
     /// Treat this body as a byte stream (consumes `self`).
     ///
-    /// Use for `string` / `bytes` (or any opaque Len payload) with ordinary
+    /// Use for `String` / `Bytes` (or any opaque Len payload) with ordinary
     /// [`Read`] helpers. Reads stop when the body is exhausted.
     #[inline]
     pub fn into_read(self) -> LenBodyRead<'a, R> {
