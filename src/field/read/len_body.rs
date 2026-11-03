@@ -629,26 +629,23 @@ where
 ///
 /// # Example
 /// ```
-/// use ::protobuf_core::{ReadExtProtobuf, Field, FieldValue};
+/// use ::protobuf_core::{FieldValue, ReadExtProtobuf};
 ///
-/// fn main() -> Result<(), Box<dyn ::std::error::Error>> {
-///     let data = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
-///     let len = data.len() as u32;
-///     let mut reader = data;
+/// let data = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
+/// let len = data.len() as u32;
+/// let mut reader = data;
 ///
-///     for field in reader.read_protobuf_fields(len) {
-///         let field = field?;
-///         match field.value {
-///             FieldValue::Varint(varint) => {
-///                 println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
-///             },
-///             FieldValue::Len(data) => {
-///                 println!("Field {}: {:?}", field.field_number.as_u32(), data);
-///             },
-///             _ => {}
+/// for field in reader.read_protobuf_fields(len) {
+///     let field = field.unwrap();
+///     match field.value {
+///         FieldValue::Varint(varint) => {
+///             println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
 ///         }
+///         FieldValue::Len(data) => {
+///             println!("Field {}: {:?}", field.field_number.as_u32(), data);
+///         }
+///         _ => {}
 ///     }
-///     Ok(())
 /// }
 /// ```
 pub trait ReadExtProtobuf: Read {
