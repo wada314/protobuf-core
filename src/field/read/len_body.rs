@@ -31,19 +31,18 @@ use ::std::io::{Read, Write};
 // Len / message body view
 // ============================================================================
 
-/// Body of a length-delimited field (or the top-level message) over `&'a mut R`.
+/// Body of a length-delimited field over `&'a mut R`.
 ///
-/// [`len()`](Self::len) is how many payload bytes remain. The lifetime keeps
-/// this value from being returned out of a Len-building closure.
+/// Passed to your closure when the parser meets a length-delimited field.
+/// The lifetime keeps this value from being returned out of that closure.
 ///
-/// Does not implement [`Read`] itself. Consume `self` with one of:
+/// Consume `self` with one of:
 /// - [`into_read()`](Self::into_read) — opaque bytes / string
 /// - [`fields()`](Self::fields) / [`fields_with()`](Self::fields_with) — nested message
 /// - [`varints()`](Self::varints) / [`fixed32s()`](Self::fixed32s) /
 ///   [`fixed64s()`](Self::fixed64s) — packed repeats
 ///
-/// Unread bytes in a Len field body are discarded when that body is finished;
-/// unused bytes of a top-level message stay on the underlying reader.
+/// Unread bytes are discarded when the body is finished.
 pub struct LenBody<'a, R: ?Sized> {
     reader: &'a mut R,
     remaining: u32,
