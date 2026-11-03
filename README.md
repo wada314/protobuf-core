@@ -30,6 +30,7 @@ Each step yields a `Result` of a `Field`: a field number plus a raw value.
 On a slice, length-delimited payloads borrow as `&[u8]`.
 
 ```rust
+use assert_matches::assert_matches;
 use protobuf_core::{AsRefExtProtobuf, Field, FieldValue};
 
 let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1 = 150
@@ -41,10 +42,7 @@ let mut fields = bytes.read_protobuf_fields();
 let field: Field<&[u8]> = fields.next().unwrap().unwrap();
 
 assert_eq!(field.field_number.as_u32(), 1);
-assert!(matches!(
-    field.value,
-    FieldValue::Varint(v) if v.to_uint64() == 150
-));
+assert_matches!(field.value, FieldValue::Varint(v) if v.to_uint64() == 150);
 // Other `FieldValue` variants: I32 / I64 / Len(&[u8]) / SGroup / EGroup
 ```
 
