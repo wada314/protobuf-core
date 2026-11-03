@@ -19,7 +19,7 @@ Breaking for any caller of the removed varint/tag partial-resume API, of `read_v
 - `GroupBody` / `group_body(field_number)` on field iterators — adapter that yields body fields until the matching outermost `EGroup` (consumed, not yielded). Nesting uses a depth counter only; **nested end-group field numbers are not validated** (caller should nest another `group_body` when seeing an inner `SGroup`). Distinct from `until_group_ends`, which keeps a full field-number stack for skip/preserve. Premature end of input before that `EGroup` is `UnexpectedEof`. After the first `None` or a yielded `Err`, further `next` is unspecified (may read past the group); use `Iterator::fuse` for sticky `None`.
 - Contract for skip/preserve mirrors `until_group_ends`: the start-group tag is already consumed (caller writes it to a preserve blob if needed); the helper advances past the matching end-group. Nested groups use the same stack rules. On predicate / decode error, the input cursor may have advanced; `Read` `copy_until` may leave a partial write in `out`.
 - `LenBody<'a, R>` — Len handlers receive it **by value**. `remaining` fits in `u32`. **Not** [`std::io::Read`] itself: bytes/string via consuming `into_read` → `LenBodyRead`; packed scalars via `varints` / `fixed32s` / `fixed64s` → `VarintIterFromLenBody` / `FixedIterFromLenBody`; nested via `fields` / `fields_with`. No public constructor. Child bodies use `scope(n, leftover)`; `Drop` writes unread count into `leftover`, then Len parse discards those bytes (I/O outside `Drop`). Renamed through interim `Take32` / `Budget32`.
-- `LenHandler<R>` — Len payload builder (`handle(field_number, LenBody) -> Result<Payload>`). `VecLenPayload` implements it (`Payload = Vec<u8>`); closures `FnMut(FieldNumber, LenBody<'_, R>) -> Result<L>` get a blanket impl. Closure entrances stay `*_with` (`FnMut` for inference); any handler uses `fields_handler` / `read_protobuf_fields_handler`.
+- `LenHandler<R>` — internal Len payload builder bound on `FieldIter` (`handle(field_number, LenBody) -> Result<Payload>`). `VecLenPayload` implements it (`Payload = Vec<u8>`); closures get a blanket impl. Public entrances are `*_with` (`FnMut`) only.
 - `FieldIter<'a, R, T, F>` — streaming field iterator; `T: AsRef<LenBody<'a, R>> + AsMut<LenBody<'a, R>>`, `F: LenHandler<R>` (default `VecLenPayload`). Single `Iterator` impl. Replaces the former `FieldIterFromRead` / `FieldIterMut` names (no aliases).
 - Message `len` / `FieldIter::remaining` / `LenBody::remaining` / `WireCursor` lengths are `u32`.
 
@@ -30,6 +30,7 @@ Breaking for any caller of the removed varint/tag partial-resume API, of `read_v
 
 ### Removed
 
+- `LenBody::fields_handler` / `ReadExtProtobuf::read_protobuf_fields_handler`. Use `fields_with` / `read_protobuf_fields_with` with a closure (`|n, body| handler.handle(n, body)` if needed).
 - Varint/tag partial-resume API: `DecodeState`, `DecodeOutcome`, `TagOutcome` / `Outcome`, `read_varint_partial` / `read_varint_resume`, `read_tag_partial` / `read_tag_resume`. Chunked callers buffer ≤ `MAX_VARINT_BYTES` (or until a terminator) and use complete reads — same model as fixed-width wire types.
 
 ### Internal

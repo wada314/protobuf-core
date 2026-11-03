@@ -46,9 +46,8 @@ pub use self::write::WriteExtProtobuf;
 ///  - Slice readers borrow the input as `&'a [u8]`.
 ///  - Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`
 ///    ([`VecLenPayload`]).
-///  - Custom payloads use `read_protobuf_fields_with` (closure /
-///    [`LenHandler`] via blanket) or `read_protobuf_fields_handler` (any
-///    [`LenHandler`]). Unused body bytes are discarded after `handle`.
+///  - Custom payloads use `read_protobuf_fields_with` with a closure.
+///    Unused body bytes are discarded after the handler returns.
 ///
 /// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
 /// does not include the group body. After an `SGroup`, discard the body with
@@ -182,8 +181,7 @@ impl<L> FieldValue<L> {
 /// `L` is the type for length-delimited values ([`FieldValue::Len`]):
 /// `&[u8]` from a slice read, `Vec<u8>` by default from `Read`
 /// ([`crate::VecLenPayload`]), or a custom type from
-/// [`crate::ReadExtProtobuf::read_protobuf_fields_with`] /
-/// [`crate::LenHandler`].
+/// [`crate::ReadExtProtobuf::read_protobuf_fields_with`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
     pub field_number: FieldNumber,

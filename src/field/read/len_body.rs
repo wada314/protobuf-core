@@ -218,28 +218,15 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
     /// Like [`fields`](Self::fields), but each length-delimited field is built
     /// by `handler` instead of [`VecLenPayload`].
     ///
-    /// Takes a closure for argument-type inference; it implements
-    /// [`LenHandler`] via the blanket. For a custom [`LenHandler`] type, use
-    /// [`fields_handler`](Self::fields_handler). The body is passed **by
-    /// value** (`remaining()` at entry is the payload length). After return,
-    /// leftover body bytes are discarded. Do not move the `LenBody` out
-    /// (HRTB).
-    ///
-    /// Non-Len wire types never call `handler`.
+    /// The body is passed **by value** (`remaining()` at entry is the payload
+    /// length). After return, leftover body bytes are discarded. Do not move
+    /// the `LenBody` out (HRTB). Non-Len wire types never call `handler`.
+    /// Custom stateful handlers can wrap as
+    /// `|n, body| my_handler.handle(n, body)`.
     #[inline]
     pub fn fields_with<L, F>(self, handler: F) -> FieldIter<'a, R, Self, F>
     where
         F: for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>,
-    {
-        self.fields_handler(handler)
-    }
-
-    /// Like [`fields_with`](Self::fields_with), but accepts any [`LenHandler`]
-    /// (including [`VecLenPayload`] and custom types).
-    #[inline]
-    pub fn fields_handler<F>(self, handler: F) -> FieldIter<'a, R, Self, F>
-    where
-        F: LenHandler<R>,
     {
         FieldIter {
             body: self,
@@ -636,8 +623,8 @@ where
 /// Each method takes an explicit message byte budget `len` (`u32`). Length-delimited
 /// payloads default to `Vec<u8>` via [`VecLenPayload`].
 /// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
-/// takes any [`LenHandler`] (closures implement it via blanket).
-/// It does not provide semantic interpretation - that is the caller's responsibility.
+/// takes a Len-building closure. It does not provide semantic interpretation —
+/// that is the caller's responsibility.
 ///
 /// # Example
 /// ```
@@ -686,12 +673,10 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
     ///
-    /// `handler` is called once for each length-delimited field. Takes a
-    /// closure for argument-type inference ([`LenHandler`] via blanket). For a
-    /// custom [`LenHandler`] type, use
-    /// [`read_protobuf_fields_handler`](Self::read_protobuf_fields_handler).
-    /// The Len body is passed **by value** (`remaining()` at entry is the
-    /// payload length). After return, unused body bytes are discarded.
+    /// `handler` is called once for each length-delimited field. The Len body
+    /// is passed **by value** (`remaining()` at entry is the payload length).
+    /// After return, unused body bytes are discarded. Custom stateful handlers
+    /// can wrap as `|n, body| my_handler.handle(n, body)`.
     ///
     /// Nested messages should call [`LenBody::fields`] /
     /// [`LenBody::fields_with`] on that body (consumes it; keeps `R` fixed).
@@ -729,17 +714,6 @@ pub trait ReadExtProtobuf: Read {
     where
         Self: Sized,
         F: for<'t> FnMut(FieldNumber, LenBody<'t, Self>) -> Result<L>;
-
-    /// Like [`read_protobuf_fields_with`](Self::read_protobuf_fields_with), but
-    /// accepts any [`LenHandler`].
-    fn read_protobuf_fields_handler<F>(
-        &mut self,
-        len: u32,
-        handler: F,
-    ) -> FieldIter<'_, Self, LenBody<'_, Self>, F>
-    where
-        Self: Sized,
-        F: LenHandler<Self>;
 }
 
 impl<R> ReadExtProtobuf for R
@@ -770,18 +744,6 @@ where
     where
         Self: Sized,
         F: for<'t> FnMut(FieldNumber, LenBody<'t, Self>) -> Result<L>,
-    {
-        self.read_protobuf_fields_handler(len, handler)
-    }
-
-    fn read_protobuf_fields_handler<F>(
-        &mut self,
-        len: u32,
-        handler: F,
-    ) -> FieldIter<'_, Self, LenBody<'_, Self>, F>
-    where
-        Self: Sized,
-        F: LenHandler<Self>,
     {
         debug_assert!(
             (len as usize) <= MAX_MESSAGE_SIZE,
