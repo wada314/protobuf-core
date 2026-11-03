@@ -21,15 +21,13 @@ pub enum WireType {
     /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields).
     Len = 2,
     /// Start group. Groups are deprecated in the Protocol Buffers language
-    /// since proto2 (prefer nested messages). Field readers return
-    /// `FieldValue::SGroup`. The group body follows on the wire; discard it
-    /// with `skip_until()` + `until_group_ends()`, preserve with `take_until()`
-    /// (slice) or `copy_until()` (Read) and the same predicate, or read nested
-    /// fields until `FieldValue::EGroup`.
+    /// since proto2 (prefer nested messages). The group body follows on the
+    /// wire; discard it with `skip_until()` + `until_group_ends()`, preserve
+    /// with `take_until()` (slice) or `copy_until()` (Read) and the same
+    /// predicate, or read nested fields until the matching end-group.
     SGroup = 3,
     /// End group. Groups are deprecated in the Protocol Buffers language since
-    /// proto2 (prefer nested messages). Field readers return
-    /// `FieldValue::EGroup`.
+    /// proto2 (prefer nested messages).
     EGroup = 4,
     /// 32-bit fixed-width values (Fixed32, SFixed32, Float).
     Int32 = 5,
