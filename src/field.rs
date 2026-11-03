@@ -57,7 +57,8 @@ pub use self::write::WriteExtProtobuf;
 /// [`take_until()`](FieldIterFromSlice::take_until) (slice) or
 /// [`copy_until()`](FieldIter::copy_until) (Read), parse it with
 /// [`group_body()`](FieldIterFromSlice::group_body) / [`GroupBody`], or read
-/// nested fields until a matching `EGroup` before the next top-level field.
+/// nested fields manually until a matching `EGroup` before the next top-level
+/// field.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
     /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`).
