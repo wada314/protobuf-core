@@ -4,13 +4,14 @@
 //! (or top-level message) over `&mut R` with a `u32`
 //! [`remaining`](LenBody::remaining). The handler signature is HRTB so the body
 //! cannot escape the closure; on [`Drop`] any leftover count is written back to
-//! a caller slot, then the library discards those bytes (Len fields) or leaves
-//! them on the underlying reader (top-level). [`LenBody`] itself does **not**
-//! implement [`Read`]; bytes/string copy uses consuming
-//! [`into_read`](LenBody::into_read), and nested decode uses
-//! [`fields`](LenBody::fields) / [`fields_with`](LenBody::fields_with).
-//! Top-level message `len` is expected to be `<= MAX_MESSAGE_SIZE`
-//! ([`crate::MAX_MESSAGE_SIZE`], 2 GiB); that is `debug_assert`ed at the entrance.
+//! a caller slot (no I/O in [`Drop`]). For Len fields the library then discards
+//! that many bytes on the fallible parse path; top-level unused budget stays on
+//! the underlying reader. [`LenBody`] itself does **not** implement [`Read`];
+//! bytes/string copy uses consuming [`into_read`](LenBody::into_read), and
+//! nested decode uses [`fields`](LenBody::fields) /
+//! [`fields_with`](LenBody::fields_with). Top-level message `len` is expected
+//! to be `<= MAX_MESSAGE_SIZE` ([`crate::MAX_MESSAGE_SIZE`], 2 GiB); that is
+//! `debug_assert`ed at the entrance (not enforced in release).
 
 use super::group::GroupBody;
 use super::wire::WireCursor;
@@ -35,10 +36,10 @@ use ::std::io::{Read, Write};
 /// `for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>` (HRTB so it cannot
 /// escape the closure). [`remaining`](Self::remaining) at entry is the payload
 /// length. On [`Drop`], leftover `remaining` is written to an optional caller
-/// slot (see [`scope`](Self::scope)); for Len fields the library then discards
-/// that many bytes from the reader. Nested messages call
-/// [`fields`](Self::fields) / [`fields_with`](Self::fields_with) (consuming
-/// `self`).
+/// slot (see [`scope`](Self::scope); no I/O). For Len fields the library then
+/// discards that many bytes from the reader on the fallible path. Nested
+/// messages call [`fields`](Self::fields) / [`fields_with`](Self::fields_with)
+/// (consuming `self`).
 ///
 /// Does not implement [`Read`] itself (so field/varint extension traits do not
 /// attach directly). Modes that consume `self`:
@@ -50,7 +51,9 @@ use ::std::io::{Read, Write};
 ///
 /// `remaining()` always fits in [`u32`] by construction. Top-level message
 /// lengths also stay `<= MAX_MESSAGE_SIZE` at [`ReadExtProtobuf`] entrances
-/// (`debug_assert`).
+/// (`debug_assert` only). Do not `mem::forget` a scoped [`LenBody`] /
+/// [`LenBodyRead`]: [`Drop`] must run so leftover writeback stays accurate
+/// (forgetting leaves leftover at `0` and underskips; prefer that to overskip).
 ///
 /// [`ReadExtVarint`]: crate::ReadExtVarint
 /// [`ReadExtTag`]: crate::ReadExtTag
@@ -176,10 +179,10 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
 
     /// Child body of exactly `n` bytes (prepaid).
     ///
-    /// Charges `n` against this body immediately. On child [`Drop`], leftover
-    /// unread count is written to `leftover` (no I/O). The caller must then
-    /// discard that many bytes from the underlying reader (Len parse does this).
-    /// Panics if `n > remaining()`.
+    /// Charges `n` against this body immediately. `*leftover` starts at `0`;
+    /// on child [`Drop`], unread count is written to `leftover` (no I/O). The
+    /// caller must then discard that many bytes from the underlying reader
+    /// (Len parse does this). Panics if `n > remaining()`.
     #[inline]
     pub(crate) fn scope<'b>(&'b mut self, n: u32, leftover: &'b mut u32) -> LenBody<'b, R> {
         assert!(
@@ -188,7 +191,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             self.remaining
         );
         self.remaining -= n;
-        *leftover = n;
+        *leftover = 0;
         LenBody {
             reader: &mut *self.reader,
             remaining: n,
@@ -207,6 +210,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         FieldIter {
             body: self,
             handler: VecLenPayload,
+            failed: false,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -240,6 +244,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         FieldIter {
             body: self,
             handler,
+            failed: false,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -249,7 +254,8 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
     /// When the field is length-delimited, `handler` runs once with a child
     /// [`LenBody`] by value for the payload length. After it returns (and
     /// [`Drop`] writes leftover into a local slot), unused body bytes are
-    /// discarded. Other wire types do not call `handler`.
+    /// discarded. Handler errors are preferred over discard I/O errors. Other
+    /// wire types do not call `handler`.
     #[inline]
     fn parse_field_with<F>(&mut self, handler: &mut F) -> Result<Field<F::Payload>>
     where
@@ -268,10 +274,11 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
                 let mut left = 0;
                 let result = handler.handle(tag.field_number, self.scope(length, &mut left));
                 // `LenBody` Drop wrote unread count into `left`.
-                discard_reader_bytes(self.reader, left)?;
-                match result {
-                    Ok(payload) => FieldValue::Len(payload),
-                    Err(err) => return Err(err),
+                let discard = discard_reader_bytes(self.reader, left);
+                match (result, discard) {
+                    (Err(handler_err), _) => return Err(handler_err),
+                    (Ok(_), Err(discard_err)) => return Err(discard_err),
+                    (Ok(payload), Ok(())) => FieldValue::Len(payload),
                 }
             }
             WireType::SGroup => FieldValue::SGroup,
@@ -288,7 +295,8 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
 ///
 /// Returned by [`LenBody::into_read`]. Caps reads by the body's remaining
 /// budget (soft `Ok(0)` when exhausted), like a `u32`-bounded
-/// [`std::io::Take`].
+/// [`std::io::Take`]. Must be dropped (do not `mem::forget`) so the inner
+/// [`LenBody`] can write leftover into its scope slot.
 pub struct LenBodyRead<'a, R: ?Sized> {
     body: LenBody<'a, R>,
 }
@@ -359,9 +367,16 @@ fn read_body<R: Read + ?Sized>(body: &mut LenBody<'_, R>, buf: &mut [u8]) -> Res
     if max == 0 {
         return Ok(0);
     }
-    let n = body.reader.read(&mut buf[..max])?;
-    body.remaining -= n as u32;
-    Ok(n)
+    loop {
+        match body.reader.read(&mut buf[..max]) {
+            Ok(n) => {
+                body.remaining -= n as u32;
+                return Ok(n);
+            }
+            Err(err) if err.kind() == ::std::io::ErrorKind::Interrupted => continue,
+            Err(err) => return Err(err.into()),
+        }
+    }
 }
 
 /// Read exactly `buf.len()` bytes from `body`.
@@ -440,11 +455,13 @@ impl<R: Read + ?Sized> LenHandler<R> for VecLenPayload {
     fn handle(
         &mut self,
         _field_number: FieldNumber,
-        body: LenBody<'_, R>,
+        mut body: LenBody<'_, R>,
     ) -> Result<Self::Payload> {
         let len = body.remaining();
         let mut buf = vec![0u8; len as usize];
-        body.into_read().read_exact(&mut buf)?;
+        // Use `read_body_exact` so mid-budget truncation is
+        // `UnexpectedEof` (same as fixed-width), not `IoError`.
+        read_body_exact(&mut body, &mut buf)?;
         Ok(buf)
     }
 }
@@ -508,9 +525,15 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
 /// Consumes the wire bytes of each field it has advanced over (including unread
 /// Len body bytes discarded after the handler). Fields never yielded leave
 /// their bytes in the held [`LenBody`].
+///
+/// After a yielded [`Err`], further [`next`](Iterator::next) calls return
+/// [`None`] (fused on error). The reader / budget may already be desynced
+/// (for example a mid-discard I/O failure, or a handler panic that skipped
+/// discard); abandon the iterator.
 pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
     body: T,
     handler: F,
+    failed: bool,
     _marker: ::std::marker::PhantomData<&'a mut R>,
 }
 
@@ -580,10 +603,16 @@ where
     type Item = Result<Field<F::Payload>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.body.as_ref().remaining() == 0 {
+        if self.failed || self.body.as_ref().remaining() == 0 {
             return None;
         }
-        Some(self.body.as_mut().parse_field_with(&mut self.handler))
+        match self.body.as_mut().parse_field_with(&mut self.handler) {
+            Ok(field) => Some(Ok(field)),
+            Err(err) => {
+                self.failed = true;
+                Some(Err(err))
+            }
+        }
     }
 }
 
@@ -718,6 +747,7 @@ where
         FieldIter {
             body: LenBody::new(self, len),
             handler: VecLenPayload,
+            failed: false,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -750,6 +780,7 @@ where
         FieldIter {
             body: LenBody::new(self, len),
             handler,
+            failed: false,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -1125,6 +1156,58 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert!(matches!(len_err, ProtobufError::UnexpectedEof));
+    }
+
+    #[test]
+    fn oversized_budget_truncated_len_is_unexpected_eof() {
+        use super::ReadExtProtobuf;
+        use crate::ProtobufError;
+        use ::std::io::Cursor;
+
+        // Length prefix claims 3; only 1 payload byte on the reader, but budget
+        // is large enough to pass the prepaid length check — VecLenPayload must
+        // still surface UnexpectedEof (not IoError).
+        let err = Cursor::new([0x0A, 0x03, b'A'])
+            .read_protobuf_fields(100)
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            matches!(err, ProtobufError::UnexpectedEof),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn handler_err_preferred_over_discard_err() {
+        use super::ReadExtProtobuf;
+        use crate::ProtobufError;
+        use ::std::io::Cursor;
+
+        // Handler fails without reading; leftover discard then hits EOF. The
+        // iterator must return the handler error, not the discard UnexpectedEof.
+        let err = Cursor::new([0x0A, 0x03, b'A'])
+            .read_protobuf_fields_with(100, |_n, _body| -> crate::Result<Vec<u8>> {
+                Err(ProtobufError::InvalidWireType { value: 7 })
+            })
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            matches!(err, ProtobufError::InvalidWireType { value: 7 }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn field_iter_fuses_after_error() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        let mut cursor = Cursor::new([0x0D, 0x01, 0x02, 0x03]);
+        let mut fields = cursor.read_protobuf_fields(4);
+        assert!(fields.next().unwrap().is_err());
+        assert!(fields.next().is_none());
     }
 }
 
