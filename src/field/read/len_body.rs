@@ -679,14 +679,19 @@ pub trait ReadExtProtobuf: Read {
     /// Like [`read_protobuf_fields()`](Self::read_protobuf_fields), but each
     /// length-delimited field is built by `handler` instead of `Vec<u8>`.
     ///
-    /// `handler` receives the Len body **by value** (`remaining()` is the
-    /// payload length). After it returns, unused body bytes are discarded from
-    /// `self`. Nested messages use [`LenBody::fields()`] /
-    /// [`fields_with()`](LenBody::fields_with); `bytes` / `string` use
-    /// [`LenBody::into_read()`]. Wrap a stateful handler as
-    /// `|n, body| my_handler.handle(n, body)`.
+    /// For each Len field, `handler` gets a [`LenBody`] covering that field’s
+    /// payload. Call the method that matches what you think the field is:
     ///
-    /// Reader consumption matches
+    /// - nested message — [`fields()`](LenBody::fields) /
+    ///   [`fields_with()`](LenBody::fields_with)
+    /// - `bytes` / `string` — [`into_read()`](LenBody::into_read) (then
+    ///   [`Read`](std::io::Read) helpers)
+    /// - packed repeated varints — [`varints()`](LenBody::varints)
+    /// - packed repeated fixed32 / fixed64 — [`fixed32s()`](LenBody::fixed32s) /
+    ///   [`fixed64s()`](LenBody::fixed64s)
+    ///
+    /// After `handler` returns, any unread payload bytes are discarded from
+    /// `self`. Reader consumption otherwise matches
     /// [`read_protobuf_fields()`](Self::read_protobuf_fields).
     ///
     /// # Examples
