@@ -26,17 +26,36 @@
 //!
 //! ### Reading Fields
 //!
-//! Read fields from any `AsRef<[u8]>` value, such as a slice or `Vec<u8>`.
-//! Length-delimited bytes stay borrowed (`Field<&[u8]>`).
+//! [`AsRefExtProtobuf::read_protobuf_fields`] returns a [`FieldIterFromSlice`]:
+//! an [`Iterator`] whose item is [`Result`]`<`[`Field`]`<&'a [u8]>>`.
+//! Each [`Field`] has public fields `field_number: FieldNumber` and
+//! `value: FieldValue<L>` (`L = &[u8]` here — Len payloads borrow the input).
 //!
 //! ```rust
-//! use protobuf_core::{AsRefExtProtobuf, Field};
+//! use protobuf_core::{
+//!     AsRefExtProtobuf, Field, FieldIterFromSlice, FieldValue, Result,
+//! };
 //!
-//! let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1: 150
+//! let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1 varint: 150
+//!
+//! // Iterator type (slice entrance; no extra `len` — the slice is the bound).
+//! let mut iter: FieldIterFromSlice<'_> = bytes.read_protobuf_fields();
+//!
+//! // Item = Result<Field<&[u8]>, ProtobufError>
+//! let field: Field<&[u8]> = iter.next().unwrap().unwrap();
+//! assert_eq!(field.field_number.as_u32(), 1);
+//! match field.value {
+//!     FieldValue::Varint(v) => assert_eq!(v.to_uint64(), 150),
+//!     FieldValue::I32(_) | FieldValue::I64(_) | FieldValue::Len(_)
+//!     | FieldValue::SGroup | FieldValue::EGroup => unreachable!(),
+//! }
+//!
+//! // Or collect the rest of the message:
 //! let fields: Vec<Field<&[u8]>> = bytes
 //!     .read_protobuf_fields()
-//!     .collect::<Result<Vec<_>, _>>()
+//!     .collect::<Result<Vec<_>>>()
 //!     .unwrap();
+//! assert_eq!(fields.len(), 1);
 //! ```
 //!
 //! ### Writing Fields

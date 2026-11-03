@@ -25,17 +25,39 @@ This library provides common definitions, constants, enums, and basic logic for 
 
 ### Reading Fields
 
-```rust
-use protobuf_core::{AsRefExtProtobuf, Field};
+`AsRefExtProtobuf::read_protobuf_fields` returns a `FieldIterFromSlice`: an
+`Iterator` whose item is `Result<Field<&[u8]>, ProtobufError>`. Each `Field`
+has public fields `field_number: FieldNumber` and `value: FieldValue<L>`
+(`L = &[u8]` here — Len payloads borrow the input).
 
-let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1: 150
+```rust
+use protobuf_core::{
+    AsRefExtProtobuf, Field, FieldIterFromSlice, FieldValue, Result,
+};
+
+let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1 varint: 150
+
+// Iterator type (slice entrance; no extra `len` — the slice is the bound).
+let mut iter: FieldIterFromSlice<'_> = bytes.read_protobuf_fields();
+
+// Item = Result<Field<&[u8]>, ProtobufError>
+let field: Field<&[u8]> = iter.next().unwrap().unwrap();
+assert_eq!(field.field_number.as_u32(), 1);
+match field.value {
+    FieldValue::Varint(v) => assert_eq!(v.to_uint64(), 150),
+    FieldValue::I32(_) | FieldValue::I64(_) | FieldValue::Len(_)
+    | FieldValue::SGroup | FieldValue::EGroup => unreachable!(),
+}
+
+// Or collect the whole message:
 let fields: Vec<Field<&[u8]>> = bytes
     .read_protobuf_fields()
-    .collect::<Result<Vec<_>, _>>()
+    .collect::<Result<Vec<_>>>()
     .unwrap();
+assert_eq!(fields.len(), 1);
 ```
 
-The example above is `AsRefExtProtobuf`: `read_protobuf_fields` borrows `Field<&[u8]>` (the slice length is the bound). `ReadExtProtobuf::read_protobuf_fields(len)` / `read_protobuf_fields_with(len, handler)` take an explicit `u32` message byte budget and are the only public streaming field entrances (`LenBody` is built inside those methods; there is no public constructor). Lower-level `ReadExtVarint` / `ReadExtTag` methods do not take `len`; they read until that reader's EOF (or the caller's bound such as `std::io::Take`). Length-delimited payloads default to `Vec<u8>` via `VecLenPayload`. The `*_with` handler is a closure ([`LenHandler`] via blanket); `*_handler` takes any `LenHandler` directly. Len body by value; `remaining()` is the payload length. After the closure returns, unused body bytes are discarded. Nested messages call consuming `LenBody::fields` / `fields_with` (same root `R`); `bytes` / `string` use consuming `LenBody::into_read`; packed scalars use `varints` / `fixed32s` / `fixed64s`. Byte iterators are not supported; use a slice or a `Read` (with `len` for field APIs).
+The example above is the slice path. `ReadExtProtobuf::read_protobuf_fields(len)` / `read_protobuf_fields_with(len, handler)` take an explicit `u32` message byte budget and are the only public streaming field entrances (`LenBody` is built inside those methods; there is no public constructor). Their iterator is `FieldIter` and default Len payloads are owned `Vec<u8>` via `VecLenPayload`. Lower-level `ReadExtVarint` / `ReadExtTag` methods do not take `len`; they read until that reader's EOF (or the caller's bound such as `std::io::Take`). The `*_with` handler is a closure ([`LenHandler`] via blanket); `*_handler` takes any `LenHandler` directly. Len body by value; `remaining()` is the payload length. After the closure returns, unused body bytes are discarded. Nested messages call consuming `LenBody::fields` / `fields_with` (same root `R`); `bytes` / `string` use consuming `LenBody::into_read`; packed scalars use `varints` / `fixed32s` / `fixed64s`. Byte iterators are not supported; use a slice or a `Read` (with `len` for field APIs).
 
 Deprecated group wire types (`SGroup` / `EGroup`) are returned as tag-only `FieldValue` variants. The group body stays on the cursor; discard via `skip_until` + `until_group_ends`, preserve via slice `take_until` / Read `copy_until` with the same predicate, or parse with `group_body` — the start tag is already consumed, so write it yourself first when building an unknown-field blob. Prefer `until_group_ends` for skip/preserve (full field-number stack); `group_body` is depth-only and does not check nested end-group numbers — nest another `group_body` when you see an inner `SGroup`.
 
