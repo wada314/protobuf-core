@@ -170,8 +170,7 @@ pub enum ProtobufError {
     ///
     /// Group wire types [`WireType::SGroup`] (3) and [`WireType::EGroup`] (4)
     /// are known values (groups are deprecated in the Protocol Buffers language
-    /// since proto2); field readers return [`FieldValue::SGroup`] /
-    /// [`FieldValue::EGroup`] for those.
+    /// since proto2), so they do not produce this error.
     #[error("Invalid wire type: {value} (must be 0-5)")]
     InvalidWireType { value: u8 },
 
