@@ -103,9 +103,9 @@
 //!   Returns an iterator of [`Field<&[u8]>`](Field); for a length-delimited
 //!   field, the payload is a reference to part of the input slice.
 //! - [`ReadExtProtobuf`]: from a [`std::io::Read`]. Methods that read
-//!   fields require the message length; lower-level tag/varint helpers do
-//!   not. Length-delimited values default to [`Field<Vec<u8>>`], or you can
-//!   customize it by passing your own closure to parse the payload bytes.
+//!   fields require the message length. Length-delimited values default to
+//!   [`Field<Vec<u8>>`], or you can customize it by passing your own closure
+//!   to parse the payload bytes.
 //!   The closure receives each length-delimited field as a [`LenBody`]: a
 //!   view limited to that field's bytes (nested messages, strings/bytes,
 //!   packed repeats). See [`LenBody`] for how to consume it.
