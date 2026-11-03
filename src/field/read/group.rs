@@ -9,9 +9,9 @@ use crate::{ProtobufError, Result};
 /// Predicate for protobuf **group** skip / preserve: returns `Ok(true)` when
 /// the matching end-group tag is reached.
 ///
-/// Pass this to [`crate::FieldIterFromSlice::skip_until`] /
-/// [`crate::FieldIter::skip_until`] / [`crate::FieldIterFromSlice::take_until`] /
-/// [`crate::FieldIter::copy_until`] after the start-group tag for
+/// Pass this to [`crate::FieldIterFromSlice::skip_until()`] /
+/// [`crate::FieldIter::skip_until()`] / [`crate::FieldIterFromSlice::take_until()`] /
+/// [`crate::FieldIter::copy_until()`] after the start-group tag for
 /// `field_number` has already been consumed. Nested groups are tracked with
 /// an explicit field-number stack inside the returned closure.
 ///
@@ -43,32 +43,32 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 
 /// Field-iterator adapter that stops at the matching end-group tag.
 ///
-/// Returned by [`crate::FieldIterFromSlice::group_body`] /
-/// [`crate::FieldIter::group_body`]. Call after the start-group tag for
+/// Returned by [`crate::FieldIterFromSlice::group_body()`] /
+/// [`crate::FieldIter::group_body()`]. Call after the start-group tag for
 /// `field_number` has already been consumed.
 ///
 /// # Termination
 ///
-/// [`Iterator::next`] returns `None` only after the matching outermost
+/// [`Iterator::next()`] returns `None` only after the matching outermost
 /// [`FieldValue::EGroup`] is seen (that tag is **consumed and not yielded**).
 /// If the underlying field iterator returns `None` before that end tag, this
 /// adapter yields [`ProtobufError::UnexpectedEof`].
 ///
 /// Like a normal [`Iterator`], **nothing is guaranteed after the first
-/// `None`**. A later `next` may pull again from the underlying iterator and
+/// `None`**. A later `next()` may pull again from the underlying iterator and
 /// yield fields **past** the group, or hit soft EOF and yield
 /// [`UnexpectedEof`](ProtobufError::UnexpectedEof) again. If you need sticky
-/// `None`, wrap with [`Iterator::fuse`] (for example
+/// `None`, wrap with [`Iterator::fuse()`] (for example
 /// `fields.group_body(n).fuse()`).
 ///
-/// After a yielded [`Err`], further `next` calls are likewise unspecified
+/// After a yielded [`Err`], further `next()` calls are likewise unspecified
 /// (the cursor may already have advanced). Typical `Result`-item consumers
 /// stop at the first error (`?`, `collect::<Result<_, _>>()`,
 /// `try_for_each`, …); this adapter does not fuse on `Err`.
 ///
 /// # Nesting model (depth only)
 ///
-/// In contrast to [`until_group_ends`], this adapter remembers only the
+/// In contrast to [`until_group_ends()`], this adapter remembers only the
 /// outermost group's field number. Nested [`FieldValue::SGroup`] /
 /// [`FieldValue::EGroup`] only adjust an integer **depth**; inner end-group
 /// field numbers are not checked against their start tags.
@@ -76,7 +76,7 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 /// That means the caller is responsible for validating nested group field
 /// numbers if that matters. Apply the same adapter again when an inner
 /// [`FieldValue::SGroup`] is seen (nested borrows via
-/// [`GroupBody::group_body`]):
+/// [`GroupBody::group_body()`]):
 ///
 /// ```
 /// use ::protobuf_core::{AsRefExtProtobuf, FieldValue};

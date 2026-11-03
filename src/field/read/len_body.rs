@@ -2,14 +2,14 @@
 //!
 //! [`LenBody`] is what Len handlers receive **by value**: the delimited payload
 //! (or top-level message) over `&mut R` with a `u32`
-//! [`remaining`](LenBody::remaining). The handler signature is HRTB so the body
+//! [`remaining()`](LenBody::remaining). The handler signature is HRTB so the body
 //! cannot escape the closure; on [`Drop`] any leftover count is written back to
 //! a caller slot (no I/O in [`Drop`]). For Len fields the library then discards
 //! that many bytes on the fallible parse path; top-level unused budget stays on
 //! the underlying reader. [`LenBody`] itself does **not** implement [`Read`];
-//! bytes/string copy uses consuming [`into_read`](LenBody::into_read), and
-//! nested decode uses [`fields`](LenBody::fields) /
-//! [`fields_with`](LenBody::fields_with). Top-level message `len` is expected
+//! bytes/string copy uses consuming [`into_read()`](LenBody::into_read), and
+//! nested decode uses [`fields()`](LenBody::fields) /
+//! [`fields_with()`](LenBody::fields_with). Top-level message `len` is expected
 //! to be `<= MAX_MESSAGE_SIZE` ([`crate::MAX_MESSAGE_SIZE`], 2 GiB); that is
 //! `debug_assert`ed at the entrance (not enforced in release).
 
@@ -34,18 +34,18 @@ use ::std::io::{Read, Write};
 ///
 /// Len handlers take this **by value**:
 /// `for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>` (HRTB so it cannot
-/// escape the closure). [`remaining`](Self::remaining) at entry is the payload
-/// length. On [`Drop`], leftover `remaining` is written to an optional caller
+/// escape the closure). [`remaining()`](Self::remaining) at entry is the payload
+/// length. On [`Drop`], the leftover count from `remaining()` is written to an optional caller
 /// slot when nested under a parent body (no I/O). For Len fields the library
 /// then discards that many bytes from the reader on the fallible path. Nested
-/// messages call [`fields`](Self::fields) / [`fields_with`](Self::fields_with)
+/// messages call [`fields()`](Self::fields) / [`fields_with()`](Self::fields_with)
 /// (consuming `self`).
 ///
 /// Does not implement [`Read`] itself (so field/varint extension traits do not
 /// attach directly). Modes that consume `self`:
-/// [`into_read`](Self::into_read) (bytes/string via [`LenBodyRead`]),
-/// [`varints`](Self::varints) / [`fixed32s`](Self::fixed32s) /
-/// [`fixed64s`](Self::fixed64s), and [`fields`](Self::fields)*.
+/// [`into_read()`](Self::into_read) (bytes/string via [`LenBodyRead`]),
+/// [`varints()`](Self::varints) / [`fixed32s()`](Self::fixed32s) /
+/// [`fixed64s()`](Self::fixed64s), and [`fields()`](Self::fields)*.
 ///
 /// # Contract
 ///
@@ -60,7 +60,7 @@ use ::std::io::{Read, Write};
 pub struct LenBody<'a, R: ?Sized> {
     reader: &'a mut R,
     remaining: u32,
-    /// When set, [`Drop`] does `*remaining_out = remaining` (Len [`scope`] slot).
+    /// When set, [`Drop`] does `*remaining_out = remaining` (Len [`scope()`] slot).
     remaining_out: Option<&'a mut u32>,
 }
 
@@ -139,9 +139,9 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
     /// Treat this body as a byte stream (consumes `self`).
     ///
     /// For `string` / `bytes` (or any opaque Len payload) copy via
-    /// [`Read`](std::io::Read) helpers (`read_exact`, `read_to_end`, …). Soft
-    /// EOF when [`remaining`](Self::remaining) is exhausted. Prefer
-    /// [`fields`](Self::fields)* / packed iterators for structured decode.
+    /// [`Read`](std::io::Read) helpers (`read_exact()`, `read_to_end()`, …). Soft
+    /// EOF when [`remaining()`](Self::remaining) is exhausted. Prefer
+    /// [`fields()`](Self::fields)* / packed iterators for structured decode.
     #[inline]
     pub fn into_read(self) -> LenBodyRead<'a, R> {
         LenBodyRead { body: self }
@@ -149,7 +149,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
 
     /// Iterate packed varints from this body (consumes `self`).
     ///
-    /// Soft-stops when [`remaining`](Self::remaining) is exhausted. A truncated
+    /// Soft-stops when [`remaining()`](Self::remaining) is exhausted. A truncated
     /// mid-varint is [`ProtobufError::UnexpectedEof`]. While this iterator is
     /// live, the body cannot be reinterpreted as fields or raw bytes.
     #[inline]
@@ -215,7 +215,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         }
     }
 
-    /// Like [`fields`](Self::fields), but each length-delimited field is built
+    /// Like [`fields()`](Self::fields), but each length-delimited field is built
     /// by `handler` instead of [`VecLenPayload`].
     ///
     /// The body is passed **by value** (`remaining()` at entry is the payload
@@ -280,7 +280,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
 
 /// [`Read`] view of a consumed [`LenBody`].
 ///
-/// Returned by [`LenBody::into_read`]. Caps reads by the body's remaining
+/// Returned by [`LenBody::into_read()`]. Caps reads by the body's remaining
 /// budget (soft `Ok(0)` when exhausted), like a `u32`-bounded
 /// [`std::io::Take`]. Must be dropped (do not `mem::forget`) so the inner
 /// [`LenBody`] can write leftover into its scope slot.
@@ -310,7 +310,7 @@ impl<'a, R: Read + ?Sized> Read for LenBodyRead<'a, R> {
 
 /// Iterator of packed varints from a consumed [`LenBody`].
 ///
-/// Returned by [`LenBody::varints`]. Soft-stops at body end; truncated
+/// Returned by [`LenBody::varints()`]. Soft-stops at body end; truncated
 /// mid-varint is [`ProtobufError::UnexpectedEof`].
 pub struct VarintIterFromLenBody<'a, R: ?Sized> {
     body: LenBody<'a, R>,
@@ -334,7 +334,7 @@ impl<'a, R: Read + ?Sized> Iterator for VarintIterFromLenBody<'a, R> {
 
 /// Iterator of packed fixed-width values from a consumed [`LenBody`].
 ///
-/// Returned by [`LenBody::fixed32s`] (`N = 4`) and [`LenBody::fixed64s`]
+/// Returned by [`LenBody::fixed32s()`] (`N = 4`) and [`LenBody::fixed64s()`]
 /// (`N = 8`). Soft-stops at body end; a partial trailing element is
 /// [`ProtobufError::UnexpectedEof`].
 pub struct FixedIterFromLenBody<'a, R: ?Sized, const N: usize> {
@@ -405,7 +405,7 @@ fn discard_reader_bytes<R: Read + ?Sized>(reader: &mut R, mut left: u32) -> Resu
 /// Used by [`FieldIter`]. Closures
 /// `FnMut(FieldNumber, LenBody<'_, R>) -> Result<L>` implement this via a
 /// blanket impl. [`VecLenPayload`] is the default for
-/// [`ReadExtProtobuf::read_protobuf_fields`] / [`LenBody::fields`].
+/// [`ReadExtProtobuf::read_protobuf_fields()`] / [`LenBody::fields()`].
 pub trait LenHandler<R: ?Sized> {
     /// Payload stored in [`FieldValue::Len`].
     type Payload;
@@ -512,17 +512,17 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
 /// Iterator for reading raw protobuf fields from a [`LenBody`] holder.
 ///
 /// `T` is typically an owned [`LenBody`] (from
-/// [`ReadExtProtobuf::read_protobuf_fields`] or [`LenBody::fields`] /
-/// [`fields_with`](LenBody::fields_with)). Bound with [`AsRef`] /
+/// [`ReadExtProtobuf::read_protobuf_fields()`] or [`LenBody::fields()`] /
+/// [`fields_with()`](LenBody::fields_with)). Bound with [`AsRef`] /
 /// [`AsMut`]`<LenBody<'a, R>>`.
 ///
 /// Consumes the wire bytes of each field it has advanced over (including unread
 /// Len body bytes discarded after the handler). Fields never yielded leave
 /// their bytes in the held [`LenBody`].
 ///
-/// After a yielded [`Err`], further [`next`](Iterator::next) calls return
-/// [`None`] (fused on error). Do not call [`skip_until`](Self::skip_until) /
-/// [`copy_until`](Self::copy_until) / [`group_body`](Self::group_body) after
+/// After a yielded [`Err`], further [`next()`](Iterator::next) calls return
+/// [`None`] (fused on error). Do not call [`skip_until()`](Self::skip_until) /
+/// [`copy_until()`](Self::copy_until) / [`group_body()`](Self::group_body) after
 /// that either — they are not fused and may mis-parse a desynced cursor. The
 /// reader / budget may already be wrong (mid-discard I/O failure, or a handler
 /// panic that skipped discard); abandon the iterator.
@@ -541,9 +541,9 @@ where
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
     /// Intended mainly for protobuf **group** handling: after an
-    /// [`FieldValue::SGroup`] was consumed, pair with [`crate::until_group_ends`]
+    /// [`FieldValue::SGroup`] was consumed, pair with [`crate::until_group_ends()`]
     /// to discard the body through the matching end tag (see
-    /// [`crate::FieldIterFromSlice::skip_until`] for a runnable example).
+    /// [`crate::FieldIterFromSlice::skip_until()`] for a runnable example).
     ///
     /// Length-delimited payloads are discarded without allocating. The byte
     /// budget is this iterator's remaining count.
@@ -567,13 +567,13 @@ where
     /// Copy fields to `out` until `pred` returns `Ok(true)`.
     ///
     /// Intended mainly for protobuf **group** preserve on a stream: after an
-    /// [`FieldValue::SGroup`] was consumed, pair with [`crate::until_group_ends`]
+    /// [`FieldValue::SGroup`] was consumed, pair with [`crate::until_group_ends()`]
     /// to tee the body and matching end tag (start tag already consumed — write
     /// it yourself first if the preserve blob needs it). For zero-copy
-    /// preserve from a slice, use [`crate::FieldIterFromSlice::take_until`]
+    /// preserve from a slice, use [`crate::FieldIterFromSlice::take_until()`]
     /// instead.
     ///
-    /// Same stop semantics as [`skip_until`](Self::skip_until). Writes exact
+    /// Same stop semantics as [`skip_until()`](Self::skip_until). Writes exact
     /// wire bytes (including non-canonical varints). Returns the number of
     /// bytes written. On error, `out` may already contain a partial copy.
     pub fn copy_until<P, W>(&mut self, pred: P, out: &mut W) -> Result<usize>
@@ -622,7 +622,7 @@ where
 /// This trait provides low-level utilities for reading field-by-field from a byte stream.
 /// Each method takes the message length `len: u32` (how many bytes of `self`
 /// make up this message). Length-delimited payloads default to `Vec<u8>`.
-/// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
+/// [`read_protobuf_fields_with()`](ReadExtProtobuf::read_protobuf_fields_with)
 /// takes a Len-building closure. This trait only splits the stream into raw
 /// fields (numbers and wire bytes). Building a message — choosing which
 /// fields mean what, decoding their values, and assembling your own struct —
@@ -668,28 +668,28 @@ pub trait ReadExtProtobuf: Read {
     ///   `self` (for Len, any unread payload bytes are discarded before yield).
     /// - Stopping or dropping the iterator early leaves the unread part of the
     ///   `len`-byte window still on `self` (the tail is not skipped for you).
-    /// - Running until [`FieldIter::remaining`] is `0` means exactly `len`
+    /// - Running until [`FieldIter::remaining()`] is `0` means exactly `len`
     ///   bytes were consumed from `self`.
     /// - If `self` ends before those `len` bytes are finished, the next read is
     ///   [`UnexpectedEof`](crate::ProtobufError::UnexpectedEof) (including a
-    ///   truncated mid-field). After any [`Err`], further `next` is [`None`];
+    ///   truncated mid-field). After any [`Err`], further `next()` is [`None`];
     ///   abandon the iterator — `self` may already be out of sync.
     fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, LenBody<'_, Self>>
     where
         Self: Sized;
 
-    /// Like [`read_protobuf_fields`](Self::read_protobuf_fields), but each
+    /// Like [`read_protobuf_fields()`](Self::read_protobuf_fields), but each
     /// length-delimited field is built by `handler` instead of `Vec<u8>`.
     ///
     /// `handler` receives the Len body **by value** (`remaining()` is the
     /// payload length). After it returns, unused body bytes are discarded from
-    /// `self`. Nested messages use [`LenBody::fields`] /
-    /// [`fields_with`](LenBody::fields_with); `bytes` / `string` use
-    /// [`LenBody::into_read`]. Wrap a stateful handler as
+    /// `self`. Nested messages use [`LenBody::fields()`] /
+    /// [`fields_with()`](LenBody::fields_with); `bytes` / `string` use
+    /// [`LenBody::into_read()`]. Wrap a stateful handler as
     /// `|n, body| my_handler.handle(n, body)`.
     ///
     /// Reader consumption matches
-    /// [`read_protobuf_fields`](Self::read_protobuf_fields).
+    /// [`read_protobuf_fields()`](Self::read_protobuf_fields).
     ///
     /// # Examples
     ///
@@ -1526,7 +1526,7 @@ mod len_payload {
 
     /// Dummy self-recursive message: `Node { value, child: Option<Node> }`.
     ///
-    /// Decode walks a fixed root `R` via [`LenBody::fields_with`]: each nested
+    /// Decode walks a fixed root `R` via [`LenBody::fields_with()`]: each nested
     /// Len body is already a `LenBody<'_, R>` from the Len handler, so
     /// monomorphization does not stack `&mut` layers.
     #[derive(Debug, Default, PartialEq)]
@@ -1574,7 +1574,7 @@ mod len_payload {
     }
 
     /// Top-level entrance via [`ReadExtProtobuf`]; nested bodies stay on
-    /// [`LenBody::fields_with`] / [`parse_node`].
+    /// [`LenBody::fields_with()`] / [`parse_node()`].
     fn parse_node_from_read<R: Read>(reader: &mut R, len: u32) -> crate::Result<Node> {
         let mut node = Node::default();
         for field in reader.read_protobuf_fields_with(len, |n, body| {
@@ -1638,7 +1638,7 @@ mod len_payload {
     }
 
     /// Indirect recursion: `TypeA` contains `TypeB`, `TypeB` contains `TypeA`.
-    /// Same fixed-`R` [`LenBody`] pattern as [`direct_recursive_node_via_len_body_scope`].
+    /// Same fixed-`R` [`LenBody`] pattern as [`direct_recursive_node_via_len_body_scope()`].
     #[derive(Debug, Default, PartialEq)]
     struct TypeA {
         mark: u64,

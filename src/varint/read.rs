@@ -15,7 +15,7 @@ use super::Varint;
 ///
 /// Yields [`Result<Varint>`] for each varint. Soft-stops when the reader has no
 /// bytes left; a truncated mid-varint is [`ProtobufError::UnexpectedEof`].
-/// Returned by [`ReadExtVarint::read_varints`].
+/// Returned by [`ReadExtVarint::read_varints()`].
 pub struct VarintIterFromRead<R> {
     reader: R,
 }
@@ -89,11 +89,11 @@ fn try_read_varint_with_raw<'a, R: Read>(
 /// Reads until the reader's EOF (or an existing [`std::io::Take`] bound).
 /// Methods do not take a separate byte-budget argument.
 ///
-/// - [`read_varint_with_raw`](Self::read_varint_with_raw) /
-///   [`read_varint`](Self::read_varint) — complete reads; empty or truncated
+/// - [`read_varint_with_raw()`](Self::read_varint_with_raw) /
+///   [`read_varint()`](Self::read_varint) — complete reads; empty or truncated
 ///   input is [`UnexpectedEof`](ProtobufError::UnexpectedEof) (check a length
-///   bound / `remaining` first for soft end)
-/// - [`read_varints`](Self::read_varints) — soft-stops when no bytes remain;
+///   bound / `remaining()` first for soft end)
+/// - [`read_varints()`](Self::read_varints) — soft-stops when no bytes remain;
 ///   truncated mid-varint is [`UnexpectedEof`](ProtobufError::UnexpectedEof)
 ///
 /// Chunked input: buffer until a terminating byte or [`MAX_VARINT_BYTES`] are
@@ -160,7 +160,7 @@ pub trait ReadExtVarint: Read {
 
     /// Read a varint until a complete value.
     ///
-    /// Via [`read_varint_with_raw`](Self::read_varint_with_raw) (wire bytes
+    /// Via [`read_varint_with_raw()`](Self::read_varint_with_raw) (wire bytes
     /// discarded). Empty or truncated input is
     /// [`UnexpectedEof`](ProtobufError::UnexpectedEof).
     #[inline]

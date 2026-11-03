@@ -92,7 +92,7 @@ impl<'a> FieldIterFromSlice<'a> {
     ///
     /// Intended mainly for protobuf **group** handling: after an
     /// [`crate::FieldValue::SGroup`] was consumed, pair with
-    /// [`crate::until_group_ends`] to discard the body through the matching
+    /// [`crate::until_group_ends()`] to discard the body through the matching
     /// end tag. Length-delimited payloads are discarded without allocating.
     ///
     /// ```
@@ -125,9 +125,9 @@ impl<'a> FieldIterFromSlice<'a> {
     ///
     /// Intended mainly for protobuf **group** preserve: after an
     /// [`crate::FieldValue::SGroup`] was consumed, pair with
-    /// [`crate::until_group_ends`] to borrow the body through the matching end
+    /// [`crate::until_group_ends()`] to borrow the body through the matching end
     /// tag (start tag already consumed). Same stop / nesting semantics as
-    /// [`skip_until`](Self::skip_until).
+    /// [`skip_until()`](Self::skip_until).
     ///
     /// On error the cursor may already have advanced through some fields; there
     /// is no partial span return.
