@@ -65,6 +65,18 @@
 //! buffer.write_protobuf_field(&field).unwrap();
 //! ```
 //!
+//! ## Extension traits ([`ext`])
+//!
+//! Read and write APIs are extension traits
+//! ([`AsRefExtProtobuf`], [`ReadExtProtobuf`], [`ReadExtTag`],
+//! [`ReadExtVarint`], [`WriteExtProtobuf`], [`WriteExtVarint`]). They are
+//! re-exported at the crate root, and also gathered in [`ext`] so one import
+//! covers every extension method:
+//!
+//! ```rust
+//! use protobuf_core::ext::*;
+//! ```
+//!
 //! ## Core Types
 //!
 //! ### Fields
@@ -133,6 +145,8 @@
 //! - Field number limits: [`MIN_FIELD_NUMBER`], [`MAX_FIELD_NUMBER`]
 //! - Size limits: [`MAX_MESSAGE_SIZE`], [`MAX_STRING_SIZE`], [`MAX_VARINT_BYTES`]
 //! - Wire format constants: [`FIXED32_BYTES`], [`FIXED64_BYTES`], etc.
+
+pub mod ext;
 
 pub(crate) mod field;
 pub(crate) mod field_number;

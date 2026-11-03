@@ -68,6 +68,17 @@ fn main() -> Result<(), protobuf_core::ProtobufError> {
 }
 ```
 
+## Extension traits (`ext`)
+
+Read and write APIs are extension traits (`AsRefExtProtobuf`,
+`ReadExtProtobuf`, `ReadExtTag`, `ReadExtVarint`, `WriteExtProtobuf`,
+`WriteExtVarint`). They are re-exported at the crate root, and also gathered
+in `protobuf_core::ext` so one import covers every extension method:
+
+```rust
+use protobuf_core::ext::*;
+```
+
 ## Design Philosophy
 
 This library provides **building blocks** for implementing Protocol Buffers, not a complete message parser or serializer. It focuses on:
