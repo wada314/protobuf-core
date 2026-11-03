@@ -30,13 +30,14 @@ pub(crate) trait WireCursor {
         self.len() == 0
     }
 
-    /// Read a varint and return its exact wire bytes.
+    /// Read a varint and return its wire encoding as-is (even if non-canonical).
     ///
-    /// The returned slice borrows for the joint lifetime of `self` and `buf`.
-    /// Length is in `1..=MAX_VARINT_BYTES`. [`SliceReader`] returns a subslice of
-    /// the input (no copy); [`Read`] paths fill `buf` and return `&buf[..n]`.
-    /// Empty input is [`ProtobufError::UnexpectedEof`] (caller must check
-    /// [`len()`](Self::len) first for soft end).
+    /// `buf` is scratch the implementor may use; the returned `raw` slice
+    /// borrows for the joint lifetime of `self` and `buf`, but need not point
+    /// into `buf` (for example a slice cursor may return a subslice of the
+    /// input). Length is in `1..=MAX_VARINT_BYTES`. Empty input is
+    /// [`ProtobufError::UnexpectedEof`] (caller must check [`len()`](Self::len)
+    /// first for soft end).
     fn read_varint_with_raw<'a>(
         &'a mut self,
         buf: &'a mut [u8; MAX_VARINT_BYTES],
