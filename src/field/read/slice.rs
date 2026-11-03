@@ -186,8 +186,9 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
 /// Extension trait for reading raw Protocol Buffer fields from slice types
 ///
 /// This trait provides low-level utilities for reading field-by-field from a byte slice.
-/// Each yield is a [`Field`]`<&[u8]>` value: scalars own their payload, and
-/// only the length-delimited variant holds a borrow into the source slice.
+/// Each yield is a [`Field<&[u8]>`](crate::Field) value: scalars own their
+/// payload, and only the length-delimited variant holds a borrow into the
+/// source slice.
 /// This trait only splits the slice into raw fields (numbers and wire bytes).
 /// Building a message — choosing which fields mean what, decoding their
 /// values, and assembling your own struct — is up to you.
@@ -207,7 +208,7 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
 pub trait AsRefExtProtobuf: AsRef<[u8]> {
     /// Read raw protobuf fields from the slice, returning an iterator.
     ///
-    /// Yields [`Field`]`<&[u8]>` values. Only
+    /// Yields [`Field<&[u8]>`](crate::Field) values. Only
     /// [`FieldValue::Len`](crate::FieldValue::Len) borrows from the source
     /// slice; other variants carry owned payloads.
     ///
