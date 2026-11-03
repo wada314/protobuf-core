@@ -183,7 +183,7 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
     }
 }
 
-/// Extension trait for reading raw Protocol Buffer fields from slice types
+/// Extension trait for reading raw Protocol Buffer fields from slice types.
 ///
 /// This trait provides a low-level utility for reading field-by-field from a
 /// byte slice. [`read_protobuf_fields()`](AsRefExtProtobuf::read_protobuf_fields)
