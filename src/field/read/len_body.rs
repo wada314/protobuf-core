@@ -649,6 +649,9 @@ where
 ///         _ => {}
 ///     }
 /// }
+/// // prints:
+/// // Field 1: 150
+/// // Field 2: [72, 101, 108]
 /// ```
 pub trait ReadExtProtobuf: Read {
     /// Read raw protobuf fields from the reader, returning an iterator.
