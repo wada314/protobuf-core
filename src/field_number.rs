@@ -52,24 +52,6 @@ impl FieldNumber {
         self.0 >= min && self.0 <= max
     }
 
-    /// Returns the minimum number of bytes needed to encode a tag for this
-    /// field number as a varint.
-    ///
-    /// A tag is `(field_number << 3) | wire_type`. Because `wire_type` is at
-    /// most 7, this uses the maximum tag value `(field_number << 3) | 7` so the
-    /// size is enough for any wire type.
-    pub fn encoded_size(&self) -> usize {
-        let max_tag_value = (self.0 << 3) | 7; // field_number << 3 + max wire_type (7)
-
-        match max_tag_value {
-            0..=0x7F => 1,
-            0x80..=0x3FFF => 2,
-            0x4000..=0x1FFFFF => 3,
-            0x200000..=0xFFFFFFF => 4,
-            _ => 5,
-        }
-    }
-
     /// Returns the field number as a `u32`.
     pub const fn as_u32(self) -> u32 {
         self.0
@@ -179,27 +161,6 @@ mod tests {
     }
 
     #[test]
-    fn test_encoded_size() {
-        // Field 1: (1 << 3) | 7 = 8 | 7 = 15 (1 byte)
-        assert_eq!(FieldNumber::try_new(1).unwrap().encoded_size(), 1);
-
-        // Field 16: (16 << 3) | 7 = 128 | 7 = 135 (2 bytes)
-        assert_eq!(FieldNumber::try_new(16).unwrap().encoded_size(), 2);
-
-        // Field 100: (100 << 3) | 7 = 800 | 7 = 807 (2 bytes)
-        assert_eq!(FieldNumber::try_new(100).unwrap().encoded_size(), 2);
-
-        // Field 10000: (10000 << 3) | 7 = 80000 | 7 = 80007 (3 bytes)
-        assert_eq!(FieldNumber::try_new(10000).unwrap().encoded_size(), 3);
-
-        // Field 1000000: (1000000 << 3) | 7 = 8000000 | 7 = 8000007 (4 bytes)
-        assert_eq!(FieldNumber::try_new(1000000).unwrap().encoded_size(), 4);
-
-        // Field 100000000: (100000000 << 3) | 7 = 800000000 | 7 = 800000007 (5 bytes)
-        assert_eq!(FieldNumber::try_new(100000000).unwrap().encoded_size(), 5);
-    }
-
-    #[test]
     fn test_as_u32_and_as_usize() {
         let min_field = FieldNumber::MIN;
         let max_field = FieldNumber::MAX;
@@ -236,15 +197,5 @@ mod tests {
         assert!(start.is_reserved());
         assert!(end.is_reserved());
         assert!(!above.is_reserved());
-
-        // encoded_size uses the largest wire type, so these are the byte-length boundaries.
-        assert_eq!(FieldNumber::try_new(15).unwrap().encoded_size(), 1);
-        assert_eq!(FieldNumber::try_new(2_047).unwrap().encoded_size(), 2);
-        assert_eq!(FieldNumber::try_new(2_048).unwrap().encoded_size(), 3);
-        assert_eq!(FieldNumber::try_new(262_143).unwrap().encoded_size(), 3);
-        assert_eq!(FieldNumber::try_new(262_144).unwrap().encoded_size(), 4);
-        assert_eq!(FieldNumber::try_new(33_554_431).unwrap().encoded_size(), 4);
-        assert_eq!(FieldNumber::try_new(33_554_432).unwrap().encoded_size(), 5);
-        assert_eq!(FieldNumber::MAX.encoded_size(), 5);
     }
 }
