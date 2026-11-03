@@ -222,8 +222,6 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
     ///
     /// For a length-delimited field, the payload is a reference to part of
     /// the input slice.
-    ///
-    /// This method is available for all types implementing `AsRef<[u8]>`.
     fn read_protobuf_fields(&self) -> FieldIterFromSlice<'_> {
         FieldIterFromSlice {
             slice: self.as_ref(),
