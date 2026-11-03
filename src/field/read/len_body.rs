@@ -620,8 +620,8 @@ where
 /// Extension trait for reading raw Protocol Buffer fields from `Read` types
 ///
 /// This trait provides low-level utilities for reading field-by-field from a byte stream.
-/// Each method takes an explicit message byte budget `len: u32`. Length-delimited
-/// payloads default to `Vec<u8>`.
+/// Each method takes the message length `len: u32` (how many bytes of `self`
+/// make up this message). Length-delimited payloads default to `Vec<u8>`.
 /// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
 /// takes a Len-building closure. This trait only splits the stream into raw
 /// fields (numbers and wire bytes). Building a message — choosing which
@@ -652,7 +652,7 @@ where
 pub trait ReadExtProtobuf: Read {
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
-    /// Borrows `self` and consumes at most `len` bytes of message budget.
+    /// Borrows `self` and reads fields from the next `len` bytes (the message).
     ///
     /// # Contract
     ///
@@ -666,7 +666,7 @@ pub trait ReadExtProtobuf: Read {
 
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
-    /// Borrows `self` and consumes at most `len` bytes of message budget.
+    /// Borrows `self` and reads fields from the next `len` bytes (the message).
     ///
     /// # Contract
     ///
