@@ -1,8 +1,14 @@
 //! Slice (`AsRef<[u8]>`) field iteration (zero-copy Len payloads).
 
 use super::group::GroupBody;
+#[cfg(doc)]
+#[allow(unused_imports)]
+use super::group::until_group_ends;
 use super::wire::{BufWireCursor, WireCursor};
 use crate::field::Field;
+#[cfg(doc)]
+#[allow(unused_imports)]
+use crate::field::FieldValue;
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
@@ -91,8 +97,8 @@ impl<'a> FieldIterFromSlice<'a> {
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
     /// Intended mainly for protobuf **group** handling: after an
-    /// [`crate::FieldValue::SGroup`] was consumed, pair with
-    /// [`crate::until_group_ends()`] to discard the body through the matching
+    /// [`FieldValue::SGroup`] was consumed, pair with
+    /// [`until_group_ends()`] to discard the body through the matching
     /// end tag. Length-delimited payloads are discarded without allocating.
     ///
     /// ```
@@ -124,8 +130,8 @@ impl<'a> FieldIterFromSlice<'a> {
     /// wire-byte span that was consumed (zero-copy).
     ///
     /// Intended mainly for protobuf **group** preserve: after an
-    /// [`crate::FieldValue::SGroup`] was consumed, pair with
-    /// [`crate::until_group_ends()`] to borrow the body through the matching end
+    /// [`FieldValue::SGroup`] was consumed, pair with
+    /// [`until_group_ends()`] to borrow the body through the matching end
     /// tag (start tag already consumed). Same stop / nesting semantics as
     /// [`skip_until()`](Self::skip_until).
     ///
@@ -187,7 +193,7 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
 ///
 /// This trait provides a low-level utility for reading field-by-field from a
 /// byte slice. [`read_protobuf_fields()`](AsRefExtProtobuf::read_protobuf_fields)
-/// returns an iterator of [`Field<&[u8]>`](crate::Field) values; for a
+/// returns an iterator of [`Field<&[u8]>`](Field) values; for a
 /// length-delimited field, the payload is a reference to part of the input
 /// slice. This trait only splits the slice into raw fields (numbers and wire
 /// bytes). Building a message — choosing which fields mean what, decoding
@@ -218,7 +224,7 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
 /// ```
 pub trait AsRefExtProtobuf: AsRef<[u8]> {
     /// Read raw protobuf fields from the slice, returning an iterator of
-    /// [`Field<&[u8]>`](crate::Field) values.
+    /// [`Field<&[u8]>`](Field) values.
     ///
     /// For a length-delimited field, the payload is a reference to part of
     /// the input slice.

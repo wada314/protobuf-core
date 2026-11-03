@@ -6,6 +6,9 @@
 use crate::ProtobufError;
 use crate::Result;
 use crate::field_number::FieldNumber;
+#[cfg(doc)]
+#[allow(unused_imports)]
+use crate::varint::ReadExtVarint;
 use crate::varint::Varint;
 use crate::wire_format::{FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK, WireType};
 use ::std::convert::{From, TryFrom};
@@ -76,8 +79,6 @@ impl TryFrom<Varint> for Tag {
 /// Reads until the reader's EOF (or an existing [`std::io::Take`] bound).
 /// Methods do not take a separate byte-budget argument; they forward to
 /// [`ReadExtVarint`].
-///
-/// [`ReadExtVarint`]: crate::varint::ReadExtVarint
 ///
 /// # Example
 /// ```

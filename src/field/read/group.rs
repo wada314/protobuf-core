@@ -4,14 +4,17 @@ use crate::field::{Field, FieldValue};
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::wire_format::WireType;
+#[cfg(doc)]
+#[allow(unused_imports)]
+use crate::{FieldIter, FieldIterFromSlice};
 use crate::{ProtobufError, Result};
 
 /// Predicate for protobuf **group** skip / preserve: returns `Ok(true)` when
 /// the matching end-group tag is reached.
 ///
-/// Pass this to [`crate::FieldIterFromSlice::skip_until()`] /
-/// [`crate::FieldIter::skip_until()`] / [`crate::FieldIterFromSlice::take_until()`] /
-/// [`crate::FieldIter::copy_until()`] after the start-group tag for
+/// Pass this to [`FieldIterFromSlice::skip_until()`] /
+/// [`FieldIter::skip_until()`] / [`FieldIterFromSlice::take_until()`] /
+/// [`FieldIter::copy_until()`] after the start-group tag for
 /// `field_number` has already been consumed. Nested groups are tracked with
 /// an explicit field-number stack inside the returned closure.
 ///
@@ -43,8 +46,8 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 
 /// Field-iterator adapter that stops at the matching end-group tag.
 ///
-/// Returned by [`crate::FieldIterFromSlice::group_body()`] /
-/// [`crate::FieldIter::group_body()`]. Call after the start-group tag for
+/// Returned by [`FieldIterFromSlice::group_body()`] /
+/// [`FieldIter::group_body()`]. Call after the start-group tag for
 /// `field_number` has already been consumed.
 ///
 /// # Termination

@@ -10,10 +10,16 @@
 //! bytes/string copy uses consuming [`into_read()`](LenBody::into_read), and
 //! nested decode uses [`fields()`](LenBody::fields) /
 //! [`fields_with()`](LenBody::fields_with). Top-level message `len` is expected
-//! to be `<= MAX_MESSAGE_SIZE` ([`crate::MAX_MESSAGE_SIZE`], 2 GiB); that is
+//! to be `<= MAX_MESSAGE_SIZE` ([`MAX_MESSAGE_SIZE`], 2 GiB); that is
 //! `debug_assert`ed at the entrance (not enforced in release).
 
 use super::group::GroupBody;
+#[cfg(doc)]
+#[allow(unused_imports)]
+use super::group::until_group_ends;
+#[cfg(doc)]
+#[allow(unused_imports)]
+use super::slice::FieldIterFromSlice;
 use super::wire::WireCursor;
 use crate::field::{Field, FieldValue};
 use crate::field_number::FieldNumber;
@@ -54,9 +60,6 @@ use ::std::io::{Read, Write};
 /// (`debug_assert` only). Do not `mem::forget` a scoped [`LenBody`] /
 /// [`LenBodyRead`]: [`Drop`] must run so leftover writeback stays accurate
 /// (forgetting leaves leftover at `0` and underskips; prefer that to overskip).
-///
-/// [`ReadExtVarint`]: crate::ReadExtVarint
-/// [`ReadExtTag`]: crate::ReadExtTag
 pub struct LenBody<'a, R: ?Sized> {
     reader: &'a mut R,
     remaining: u32,
@@ -385,10 +388,7 @@ fn read_body<R: Read + ?Sized>(body: &mut LenBody<'_, R>, buf: &mut [u8]) -> Res
 
 /// Read exactly `buf.len()` bytes from `body`.
 #[inline]
-fn read_body_exact<R: Read + ?Sized>(
-    body: &mut LenBody<'_, R>,
-    mut buf: &mut [u8],
-) -> Result<()> {
+fn read_body_exact<R: Read + ?Sized>(body: &mut LenBody<'_, R>, mut buf: &mut [u8]) -> Result<()> {
     while !buf.is_empty() {
         match read_body(body, buf)? {
             0 => return Err(ProtobufError::UnexpectedEof),
@@ -424,11 +424,7 @@ pub trait LenHandler<R: ?Sized> {
     ///
     /// `body.len()` at entry is the payload length. After return, the
     /// library discards any unread body bytes.
-    fn handle(
-        &mut self,
-        field_number: FieldNumber,
-        body: LenBody<'_, R>,
-    ) -> Result<Self::Payload>;
+    fn handle(&mut self, field_number: FieldNumber, body: LenBody<'_, R>) -> Result<Self::Payload>;
 }
 
 impl<R, L, F> LenHandler<R> for F
@@ -439,11 +435,7 @@ where
     type Payload = L;
 
     #[inline]
-    fn handle(
-        &mut self,
-        field_number: FieldNumber,
-        body: LenBody<'_, R>,
-    ) -> Result<Self::Payload> {
+    fn handle(&mut self, field_number: FieldNumber, body: LenBody<'_, R>) -> Result<Self::Payload> {
         self(field_number, body)
     }
 }
@@ -551,9 +543,9 @@ where
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
     /// Intended mainly for protobuf **group** handling: after an
-    /// [`FieldValue::SGroup`] was consumed, pair with [`crate::until_group_ends()`]
+    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends()`]
     /// to discard the body through the matching end tag (see
-    /// [`crate::FieldIterFromSlice::skip_until()`] for a runnable example).
+    /// [`FieldIterFromSlice::skip_until()`] for a runnable example).
     ///
     /// Length-delimited payloads are discarded without allocating. The byte
     /// bound is this iterator's `len()`.
@@ -577,10 +569,10 @@ where
     /// Copy fields to `out` until `pred` returns `Ok(true)`.
     ///
     /// Intended mainly for protobuf **group** preserve on a stream: after an
-    /// [`FieldValue::SGroup`] was consumed, pair with [`crate::until_group_ends()`]
+    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends()`]
     /// to tee the body and matching end tag (start tag already consumed — write
     /// it yourself first if the preserve blob needs it). For zero-copy
-    /// preserve from a slice, use [`crate::FieldIterFromSlice::take_until()`]
+    /// preserve from a slice, use [`FieldIterFromSlice::take_until()`]
     /// instead.
     ///
     /// Same stop semantics as [`skip_until()`](Self::skip_until). Writes exact
@@ -685,7 +677,7 @@ pub trait ReadExtProtobuf: Read {
     /// - Stopping or dropping the iterator early leaves the unread part of the
     ///   `len`-byte window still on `self` (the tail is not skipped for you).
     /// - If `self` ends before those `len` bytes are finished, the next read is
-    ///   [`UnexpectedEof`](crate::ProtobufError::UnexpectedEof) (including a
+    ///   [`UnexpectedEof`](ProtobufError::UnexpectedEof) (including a
     ///   truncated mid-field). After any [`Err`], abandon the iterator —
     ///   `self` may already be out of sync.
     fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, LenBody<'_, Self>>
@@ -844,7 +836,7 @@ mod tests {
 
     #[test]
     fn scope_writes_leftover_on_drop() {
-        use super::{discard_reader_bytes, LenBody};
+        use super::{LenBody, discard_reader_bytes};
         use ::std::io::Cursor;
 
         let mut data = Cursor::new(vec![1u8, 2, 3, 4, 5]);
@@ -896,9 +888,7 @@ mod tests {
         use ::std::io::Cursor;
 
         // field 1, Len, packed fixed32 1, 2
-        let message = [
-            0x0A, 0x08, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
-        ];
+        let message = [0x0A, 0x08, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00];
         let fields: Vec<_> = Cursor::new(message)
             .read_protobuf_fields_with(message.len() as u32, |_n, body| {
                 body.fixed32s()
@@ -1172,10 +1162,7 @@ mod tests {
             .next()
             .unwrap()
             .unwrap_err();
-        assert!(
-            matches!(err, ProtobufError::UnexpectedEof),
-            "got {err:?}"
-        );
+        assert!(matches!(err, ProtobufError::UnexpectedEof), "got {err:?}");
     }
 
     #[test]
