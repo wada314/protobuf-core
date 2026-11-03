@@ -621,7 +621,7 @@ where
 ///
 /// This trait provides low-level utilities for reading field-by-field from a byte stream.
 /// Each method takes an explicit message byte budget `len: u32`. Length-delimited
-/// payloads default to `Vec<u8>` via [`VecLenPayload`].
+/// payloads default to `Vec<u8>`.
 /// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
 /// takes a Len-building closure. It does not provide semantic interpretation —
 /// that is the caller's responsibility.
