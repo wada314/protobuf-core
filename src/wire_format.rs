@@ -9,8 +9,8 @@ use ::std::convert::TryFrom;
 
 /// Wire types used in Protocol Buffers encoding.
 ///
-/// The wire type tells the parser how big the payload is and how to interpret it.
-/// This allows old parsers to skip over new fields they don't understand.
+/// The wire type tells how large the following payload is and how to read it.
+/// Unknown wire-type values (outside 0–5) are an error in this crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum WireType {
