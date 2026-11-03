@@ -119,12 +119,8 @@
 //!
 //! ## Tag/Varint Traits
 //!
-//! Lower-level tag/varint I/O. These `Read` methods do not take a message
-//! length; the bound is the reader's end (or something like
-//! [`std::io::Take`]). A single `read_varint()` / tag read treats empty input
-//! as [`UnexpectedEof`](ProtobufError::UnexpectedEof), not a successful end.
-//! `read_varints()` is the soft-stop iterator (ends cleanly when no bytes
-//! remain; a truncated mid-varint is still an error).
+//! Lower-level tag/varint I/O. Unlike [`ReadExtProtobuf`], the reading methods
+//! do not take a message length.
 //!
 //! - [`ReadExtTag`]: Read tags from `std::io::Read`
 //! - [`ReadExtVarint`]: Read varints from `std::io::Read`
