@@ -80,7 +80,7 @@
 //!   - `I64([u8; 8])`: 64-bit fixed-width values (Fixed64, SFixed64, Double)
 //!   - `Len(L)`: Length-delimited values (String, Bytes, embedded messages, packed repeated
 //!     fields)
-//!   - `SGroup` / `EGroup`: Deprecated group start/end tags (no payload; body follows `SGroup`)
+//!   - `SGroup` / `EGroup`: Deprecated group start/end tags
 //!
 //! ### Basic Types
 //!
