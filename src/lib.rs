@@ -97,22 +97,21 @@
 //!
 //! ## Reading Traits
 //!
-//! The library provides traits for reading protobuf fields from two sources:
+//! Two ways to read fields:
 //!
-//! - [`AsRefExtProtobuf`]: Read fields from `AsRef<[u8]>` types
-//!   (slices, arrays, etc.). The slice length is the bound (no extra `len` arg).
-//!   - Output: [`Field<&[u8]>`] — Len values are borrowed `&[u8]` slices (zero-copy)
-//! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types with an explicit
-//!   `u32` message byte budget `len` (via [`LenBody`])
-//!   - Output: [`Field<Vec<u8>>`] by default, or [`Field<L>`] from a Len handler
-//!     `FnMut(FieldNumber, LenBody<'_, R>) -> Result<L>`
+//! - [`AsRefExtProtobuf`]: from a byte slice (or anything `AsRef<[u8]>`).
+//!   Length-delimited values borrow as [`Field<&[u8]>`].
+//! - [`ReadExtProtobuf`]: from a [`std::io::Read`]. Methods that read
+//!   **fields** take the message length (`len`); lower-level tag/varint
+//!   helpers do not. Length-delimited values default to [`Field<Vec<u8>>`].
 //!
-//! Field iterators expose `skip_until`, slice `take_until`, Read `copy_until`,
-//! and [`group_body`](FieldIterFromSlice::group_body) /
-//! [`GroupBody`] for parsing a group body. After an [`FieldValue::SGroup`],
-//! pair skip/preserve with [`until_group_ends`] (start tag already consumed).
+//! On the `Read` path, each length-delimited field is handed to you as a
+//! [`LenBody`]: a view limited to that field's bytes (nested messages,
+//! strings/bytes, packed repeats). See [`LenBody`] for how to consume it.
 //!
-//! Byte iterators are not supported; use a slice or a `Read` with `len`.
+//! Field iterators also offer `skip_until`, slice `take_until`, Read
+//! `copy_until`, and [`group_body`](FieldIterFromSlice::group_body) /
+//! [`GroupBody`] for deprecated groups (with [`until_group_ends`]).
 //!
 //! ## Writing Traits
 //!
