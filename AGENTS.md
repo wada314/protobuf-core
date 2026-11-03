@@ -14,7 +14,10 @@ Edition 2024. Field, tag, and varint I/O ship together. Do not reintroduce `read
 cargo test
 cargo fmt
 cargo clippy --all-targets
+RUSTDOCFLAGS='-D warnings' cargo doc --no-deps
 ```
+
+`cargo test` also runs rustdoc examples (doctests). CI runs the same set (see `.github/workflows/rust.yml`).
 
 ## Constraints (do not reverse these)
 
