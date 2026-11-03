@@ -624,8 +624,9 @@ where
 /// payloads default to `Vec<u8>`.
 /// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
 /// takes a Len-building closure. This trait only splits the stream into raw
-/// fields (numbers and wire bytes); turning those into ints, strings, or
-/// nested messages is up to you.
+/// fields (numbers and wire bytes). Building a message — choosing which
+/// fields mean what, decoding their values, and assembling your own struct —
+/// is up to you.
 ///
 /// # Example
 /// ```
