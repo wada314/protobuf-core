@@ -3,7 +3,7 @@
 //! This module provides low-level utilities for reading raw protobuf fields from
 //! `std::io::Read` (with an explicit `u32` message byte budget) and from byte
 //! slices (`AsRef<[u8]>`). Streaming Len handlers receive a scoped
-//! [`LenBody<'_, R>`](LenBody) (`remaining()` is the payload length; leftover discarded after the closure).
+//! [`LenBody<'_, R>`](LenBody) (`len()` is the payload length; leftover discarded after the closure).
 //! Slice sources borrow Len values as `&[u8]`.
 //!
 //! Byte iterators are not supported; wrap bytes as a slice ([`AsRefExtProtobuf`])

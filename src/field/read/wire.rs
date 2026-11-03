@@ -13,16 +13,22 @@ use ::std::io::Write;
 /// that compose them (`skip_field()`, `skip_until()`, `copy_field()`, `copy_until()`,
 /// …). Implementors only override the I/O primitives.
 ///
-/// Soft end-of-input is signaled by [`remaining()`](Self::remaining) `== 0`
+/// Soft end-of-input is signaled by [`len()`](Self::len) `== 0`
 /// (field iterators stop there). Mid-field emptiness is
 /// [`ProtobufError::UnexpectedEof`].
 pub(crate) trait WireCursor {
-    /// Bytes still allowed in this cursor's bound (message budget / slice length).
+    /// Bytes still in this cursor's bound (message / slice length left).
     ///
     /// Protobuf message sizes are treated as [`u32`] (see `MAX_MESSAGE_SIZE`).
     /// Host slices longer than `u32::MAX` report [`u32::MAX`] until drained
-    /// below that (soft end is still `remaining() == 0` only when empty).
-    fn remaining(&self) -> u32;
+    /// below that (soft end is still `len() == 0` only when empty).
+    fn len(&self) -> u32;
+
+    /// `true` when [`len()`](Self::len) is `0`.
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     /// Read a varint and return its exact wire bytes.
     ///
@@ -30,7 +36,7 @@ pub(crate) trait WireCursor {
     /// Length is in `1..=MAX_VARINT_BYTES`. [`SliceReader`] returns a subslice of
     /// the input (no copy); [`Read`] paths fill `buf` and return `&buf[..n]`.
     /// Empty input is [`ProtobufError::UnexpectedEof`] (caller must check
-    /// [`remaining()`](Self::remaining) first for soft end).
+    /// [`len()`](Self::len) first for soft end).
     fn read_varint_with_raw<'a>(
         &'a mut self,
         buf: &'a mut [u8; MAX_VARINT_BYTES],
@@ -39,7 +45,7 @@ pub(crate) trait WireCursor {
     /// Read a varint (discards the raw wire bytes).
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`] (caller must check
-    /// [`remaining()`](Self::remaining) first for soft end).
+    /// [`len()`](Self::len) first for soft end).
     #[inline(always)]
     fn read_varint(&mut self) -> Result<Varint> {
         Ok(self.read_varint_with_raw(&mut [0u8; MAX_VARINT_BYTES])?.0)
@@ -103,7 +109,7 @@ pub(crate) trait WireCursor {
         F: FnMut(Tag) -> Result<bool>,
     {
         loop {
-            if self.remaining() == 0 {
+            if self.is_empty() {
                 return Err(ProtobufError::UnexpectedEof);
             }
             let tag = self.skip_field()?;
@@ -156,7 +162,7 @@ pub(crate) trait WireCursor {
     {
         let mut written = 0usize;
         loop {
-            if self.remaining() == 0 {
+            if self.is_empty() {
                 return Err(ProtobufError::UnexpectedEof);
             }
             let (tag, n) = self.copy_field(out)?;
@@ -193,7 +199,7 @@ pub(crate) trait BufWireCursor<L>: WireCursor {
     /// caller's closure. The slice reader uses `&'a [u8]`.
     ///
     /// Empty input is [`ProtobufError::UnexpectedEof`] (field iterators check
-    /// [`remaining()`](WireCursor::remaining) first for soft end).
+    /// [`len()`](WireCursor::len) first for soft end).
     ///
     /// For [`FieldValue::SGroup`] / [`FieldValue::EGroup`], only the tag is
     /// consumed; a start-group body remains on the cursor for the caller to

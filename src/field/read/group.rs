@@ -965,7 +965,7 @@ mod group_skip {
         let after = cursor.skip_field().unwrap();
         assert_eq!(after.field_number.as_u32(), 3);
         assert_eq!(after.wire_type, WireType::Varint);
-        assert_eq!(cursor.remaining(), 0);
+        assert_eq!(cursor.len(), 0);
     }
 
     #[test]
@@ -980,7 +980,7 @@ mod group_skip {
         cursor
             .skip_until(until_group_ends(start.field_number))
             .unwrap();
-        assert_eq!(cursor.remaining(), 0);
+        assert_eq!(cursor.len(), 0);
         assert!(slice.is_empty());
     }
 

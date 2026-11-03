@@ -22,7 +22,7 @@ pub(crate) struct SliceReader<'a, 'b> {
 
 impl WireCursor for SliceReader<'_, '_> {
     #[inline]
-    fn remaining(&self) -> u32 {
+    fn len(&self) -> u32 {
         u32::try_from(self.slice.len()).unwrap_or(u32::MAX)
     }
 
@@ -176,7 +176,7 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
         let mut reader = SliceReader {
             slice: &mut self.slice,
         };
-        if reader.remaining() == 0 {
+        if reader.is_empty() {
             return None;
         }
         Some(reader.parse_field())

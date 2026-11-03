@@ -2,7 +2,7 @@
 //!
 //! [`LenBody`] is what Len handlers receive **by value**: the delimited payload
 //! (or top-level message) over `&mut R` with a `u32`
-//! [`remaining()`](LenBody::remaining). The handler signature is HRTB so the body
+//! [`len()`](LenBody::len). The handler signature is HRTB so the body
 //! cannot escape the closure; on [`Drop`] any leftover count is written back to
 //! a caller slot (no I/O in [`Drop`]). For Len fields the library then discards
 //! that many bytes on the fallible parse path; top-level unused budget stays on
@@ -34,8 +34,8 @@ use ::std::io::{Read, Write};
 ///
 /// Len handlers take this **by value**:
 /// `for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>` (HRTB so it cannot
-/// escape the closure). [`remaining()`](Self::remaining) at entry is the payload
-/// length. On [`Drop`], the leftover count from `remaining()` is written to an optional caller
+/// escape the closure). [`len()`](Self::len) at entry is the payload
+/// length. On [`Drop`], the leftover count from `len()` is written to an optional caller
 /// slot when nested under a parent body (no I/O). For Len fields the library
 /// then discards that many bytes from the reader on the fallible path. Nested
 /// messages call [`fields()`](Self::fields) / [`fields_with()`](Self::fields_with)
@@ -49,7 +49,7 @@ use ::std::io::{Read, Write};
 ///
 /// # Contract
 ///
-/// `remaining()` always fits in [`u32`] by construction. Top-level message
+/// `len()` always fits in [`u32`] by construction. Top-level message
 /// lengths also stay `<= MAX_MESSAGE_SIZE` at [`ReadExtProtobuf`] entrances
 /// (`debug_assert` only). Do not `mem::forget` a scoped [`LenBody`] /
 /// [`LenBodyRead`]: [`Drop`] must run so leftover writeback stays accurate
@@ -99,10 +99,20 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         }
     }
 
-    /// Bytes still allowed in this body.
+    /// Length of this body in bytes.
+    ///
+    /// At handler entry this is the Len payload size. Prefer consuming
+    /// [`into_read()`](Self::into_read) / [`fields()`](Self::fields) / packed
+    /// iterators rather than reading through this value in place.
     #[inline]
-    pub fn remaining(&self) -> u32 {
+    pub fn len(&self) -> u32 {
         self.remaining
+    }
+
+    /// `true` when [`len()`](Self::len) is `0`.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.remaining == 0
     }
 
     /// Decode one varint from this body (empty body is
@@ -140,7 +150,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
     ///
     /// For `string` / `bytes` (or any opaque Len payload) copy via
     /// [`Read`](std::io::Read) helpers (`read_exact()`, `read_to_end()`, …). Soft
-    /// EOF when [`remaining()`](Self::remaining) is exhausted. Prefer
+    /// EOF when [`len()`](Self::len) is exhausted. Prefer
     /// [`fields()`](Self::fields)* / packed iterators for structured decode.
     #[inline]
     pub fn into_read(self) -> LenBodyRead<'a, R> {
@@ -149,7 +159,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
 
     /// Iterate packed varints from this body (consumes `self`).
     ///
-    /// Soft-stops when [`remaining()`](Self::remaining) is exhausted. A truncated
+    /// Soft-stops when [`len()`](Self::len) is exhausted. A truncated
     /// mid-varint is [`ProtobufError::UnexpectedEof`]. While this iterator is
     /// live, the body cannot be reinterpreted as fields or raw bytes.
     #[inline]
@@ -182,12 +192,12 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
     /// Charges `n` against this body immediately. `*leftover` starts at `0`;
     /// on child [`Drop`], unread count is written to `leftover` (no I/O). The
     /// caller must then discard that many bytes from the underlying reader
-    /// (Len parse does this). Panics if `n > remaining()`.
+    /// (Len parse does this). Panics if `n > len()`.
     #[inline]
     pub(crate) fn scope<'b>(&'b mut self, n: u32, leftover: &'b mut u32) -> LenBody<'b, R> {
         assert!(
             n <= self.remaining,
-            "LenBody::scope length {n} exceeds remaining {}",
+            "LenBody::scope length {n} exceeds len {}",
             self.remaining
         );
         self.remaining -= n;
@@ -218,7 +228,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
     /// Like [`fields()`](Self::fields), but each length-delimited field is built
     /// by `handler` instead of [`VecLenPayload`].
     ///
-    /// The body is passed **by value** (`remaining()` at entry is the payload
+    /// The body is passed **by value** (`len()` at entry is the payload
     /// length). After return, leftover body bytes are discarded. Do not move
     /// the `LenBody` out (HRTB). Non-Len wire types never call `handler`.
     /// Custom stateful handlers can wrap as
@@ -255,7 +265,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(self)?),
             WireType::Len => {
                 let length = WireCursor::read_varint(self)?.try_to_uint32()?;
-                if length > self.remaining() {
+                if length > self.len() {
                     return Err(ProtobufError::UnexpectedEof);
                 }
                 let mut left = 0;
@@ -321,7 +331,7 @@ impl<'a, R: Read + ?Sized> Iterator for VarintIterFromLenBody<'a, R> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.body.remaining() == 0 {
+        if self.body.is_empty() {
             return None;
         }
         Some(
@@ -346,7 +356,7 @@ impl<'a, R: Read + ?Sized, const N: usize> Iterator for FixedIterFromLenBody<'a,
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.body.remaining() == 0 {
+        if self.body.is_empty() {
             return None;
         }
         let mut bytes = [0u8; N];
@@ -412,7 +422,7 @@ pub trait LenHandler<R: ?Sized> {
 
     /// Consume the Len body (by value) into a payload.
     ///
-    /// `body.remaining()` at entry is the payload length. After return, the
+    /// `body.len()` at entry is the payload length. After return, the
     /// library discards any unread body bytes.
     fn handle(
         &mut self,
@@ -451,7 +461,7 @@ impl<R: Read + ?Sized> LenHandler<R> for VecLenPayload {
         _field_number: FieldNumber,
         mut body: LenBody<'_, R>,
     ) -> Result<Self::Payload> {
-        let len = body.remaining();
+        let len = body.len();
         let mut buf = vec![0u8; len as usize];
         // Use `read_body_exact` so mid-budget truncation is
         // `UnexpectedEof` (same as fixed-width), not `IoError`.
@@ -462,7 +472,7 @@ impl<R: Read + ?Sized> LenHandler<R> for VecLenPayload {
 
 impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
     #[inline]
-    fn remaining(&self) -> u32 {
+    fn len(&self) -> u32 {
         self.remaining
     }
 
@@ -546,7 +556,7 @@ where
     /// [`crate::FieldIterFromSlice::skip_until()`] for a runnable example).
     ///
     /// Length-delimited payloads are discarded without allocating. The byte
-    /// budget is this iterator's remaining count.
+    /// bound is this iterator's `len()`.
     pub fn skip_until<P>(&mut self, pred: P) -> Result<()>
     where
         P: FnMut(Tag) -> Result<bool>,
@@ -584,10 +594,16 @@ where
         WireCursor::copy_until(self.body.as_mut(), pred, out)
     }
 
-    /// Bytes still allowed in this iterator's budget.
+    /// Bytes still in this iterator's message / body length.
     #[inline]
-    pub fn remaining(&self) -> u32 {
-        self.body.as_ref().remaining()
+    pub fn len(&self) -> u32 {
+        self.body.as_ref().len()
+    }
+
+    /// `true` when [`len()`](Self::len) is `0`.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.body.as_ref().is_empty()
     }
 }
 
@@ -600,7 +616,7 @@ where
     type Item = Result<Field<F::Payload>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.failed || self.body.as_ref().remaining() == 0 {
+        if self.failed || self.body.as_ref().is_empty() {
             return None;
         }
         match self.body.as_mut().parse_field_with(&mut self.handler) {
@@ -706,7 +722,7 @@ pub trait ReadExtProtobuf: Read {
     /// let len = data.len() as u32;
     /// let fields: Vec<_> = data
     ///     .read_protobuf_fields_with(len, |_n, body| {
-    ///         let body_len = body.remaining();
+    ///         let body_len = body.len();
     ///         let mut buf = vec![0u8; body_len as usize];
     ///         body.into_read().read_exact(&mut buf)?;
     ///         Ok(buf.into_boxed_slice())
@@ -833,20 +849,20 @@ mod tests {
 
         let mut data = Cursor::new(vec![1u8, 2, 3, 4, 5]);
         let mut take = LenBody::new(&mut data, 5);
-        assert_eq!(take.remaining(), 5);
+        assert_eq!(take.len(), 5);
         let mut left = 0;
         {
             let child = take.scope(3, &mut left);
-            assert_eq!(child.remaining(), 3);
+            assert_eq!(child.len(), 3);
             let mut one = [0u8; 1];
             child.into_read().read_exact(&mut one).unwrap();
             assert_eq!(one, [1]);
         }
         // Parent charged 3; Drop reported 2 unread in the child.
-        assert_eq!(take.remaining(), 2);
+        assert_eq!(take.len(), 2);
         assert_eq!(left, 2);
         discard_reader_bytes(take.reader, left).unwrap();
-        assert_eq!(take.remaining(), 2);
+        assert_eq!(take.len(), 2);
         drop(take);
         assert_eq!(data.position(), 3);
     }
@@ -1211,7 +1227,7 @@ mod len_payload {
         _n: FieldNumber,
         reader: LenBody<'_, R>,
     ) -> crate::Result<Bytes> {
-        let len = reader.remaining();
+        let len = reader.len();
         let mut data = vec![0; len as usize];
         reader.into_read().read_exact(&mut data)?;
         Ok(Bytes(data))
@@ -1266,7 +1282,7 @@ mod len_payload {
     fn assert_box(message: &[u8], expected: &[u8]) {
         let from_read = Cursor::new(message.to_vec())
             .read_protobuf_fields_with(message.len() as u32, |_n, r| {
-                let body_len = r.remaining();
+                let body_len = r.len();
                 let mut buf = vec![0u8; body_len as usize];
                 r.into_read().read_exact(&mut buf)?;
                 Ok(buf.into_boxed_slice())
@@ -1322,7 +1338,7 @@ mod len_payload {
 
         let from_read = Cursor::new(message)
             .read_protobuf_fields_with(len, |_n, r| {
-                let body_len = r.remaining();
+                let body_len = r.len();
                 let mut data = vec![0; body_len as usize];
                 r.into_read().read_exact(&mut data)?;
                 Ok(Tagged { id, data })
@@ -1391,7 +1407,7 @@ mod len_payload {
 
         let from_read = Cursor::new(message)
             .read_protobuf_fields_with(message.len() as u32, |_n, r| {
-                let body_len = r.remaining();
+                let body_len = r.len();
                 let n = body_len as usize;
                 let mut data = vec![0xAB; n + 4];
                 r.into_read().read_exact(&mut data[..n])?;
@@ -1451,13 +1467,13 @@ mod len_payload {
             field_number: FieldNumber,
             reader: LenBody<'_, R>,
         ) -> crate::Result<LenValue> {
-            let len = reader.remaining();
+            let len = reader.len();
             match field_number.as_u32() {
                 2 => {
                     let mut child = Child::default();
                     let nested = reader
                         .fields_with(|_n, inner| {
-                            let inner_len = inner.remaining();
+                            let inner_len = inner.len();
                             let mut bytes = vec![0u8; inner_len as usize];
                             inner.into_read().read_exact(&mut bytes)?;
                             Ok(LenValue::Bytes(bytes))
@@ -1547,7 +1563,7 @@ mod len_payload {
     fn parse_node<R: Read + ?Sized>(body: LenBody<'_, R>) -> crate::Result<Node> {
         let mut node = Node::default();
         for field in body.fields_with(|n, nested| {
-            let body_len = nested.remaining();
+            let body_len = nested.len();
             match n.as_u32() {
                 2 => Ok(NodeLen::Child(parse_node(nested)?)),
                 _ => {
@@ -1581,7 +1597,7 @@ mod len_payload {
     fn parse_node_from_read<R: Read>(reader: &mut R, len: u32) -> crate::Result<Node> {
         let mut node = Node::default();
         for field in reader.read_protobuf_fields_with(len, |n, body| {
-            let body_len = body.remaining();
+            let body_len = body.len();
             match n.as_u32() {
                 2 => Ok(NodeLen::Child(parse_node(body)?)),
                 _ => {
@@ -1669,7 +1685,7 @@ mod len_payload {
     fn parse_a<R: Read + ?Sized>(body: LenBody<'_, R>) -> crate::Result<TypeA> {
         let mut msg = TypeA::default();
         for field in body.fields_with(|n, nested| {
-            let body_len = nested.remaining();
+            let body_len = nested.len();
             match n.as_u32() {
                 2 => Ok(ALen::B(parse_b(nested)?)),
                 _ => {
@@ -1701,7 +1717,7 @@ mod len_payload {
     fn parse_b<R: Read + ?Sized>(body: LenBody<'_, R>) -> crate::Result<TypeB> {
         let mut msg = TypeB::default();
         for field in body.fields_with(|n, nested| {
-            let body_len = nested.remaining();
+            let body_len = nested.len();
             match n.as_u32() {
                 2 => Ok(BLen::A(parse_a(nested)?)),
                 _ => {
@@ -1733,7 +1749,7 @@ mod len_payload {
     fn parse_a_from_read<R: Read>(reader: &mut R, len: u32) -> crate::Result<TypeA> {
         let mut msg = TypeA::default();
         for field in reader.read_protobuf_fields_with(len, |n, body| {
-            let body_len = body.remaining();
+            let body_len = body.len();
             match n.as_u32() {
                 2 => Ok(ALen::B(parse_b(body)?)),
                 _ => {
