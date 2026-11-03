@@ -100,8 +100,8 @@
 //! Two ways to read fields; both return an iterator of [`Field`] values:
 //!
 //! - [`AsRefExtProtobuf`]: from a byte slice (or anything `AsRef<[u8]>`).
-//!   Items are [`Field<&[u8]>`](Field); for a length-delimited field, the
-//!   payload is a reference to part of the input slice.
+//!   For a length-delimited field, the payload is a reference to part of the
+//!   input slice ([`Field<&[u8]>`](Field)).
 //! - [`ReadExtProtobuf`]: from a [`std::io::Read`]. Methods that read
 //!   fields require the message length. Length-delimited values default to
 //!   [`Field<Vec<u8>>`], or you can customize it by passing your own closure
@@ -110,9 +110,8 @@
 //!   view limited to that field's bytes (nested messages, strings/bytes,
 //!   packed repeats). See [`LenBody`] for how to consume it.
 //!
-//! Field iterators also offer `skip_until()`, slice `take_until()`, Read
-//! `copy_until()`, and `group_body()` / [`GroupBody`] for deprecated groups
-//! (with `until_group_ends()`).
+//! Field iterators also have methods to skip or read the deprecated group
+//! wire feature.
 //!
 //! ## Writing Traits
 //!
