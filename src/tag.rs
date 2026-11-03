@@ -31,7 +31,7 @@ impl Tag {
     /// Unpack a tag from a [`Varint`] tag value (`(field_number << 3) | wire_type`).
     ///
     /// This is not a byte-stream read; use [`ReadExtTag`] to read wire bytes.
-    pub fn from_varint(varint: Varint) -> Result<Self> {
+    pub fn try_from_varint(varint: Varint) -> Result<Self> {
         let value = varint.try_to_uint32()?;
         let field_number_value = value >> FIELD_NUMBER_SHIFT;
         let wire_type_value = value & WIRE_TYPE_MASK;
@@ -67,7 +67,7 @@ impl TryFrom<Varint> for Tag {
     type Error = ProtobufError;
 
     fn try_from(varint: Varint) -> Result<Self> {
-        Self::from_varint(varint)
+        Self::try_from_varint(varint)
     }
 }
 
@@ -105,7 +105,7 @@ where
     fn read_tag(&mut self) -> Result<Tag> {
         use crate::varint::ReadExtVarint;
 
-        Tag::from_varint(self.read_varint()?)
+        Tag::try_from_varint(self.read_varint()?)
     }
 }
 
@@ -139,7 +139,7 @@ mod tests {
         };
         let encoded = tag.to_varint();
         assert_eq!(encoded.to_uint64(), 8);
-        let parsed = Tag::from_varint(encoded).unwrap();
+        let parsed = Tag::try_from_varint(encoded).unwrap();
         assert_eq!(parsed, tag);
     }
 
@@ -175,7 +175,7 @@ mod tests {
     fn test_parse_tag_invalid_field_number() {
         // Field number 0 is invalid.
         let varint = Varint::from_uint32(0);
-        let result = Tag::from_varint(varint);
+        let result = Tag::try_from_varint(varint);
         assert!(matches!(
             result,
             Err(ProtobufError::FieldNumberOutOfRange { value: 0 })
@@ -186,7 +186,7 @@ mod tests {
     fn test_parse_tag_invalid_wire_type() {
         let varint = Varint::from_uint64(0x0F); // field 1, wire type 7
         assert!(matches!(
-            Tag::from_varint(varint),
+            Tag::try_from_varint(varint),
             Err(ProtobufError::InvalidWireType { value: 7 })
         ));
     }
@@ -215,7 +215,7 @@ mod tests {
             };
             let encoded = tag.to_varint();
             assert_eq!(encoded.to_uint64(), encoded_value, "field {number}");
-            assert_eq!(Tag::from_varint(encoded).unwrap(), tag);
+            assert_eq!(Tag::try_from_varint(encoded).unwrap(), tag);
             let via_from = Tag::try_from(Varint::from(tag)).unwrap();
             assert_eq!(via_from, tag);
         }
