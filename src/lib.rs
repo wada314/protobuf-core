@@ -106,10 +106,11 @@
 //!   fields require the message length; lower-level tag/varint helpers do
 //!   not. Length-delimited values default to [`Field<Vec<u8>>`].
 //!
-//! On [`ReadExtProtobuf`], while parsing via a closure, each length-delimited
-//! field is handed to you as a [`LenBody`]: a view limited to that field's
-//! bytes (nested messages, strings/bytes, packed repeats). See [`LenBody`]
-//! for how to consume it.
+//! [`ReadExtProtobuf::read_protobuf_fields_with()`] passes each
+//! length-delimited field to your closure as a [`LenBody`] (the iterator
+//! yields what the closure returns, not the body itself). [`LenBody`] is a
+//! view limited to that field's bytes (nested messages, strings/bytes,
+//! packed repeats); see it for how to consume the body.
 //!
 //! Field iterators also offer `skip_until()`, slice `take_until()`, Read
 //! `copy_until()`, and `group_body()` / [`GroupBody`] for deprecated groups
