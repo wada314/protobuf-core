@@ -27,33 +27,23 @@
 //! ### Reading Fields
 //!
 //! Give the library a byte slice. It walks the message one field at a time.
-//! Each field has a number and a raw value (small integer, fixed-width bytes,
-//! or a length-delimited blob that still borrows from your slice).
+//! Each step yields a [`Result`] of a [`Field`]: a field number plus a raw
+//! value. On a slice, length-delimited payloads borrow as `&[u8]`.
 //!
 //! ```rust
-//! use protobuf_core::{
-//!     AsRefExtProtobuf, Field, FieldIterFromSlice, FieldValue, Result,
-//! };
+//! use protobuf_core::{AsRefExtProtobuf, Field, FieldValue};
 //!
 //! let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1 = 150
 //!
-//! // Returns an iterator over Result<Field<&[u8]>, ProtobufError>.
-//! let mut iter: FieldIterFromSlice<'_> = bytes.read_protobuf_fields();
+//! let mut fields = bytes.read_protobuf_fields();
+//! let field: Field<&[u8]> = fields.next().unwrap().unwrap();
 //!
-//! let field: Field<&[u8]> = iter.next().unwrap().unwrap();
 //! assert_eq!(field.field_number.as_u32(), 1);
-//! match field.value {
-//!     FieldValue::Varint(v) => assert_eq!(v.to_uint64(), 150),
-//!     // Other variants: I32 / I64 / Len(&[u8]) / SGroup / EGroup
-//!     _ => unreachable!(),
-//! }
-//!
-//! // Collect every field in the message:
-//! let fields: Vec<Field<&[u8]>> = bytes
-//!     .read_protobuf_fields()
-//!     .collect::<Result<Vec<_>>>()
-//!     .unwrap();
-//! assert_eq!(fields.len(), 1);
+//! assert!(matches!(
+//!     field.value,
+//!     FieldValue::Varint(v) if v.to_uint64() == 150
+//! ));
+//! // Other `FieldValue` variants: I32 / I64 / Len(&[u8]) / SGroup / EGroup
 //! ```
 //!
 //! For a streaming [`std::io::Read`] (with an explicit message length), see
