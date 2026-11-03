@@ -61,7 +61,8 @@ pub use self::write::WriteExtProtobuf;
 /// the next top-level field.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
-    /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`)
+    /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`).
+    /// The payload is a [`Varint`].
     Varint(Varint),
     /// 32-bit fixed-width values (`Fixed32`, `SFixed32`, `Float`)
     I32([u8; 4]),
