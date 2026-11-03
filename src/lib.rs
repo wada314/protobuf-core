@@ -109,9 +109,9 @@
 //! [`LenBody`]: a view limited to that field's bytes (nested messages,
 //! strings/bytes, packed repeats). See [`LenBody`] for how to consume it.
 //!
-//! Field iterators also offer `skip_until`, slice `take_until`, Read
-//! `copy_until`, and [`group_body`](FieldIterFromSlice::group_body) /
-//! [`GroupBody`] for deprecated groups (with [`until_group_ends`]).
+//! Field iterators also offer `skip_until()`, slice `take_until()`, Read
+//! `copy_until()`, and `group_body()` / [`GroupBody`] for deprecated groups
+//! (with `until_group_ends()`).
 //!
 //! ## Writing Traits
 //!
