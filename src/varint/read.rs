@@ -90,10 +90,11 @@ fn try_read_varint_with_raw<'a, R: Read>(
 /// assert_eq!(varint.to_uint64(), 150);
 /// ```
 pub trait ReadExtVarint: Read {
-    /// Read a varint and return its wire encoding as `raw`.
+    /// Read a varint and return its wire encoding as-is (even if non-canonical).
     ///
-    /// Returns `(varint, raw)` where `raw` is `&buf[..n]`: the input's wire
-    /// encoding as-is, even if it is non-canonical. Empty or truncated input is
+    /// `buf` is scratch the implementor may use; the returned `raw` slice
+    /// borrows for the joint lifetime of `self` and `buf`, but need not point
+    /// into `buf`. Empty or truncated input is
     /// [`UnexpectedEof`](ProtobufError::UnexpectedEof).
     ///
     /// # Example
