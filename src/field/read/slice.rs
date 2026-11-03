@@ -91,9 +91,9 @@ impl<'a> FieldIterFromSlice<'a> {
     /// Skip fields until `pred` returns `Ok(true)`.
     ///
     /// Intended mainly for protobuf **group** handling: after an
-    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
-    /// discard the body through the matching end tag. Length-delimited
-    /// payloads are discarded without allocating.
+    /// [`crate::FieldValue::SGroup`] was consumed, pair with
+    /// [`crate::until_group_ends`] to discard the body through the matching
+    /// end tag. Length-delimited payloads are discarded without allocating.
     ///
     /// ```
     /// use ::protobuf_core::{AsRefExtProtobuf, FieldValue, until_group_ends};
@@ -124,9 +124,9 @@ impl<'a> FieldIterFromSlice<'a> {
     /// wire-byte span that was consumed (zero-copy).
     ///
     /// Intended mainly for protobuf **group** preserve: after an
-    /// [`FieldValue::SGroup`] was consumed, pair with [`until_group_ends`] to
-    /// borrow the body through the matching end tag (start tag already
-    /// consumed). Same stop / nesting semantics as
+    /// [`crate::FieldValue::SGroup`] was consumed, pair with
+    /// [`crate::until_group_ends`] to borrow the body through the matching end
+    /// tag (start tag already consumed). Same stop / nesting semantics as
     /// [`skip_until`](Self::skip_until).
     ///
     /// On error the cursor may already have advanced through some fields; there
