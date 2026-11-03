@@ -119,13 +119,15 @@
 //!
 //! ## Tag/Varint Traits
 //!
-//! For lower-level operations, the library provides traits for reading and writing tags and
-//! varints. These `Read` methods do not take a byte budget; they stop at the reader's EOF
-//! (or the caller's own bound such as [`std::io::Take`]):
+//! Lower-level tag/varint I/O. These `Read` methods do not take a message
+//! length; the bound is the reader's end (or something like
+//! [`std::io::Take`]). A single `read_varint()` / tag read treats empty input
+//! as [`UnexpectedEof`](ProtobufError::UnexpectedEof), not a successful end.
+//! `read_varints()` is the soft-stop iterator (ends cleanly when no bytes
+//! remain; a truncated mid-varint is still an error).
 //!
 //! - [`ReadExtTag`]: Read tags from `std::io::Read`
-//! - [`ReadExtVarint`]: Read varints from `std::io::Read` (`with_raw` / `read_varint`
-//!   return `Result` — empty is `UnexpectedEof`; chunked callers buffer ≤10 bytes)
+//! - [`ReadExtVarint`]: Read varints from `std::io::Read`
 //! - [`WriteExtVarint`]: Write varints
 //!
 //! ## Constants
