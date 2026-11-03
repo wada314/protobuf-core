@@ -668,8 +668,6 @@ pub trait ReadExtProtobuf: Read {
     ///   `self` (for Len, any unread payload bytes are discarded before yield).
     /// - Stopping or dropping the iterator early leaves the unread part of the
     ///   `len`-byte window still on `self` (the tail is not skipped for you).
-    /// - Running until [`FieldIter::remaining()`] is `0` means exactly `len`
-    ///   bytes were consumed from `self`.
     /// - If `self` ends before those `len` bytes are finished, the next read is
     ///   [`UnexpectedEof`](crate::ProtobufError::UnexpectedEof) (including a
     ///   truncated mid-field). After any [`Err`], further `next()` is [`None`];
