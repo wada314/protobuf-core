@@ -1,4 +1,4 @@
-//! Field writing utilities for Protocol Buffers
+//! Field writing utilities for Protocol Buffers.
 //!
 //! This module provides low-level utilities for writing raw protobuf fields to byte streams.
 
@@ -9,12 +9,12 @@ use crate::varint::{Varint, WriteExtVarint};
 use crate::wire_format::WireType;
 use ::std::io::Write;
 
-/// Extension trait for writing raw Protocol Buffer fields to `Write` types
+/// Extension trait for writing raw Protocol Buffer fields to `Write` types.
 ///
 /// This trait provides low-level utilities for writing fields to a byte stream.
 /// It is the counterpart to `ReadExtProtobuf` for serialization.
 pub trait WriteExtProtobuf {
-    /// Write a single raw protobuf field to the writer (tag + value)
+    /// Write a single raw protobuf field to the writer (tag + value).
     ///
     /// Returns the number of bytes written.
     ///
@@ -37,7 +37,7 @@ pub trait WriteExtProtobuf {
     /// ```
     fn write_protobuf_field<L: AsRef<[u8]>>(&mut self, field: &Field<L>) -> Result<usize>;
 
-    /// Write multiple raw protobuf fields to the writer
+    /// Write multiple raw protobuf fields to the writer.
     ///
     /// Returns the total number of bytes written.
     ///
@@ -82,7 +82,7 @@ where
             field_number: field.field_number,
             wire_type,
         };
-        let tag_varint = tag.to_encoded();
+        let tag_varint = tag.to_varint();
         bytes_written += self.write_varint(&tag_varint)?;
 
         // Write value (group tags have no payload)
@@ -377,8 +377,8 @@ mod tests {
             buffer.write_protobuf_field(&original_field).unwrap();
 
             // Read
-            let len = buffer.len();
-            let reader = buffer.as_slice();
+            let len = buffer.len() as u32;
+            let mut reader = buffer.as_slice();
             let fields: Vec<_> = reader
                 .read_protobuf_fields(len)
                 .collect::<::std::result::Result<Vec<_>, _>>()
@@ -399,8 +399,8 @@ mod tests {
             buffer.write_protobuf_field(&original_field).unwrap();
 
             // Read
-            let len = buffer.len();
-            let reader = buffer.as_slice();
+            let len = buffer.len() as u32;
+            let mut reader = buffer.as_slice();
             let fields: Vec<_> = reader
                 .read_protobuf_fields(len)
                 .collect::<::std::result::Result<Vec<_>, _>>()
@@ -433,8 +433,8 @@ mod tests {
             buffer.write_protobuf_fields(&original_fields).unwrap();
 
             // Read
-            let len = buffer.len();
-            let reader = buffer.as_slice();
+            let len = buffer.len() as u32;
+            let mut reader = buffer.as_slice();
             let read_fields: Vec<_> = reader
                 .read_protobuf_fields(len)
                 .collect::<::std::result::Result<Vec<_>, _>>()
@@ -485,7 +485,7 @@ mod tests {
                 .sum::<usize>();
             assert_eq!(written, expected);
 
-            let len = buffer.len();
+            let len = buffer.len() as u32;
             let read_fields: Vec<_> = buffer
                 .as_slice()
                 .read_protobuf_fields(len)

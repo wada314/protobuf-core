@@ -26,18 +26,31 @@
 //!
 //! ### Reading Fields
 //!
-//! Read fields from any `AsRef<[u8]>` value, such as a slice or `Vec<u8>`.
-//! Length-delimited bytes stay borrowed (`Field<&[u8]>`).
+//! Give the library a byte slice. It walks the message one field at a time.
+//! Each step yields a [`Result`] of a [`Field`]: a field number plus a raw
+//! value. On a slice, length-delimited payloads borrow as `&[u8]`.
 //!
 //! ```rust
-//! use protobuf_core::{AsRefExtProtobuf, Field};
+//! use assert_matches::assert_matches;
+//! use protobuf_core::{AsRefExtProtobuf, FieldValue};
 //!
-//! let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1: 150
-//! let fields: Vec<Field<&[u8]>> = bytes
-//!     .read_protobuf_fields()
-//!     .collect::<Result<Vec<_>, _>>()
-//!     .unwrap();
+//! // field 1 varint = 150, field 2 string = "hi"
+//! let bytes: &[u8] = &[0x08, 0x96, 0x01, 0x12, 0x02, b'h', b'i'];
+//!
+//! let mut fields = bytes.read_protobuf_fields();
+//!
+//! let Some(Ok(field)) = fields.next() else { unreachable!() };
+//! assert_eq!(field.field_number.as_u32(), 1);
+//! assert_matches!(field.value, FieldValue::Varint(v) if v.to_uint64() == 150);
+//!
+//! let Some(Ok(field)) = fields.next() else { unreachable!() };
+//! assert_eq!(field.field_number.as_u32(), 2);
+//! // Strings arrive as Len(&[u8]), not &str: proto2 does not UTF-8-check.
+//! assert_matches!(field.value, FieldValue::Len(s) if s == b"hi");
 //! ```
+//!
+//! For a streaming [`std::io::Read`] (with an explicit message length), see
+//! [`ReadExtProtobuf`] below.
 //!
 //! ### Writing Fields
 //!
@@ -57,23 +70,23 @@
 //! ### Fields
 //!
 //! - [`Field<L>`]: Represents a raw protobuf field with a field number and value.
-//!   The `L` type parameter represents the type used for length-delimited values
-//!   (`Vec<u8>` from `Read` with a `len` budget, a buffer returned by the caller's
-//!   closure, or `&'a [u8]` for a slice read).
+//!   The `L` type parameter is the length-delimited payload: `&[u8]` from a slice
+//!   read (as above), `Vec<u8>` by default from `Read`, or a custom type from a
+//!   Len handler.
 //! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
-//!   - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64,
-//!     Bool, Enum)
+//!   - <code>Varint([Varint])</code>: Variable-width integers (Int32, Int64, UInt32, UInt64,
+//!     SInt32, SInt64, Bool, Enum)
 //!   - `I32([u8; 4])`: 32-bit fixed-width values (Fixed32, SFixed32, Float)
 //!   - `I64([u8; 8])`: 64-bit fixed-width values (Fixed64, SFixed64, Double)
 //!   - `Len(L)`: Length-delimited values (String, Bytes, embedded messages, packed repeated
 //!     fields)
-//!   - `SGroup` / `EGroup`: Deprecated group start/end tags (no payload; body follows `SGroup`)
+//!   - `SGroup` / `EGroup`: Group start/end tags (deprecated in the Protocol
+//!     Buffers language since proto2)
 //!
 //! ### Basic Types
 //!
 //! - [`Tag`]: Represents a protobuf tag (field number + wire type)
-//! - [`Varint`]: Represents a deserialized varint value (8-byte internal
-//!   representation)
+//! - [`Varint`]: The decoded integer value of a varint (not the on-wire bytes)
 //! - [`FieldNumber`]: A validated field number (range: 1 to 2^29 - 1)
 //! - [`WireType`]: Represents the protobuf wire type (`Varint`, `Int64`, `Len`,
 //!   `SGroup`, `EGroup`, `Int32`)
@@ -85,21 +98,21 @@
 //!
 //! ## Reading Traits
 //!
-//! The library provides traits for reading protobuf fields from two sources:
+//! Two ways to read fields; both return an iterator of [`Field`] values:
 //!
-//! - [`AsRefExtProtobuf`]: Read fields from `AsRef<[u8]>` types
-//!   (slices, arrays, etc.). The slice length is the bound (no extra `len` arg).
-//!   - Output: [`Field<&[u8]>`] — Len values are borrowed `&[u8]` slices (zero-copy)
-//! - [`ReadExtProtobuf`]: Read fields from `std::io::Read` types with an explicit
-//!   byte budget `len` (bounded via [`std::io::Take`])
-//!   - Output: [`Field<Vec<u8>>`], or [`Field<L>`] where `L: AsMut<[u8]>`
+//! - [`AsRefExtProtobuf`]: from a byte slice (or anything `AsRef<[u8]>`).
+//!   For a length-delimited field, the payload is a reference to part of the
+//!   input slice ([`Field<&[u8]>`](Field)).
+//! - [`ReadExtProtobuf`]: from a [`std::io::Read`]. Methods that read
+//!   fields require the message length. Length-delimited values default to
+//!   [`Field<Vec<u8>>`], or you can customize it by passing your own closure
+//!   to parse the payload bytes.
+//!   The closure receives each length-delimited field as a [`LenBody`]: a
+//!   view limited to that field's bytes (nested messages, strings/bytes,
+//!   packed repeats). See [`LenBody`] for how to consume it.
 //!
-//! Field iterators expose `skip_until`, slice `take_until`, Read `copy_until`,
-//! and [`group_body`](FieldIterFromSlice::group_body) /
-//! [`GroupBody`] for parsing a group body. After an [`FieldValue::SGroup`],
-//! pair skip/preserve with [`until_group_ends`] (start tag already consumed).
-//!
-//! Byte iterators are not supported; use a slice or a `Read` with `len`.
+//! Field iterators also have methods to skip or read groups (a wire feature
+//! deprecated in the Protocol Buffers language since proto2).
 //!
 //! ## Writing Traits
 //!
@@ -107,13 +120,10 @@
 //!
 //! ## Tag/Varint Traits
 //!
-//! For lower-level operations, the library provides traits for reading and writing tags and
-//! varints. These `Read` methods do not take a byte budget; they stop at the reader's EOF
-//! (or an existing [`std::io::Take`] from [`ReadExtProtobuf`] / the caller):
+//! Lower-level tag/varint I/O:
 //!
 //! - [`ReadExtTag`]: Read tags from `std::io::Read`
-//! - [`ReadExtVarint`]: Read varints from `std::io::Read` (`with_raw` / `read_varint`
-//!   return `Result` — empty is `UnexpectedEof`; chunked callers buffer ≤10 bytes)
+//! - [`ReadExtVarint`]: Read varints from `std::io::Read`
 //! - [`WriteExtVarint`]: Write varints
 //!
 //! ## Constants
@@ -131,8 +141,9 @@ pub(crate) mod varint;
 pub(crate) mod wire_format;
 
 pub use self::field::{
-    AsRefExtProtobuf, Field, FieldIterFromRead, FieldIterFromSlice, FieldValue, GroupBody,
-    ReadExtProtobuf, WriteExtProtobuf, until_group_ends,
+    AsRefExtProtobuf, Field, FieldIter, FieldIterFromSlice, FieldValue, FixedIterFromLenBody,
+    GroupBody, LenBody, LenBodyRead, LenHandler, ReadExtProtobuf, VarintIterFromLenBody,
+    VecLenPayload, WriteExtProtobuf, until_group_ends,
 };
 pub use self::field_number::FieldNumber;
 pub use self::tag::{ReadExtTag, Tag};
@@ -148,7 +159,7 @@ pub use self::wire_format::{
 use ::std::convert::Infallible;
 use ::thiserror::Error;
 
-/// Unified error type for all protobuf operations
+/// Unified error type for all protobuf operations.
 #[derive(Error, Debug)]
 pub enum ProtobufError {
     #[error("Field number {value} is out of valid range [1, 536_870_911]")]
@@ -156,9 +167,9 @@ pub enum ProtobufError {
 
     /// The tag's low 3 bits were not a known wire type (must be 0–5).
     ///
-    /// Deprecated group types [`WireType::SGroup`] (3) and [`WireType::EGroup`]
-    /// (4) are known wire types; field readers return
-    /// [`FieldValue::SGroup`] / [`FieldValue::EGroup`] for those.
+    /// Group wire types [`WireType::SGroup`] (3) and [`WireType::EGroup`] (4)
+    /// are known values (groups are deprecated in the Protocol Buffers language
+    /// since proto2), so they do not produce this error.
     #[error("Invalid wire type: {value} (must be 0-5)")]
     InvalidWireType { value: u8 },
 
@@ -195,5 +206,5 @@ impl From<Infallible> for ProtobufError {
     }
 }
 
-/// Custom Result type for protobuf operations
+/// Custom Result type for protobuf operations.
 pub type Result<T> = ::std::result::Result<T, ProtobufError>;

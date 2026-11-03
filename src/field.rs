@@ -1,4 +1,4 @@
-//! Field-level I/O utilities for Protocol Buffers
+//! Field-level I/O utilities for Protocol Buffers.
 //!
 //! This module provides primitive utilities for reading and writing raw protobuf fields.
 //! These are building blocks for constructing higher-level parsers and serializers,
@@ -30,124 +30,132 @@ pub(crate) mod read;
 pub(crate) mod write;
 
 pub use self::read::{
-    AsRefExtProtobuf, FieldIterFromRead, FieldIterFromSlice, GroupBody, ReadExtProtobuf,
+    AsRefExtProtobuf, FieldIter, FieldIterFromSlice, FixedIterFromLenBody, GroupBody, LenBody,
+    LenBodyRead, LenHandler, ReadExtProtobuf, VarintIterFromLenBody, VecLenPayload,
     until_group_ends,
 };
 pub use self::write::WriteExtProtobuf;
 
-/// A raw field value read from the wire
+/// A raw field value read from the wire.
 ///
 /// This represents the raw bytes of a field value without semantic interpretation.
 /// The caller is responsible for converting these raw values to the appropriate types
 /// based on the field's schema definition.
 ///
-/// `L` is the type for length-delimited values (Len variant).
+/// `L` is the type for length-delimited values ([`Self::Len`]):
+///  - Slice readers borrow the input as `&[u8]`.
 ///  - Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`.
-///    `read_protobuf_fields_with` takes `FnMut(usize) -> Result<L>` with
-///    `L: AsMut<[u8]>` and calls it once per payload.
-///  - Slice readers borrow the input as `&'a [u8]`.
+///  - Custom payloads use [`ReadExtProtobuf::read_protobuf_fields_with()`]
+///    with a closure. Unused body bytes are discarded after the handler
+///    returns.
 ///
-/// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
-/// does not include the group body. After an `SGroup`, discard the body with
-/// [`skip_until`](crate::FieldIterFromSlice::skip_until) +
-/// [`until_group_ends`](crate::until_group_ends), preserve it with
-/// [`take_until`](crate::FieldIterFromSlice::take_until) (slice) or
-/// [`copy_until`](crate::FieldIterFromRead::copy_until) (Read), parse the body
-/// with [`group_body`](crate::FieldIterFromSlice::group_body) /
-/// [`GroupBody`], or read nested fields until a matching `EGroup` before
-/// the next top-level field.
+/// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the fields
+/// between a start-group and its matching end-group are treated as a nested
+/// message. After an `SGroup`, discard that nested message with
+/// [`skip_until()`](FieldIterFromSlice::skip_until) +
+/// [`until_group_ends()`], preserve it with
+/// [`take_until()`](FieldIterFromSlice::take_until) (slice) or
+/// [`copy_until()`](FieldIter::copy_until) (Read), parse it with
+/// [`group_body()`](FieldIterFromSlice::group_body) / [`GroupBody`], or read
+/// nested fields manually until a matching `EGroup` before the next top-level
+/// field.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
-    /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`)
+    /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`).
+    /// The payload is a [`Varint`].
     Varint(Varint),
-    /// 32-bit fixed-width values (`Fixed32`, `SFixed32`, `Float`)
+    /// 32-bit fixed-width values (`Fixed32`, `SFixed32`, `Float`).
     I32([u8; 4]),
-    /// 64-bit fixed-width values (`Fixed64`, `SFixed64`, `Double`)
+    /// 64-bit fixed-width values (`Fixed64`, `SFixed64`, `Double`).
     I64([u8; 8]),
-    /// Length-delimited values (`String`, `Bytes`, embedded messages, packed repeated fields)
+    /// Length-delimited values (`String`, `Bytes`, embedded messages, packed repeated fields).
     Len(L),
-    /// Start-group tag (deprecated). No payload bytes follow the tag itself.
+    /// Start-group tag. Groups are deprecated in the Protocol Buffers language
+    /// since proto2 (prefer nested messages). No payload bytes follow the tag
+    /// itself.
     SGroup,
-    /// End-group tag (deprecated). No payload bytes follow the tag itself.
+    /// End-group tag. Groups are deprecated in the Protocol Buffers language
+    /// since proto2 (prefer nested messages). No payload bytes follow the tag
+    /// itself.
     EGroup,
 }
 
 impl<L> FieldValue<L> {
     // Varint constructors
 
-    /// Create a field value from a Varint
+    /// Create a field value from a Varint.
     pub fn from_varint(varint: Varint) -> Self {
         Self::Varint(varint)
     }
 
-    /// Create a field value from a `UInt64` protobuf type
+    /// Create a field value from a `UInt64` protobuf type.
     pub fn from_uint64(value: u64) -> Self {
         Self::Varint(Varint::from_uint64(value))
     }
 
-    /// Create a field value from a `UInt32` protobuf type
+    /// Create a field value from a `UInt32` protobuf type.
     pub fn from_uint32(value: u32) -> Self {
         Self::Varint(Varint::from_uint32(value))
     }
 
-    /// Create a field value from a `SInt64` protobuf type (ZigZag encoded)
+    /// Create a field value from a `SInt64` protobuf type (ZigZag encoded).
     pub fn from_sint64(value: i64) -> Self {
         Self::Varint(Varint::from_sint64(value))
     }
 
-    /// Create a field value from a `SInt32` protobuf type (ZigZag encoded)
+    /// Create a field value from a `SInt32` protobuf type (ZigZag encoded).
     pub fn from_sint32(value: i32) -> Self {
         Self::Varint(Varint::from_sint32(value))
     }
 
-    /// Create a field value from an `Int64` protobuf type (non-ZigZag)
+    /// Create a field value from an `Int64` protobuf type (non-ZigZag).
     pub fn from_int64(value: i64) -> Self {
         Self::Varint(Varint::from_int64(value))
     }
 
-    /// Create a field value from an `Int32` protobuf type (non-ZigZag)
+    /// Create a field value from an `Int32` protobuf type (non-ZigZag).
     pub fn from_int32(value: i32) -> Self {
         Self::Varint(Varint::from_int32(value))
     }
 
-    /// Create a field value from a `Bool` protobuf type
+    /// Create a field value from a `Bool` protobuf type.
     pub fn from_bool(value: bool) -> Self {
         Self::Varint(Varint::from_bool(value))
     }
 
     // Fixed-width constructors
 
-    /// Create a field value from a `Fixed32` protobuf type
+    /// Create a field value from a `Fixed32` protobuf type.
     pub fn from_fixed32(value: u32) -> Self {
         Self::I32(value.to_le_bytes())
     }
 
-    /// Create a field value from a `SFixed32` protobuf type
+    /// Create a field value from a `SFixed32` protobuf type.
     pub fn from_sfixed32(value: i32) -> Self {
         Self::I32(value.to_le_bytes())
     }
 
-    /// Create a field value from a `Float` protobuf type
+    /// Create a field value from a `Float` protobuf type.
     pub fn from_float(value: f32) -> Self {
         Self::I32(value.to_le_bytes())
     }
 
-    /// Create a field value from a `Fixed64` protobuf type
+    /// Create a field value from a `Fixed64` protobuf type.
     pub fn from_fixed64(value: u64) -> Self {
         Self::I64(value.to_le_bytes())
     }
 
-    /// Create a field value from a `SFixed64` protobuf type
+    /// Create a field value from a `SFixed64` protobuf type.
     pub fn from_sfixed64(value: i64) -> Self {
         Self::I64(value.to_le_bytes())
     }
 
-    /// Create a field value from a `Double` protobuf type
+    /// Create a field value from a `Double` protobuf type.
     pub fn from_double(value: f64) -> Self {
         Self::I64(value.to_le_bytes())
     }
 
-    /// Calculate the encoded size of this field value in bytes (excluding the tag)
+    /// Calculate the encoded size of this field value in bytes (excluding the tag).
     ///
     /// For Len values, this includes the length varint plus the data bytes.
     pub fn encoded_size(&self) -> usize
@@ -170,16 +178,14 @@ impl<L> FieldValue<L> {
     }
 }
 
-/// A raw field read from the wire
+/// A raw field read from the wire.
 ///
 /// Contains the field number and the raw field value.
 /// The caller must interpret the value based on the message schema.
 ///
-/// `L` is the type for length-delimited values (FieldValue::Len).
-/// Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`.
-/// `read_protobuf_fields_with` takes `FnMut(usize) -> Result<L>` with
-/// `L: AsMut<[u8]>` and calls it once per payload.
-/// Slice readers borrow the input as `&'a [u8]`.
+/// `L` is the type for length-delimited values ([`FieldValue::Len`]):
+/// `&[u8]` from a slice read, `Vec<u8>` by default from `Read`, or a custom
+/// type from [`ReadExtProtobuf::read_protobuf_fields_with()`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
     pub field_number: FieldNumber,
@@ -187,7 +193,7 @@ pub struct Field<L> {
 }
 
 impl<L> Field<L> {
-    /// Create a new field with the given field number and value
+    /// Create a new field with the given field number and value.
     pub fn new(field_number: FieldNumber, value: FieldValue<L>) -> Self {
         Self {
             field_number,
@@ -195,7 +201,7 @@ impl<L> Field<L> {
         }
     }
 
-    /// Calculate the total encoded size of this field in bytes (tag + value)
+    /// Calculate the total encoded size of this field in bytes (tag + value).
     pub fn encoded_size(&self) -> usize
     where
         L: AsRef<[u8]>,
@@ -213,7 +219,7 @@ impl<L> Field<L> {
             field_number: self.field_number,
             wire_type,
         };
-        let tag_varint = tag.to_encoded();
+        let tag_varint = tag.to_varint();
         let tag_size = tag_varint.varint_size();
 
         // Value size

@@ -9,26 +9,27 @@ use ::std::convert::TryFrom;
 
 /// Wire types used in Protocol Buffers encoding.
 ///
-/// The wire type tells the parser how big the payload is and how to interpret it.
-/// This allows old parsers to skip over new fields they don't understand.
+/// The wire type tells how large the following payload is and how to read it.
+/// Unknown wire-type values (outside 0–5) are an error in this crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum WireType {
-    /// Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum)
+    /// Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum).
     Varint = 0,
-    /// 64-bit fixed-width values (Fixed64, SFixed64, Double)
+    /// 64-bit fixed-width values (Fixed64, SFixed64, Double).
     Int64 = 1,
-    /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields)
+    /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields).
     Len = 2,
-    /// Start group (deprecated). Field readers return [`crate::FieldValue::SGroup`].
-    /// The group body follows on the wire; discard it with `skip_until` +
-    /// [`crate::until_group_ends`], preserve with `take_until` (slice) or
-    /// `copy_until` (Read) and the same predicate, or read nested fields until
-    /// [`crate::FieldValue::EGroup`].
+    /// Start group. Groups are deprecated in the Protocol Buffers language
+    /// since proto2 (prefer nested messages). The group body follows on the
+    /// wire; discard it with `skip_until()` + `until_group_ends()`, preserve
+    /// with `take_until()` (slice) or `copy_until()` (Read) and the same
+    /// predicate, or read nested fields until the matching end-group.
     SGroup = 3,
-    /// End group (deprecated). Field readers return [`crate::FieldValue::EGroup`].
+    /// End group. Groups are deprecated in the Protocol Buffers language since
+    /// proto2 (prefer nested messages).
     EGroup = 4,
-    /// 32-bit fixed-width values (Fixed32, SFixed32, Float)
+    /// 32-bit fixed-width values (Fixed32, SFixed32, Float).
     Int32 = 5,
 }
 

@@ -6,12 +6,15 @@
 use crate::ProtobufError;
 use crate::Result;
 use crate::field_number::FieldNumber;
+#[cfg(doc)]
+#[allow(unused_imports)]
+use crate::varint::ReadExtVarint;
 use crate::varint::Varint;
 use crate::wire_format::{FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK, WireType};
 use ::std::convert::{From, TryFrom};
 use ::std::io::Read;
 
-/// A protobuf tag containing field number and wire type
+/// A protobuf tag containing field number and wire type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tag {
     pub field_number: FieldNumber,
@@ -19,16 +22,20 @@ pub struct Tag {
 }
 
 impl Tag {
-    /// Build the encoded tag value as a `Varint`.
-    pub fn to_encoded(self) -> Varint {
+    /// Pack this tag into a [`Varint`] (`(field_number << 3) | wire_type`).
+    ///
+    /// This is not a byte-stream write; use the write traits to emit wire bytes.
+    pub fn to_varint(self) -> Varint {
         let value: u32 =
             (u32::from(self.field_number) << FIELD_NUMBER_SHIFT) | (self.wire_type as u32);
         Varint::from_uint32(value)
     }
 
-    /// Parse a tag from a `Varint` value.
-    pub fn from_encoded(encoded: Varint) -> Result<Self> {
-        let value = encoded.try_to_uint32()?;
+    /// Unpack a tag from a [`Varint`] tag value (`(field_number << 3) | wire_type`).
+    ///
+    /// This is not a byte-stream read; use [`ReadExtTag`] to read wire bytes.
+    pub fn try_from_varint(varint: Varint) -> Result<Self> {
+        let value = varint.try_to_uint32()?;
         let field_number_value = value >> FIELD_NUMBER_SHIFT;
         let wire_type_value = value & WIRE_TYPE_MASK;
 
@@ -55,41 +62,34 @@ impl Tag {
 
 impl From<Tag> for Varint {
     fn from(tag: Tag) -> Self {
-        tag.to_encoded()
+        tag.to_varint()
     }
 }
 
 impl TryFrom<Varint> for Tag {
     type Error = ProtobufError;
 
-    fn try_from(encoded: Varint) -> Result<Self> {
-        Self::from_encoded(encoded)
+    fn try_from(varint: Varint) -> Result<Self> {
+        Self::try_from_varint(varint)
     }
 }
 
-/// Extension trait for reading tags from Read instances.
+/// Extension trait for reading tags from [`Read`] instances.
 ///
-/// Reads until the reader's EOF (or an existing [`std::io::Take`] bound).
-/// Methods do not take a separate byte-budget argument; they forward to
-/// [`ReadExtVarint`].
-///
-/// [`ReadExtVarint`]: crate::varint::ReadExtVarint
+/// Forwards to [`ReadExtVarint`].
 ///
 /// # Example
 /// ```
-/// use ::std::io::Cursor;
 /// use ::protobuf_core::ReadExtTag;
 ///
-/// let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
-/// let mut reader = Cursor::new(data);
-/// let tag = reader.read_tag().unwrap();
+/// let mut data: &[u8] = &[0x08]; // tag 1:0 (field 1, wire type 0)
+/// let tag = data.read_tag().unwrap();
 /// assert_eq!(tag.field_number.as_u32(), 1);
 /// ```
 pub trait ReadExtTag {
-    /// Read a tag from this reader until a complete value.
+    /// Read a tag from this reader.
     ///
-    /// Empty or truncated input is [`ProtobufError::UnexpectedEof`]; check a
-    /// length bound first for soft end.
+    /// Empty or truncated input is [`ProtobufError::UnexpectedEof`].
     fn read_tag(&mut self) -> Result<Tag>;
 }
 
@@ -101,7 +101,7 @@ where
     fn read_tag(&mut self) -> Result<Tag> {
         use crate::varint::ReadExtVarint;
 
-        Tag::from_encoded(self.read_varint()?)
+        Tag::try_from_varint(self.read_varint()?)
     }
 }
 
@@ -133,9 +133,9 @@ mod tests {
             field_number: FieldNumber::try_new(1).unwrap(),
             wire_type: WireType::Varint,
         };
-        let encoded = tag.to_encoded();
+        let encoded = tag.to_varint();
         assert_eq!(encoded.to_uint64(), 8);
-        let parsed = Tag::from_encoded(encoded).unwrap();
+        let parsed = Tag::try_from_varint(encoded).unwrap();
         assert_eq!(parsed, tag);
     }
 
@@ -171,7 +171,7 @@ mod tests {
     fn test_parse_tag_invalid_field_number() {
         // Field number 0 is invalid.
         let varint = Varint::from_uint32(0);
-        let result = Tag::from_encoded(varint);
+        let result = Tag::try_from_varint(varint);
         assert!(matches!(
             result,
             Err(ProtobufError::FieldNumberOutOfRange { value: 0 })
@@ -182,7 +182,7 @@ mod tests {
     fn test_parse_tag_invalid_wire_type() {
         let varint = Varint::from_uint64(0x0F); // field 1, wire type 7
         assert!(matches!(
-            Tag::from_encoded(varint),
+            Tag::try_from_varint(varint),
             Err(ProtobufError::InvalidWireType { value: 7 })
         ));
     }
@@ -209,9 +209,9 @@ mod tests {
                 field_number: FieldNumber::try_new(number).unwrap(),
                 wire_type,
             };
-            let encoded = tag.to_encoded();
+            let encoded = tag.to_varint();
             assert_eq!(encoded.to_uint64(), encoded_value, "field {number}");
-            assert_eq!(Tag::from_encoded(encoded).unwrap(), tag);
+            assert_eq!(Tag::try_from_varint(encoded).unwrap(), tag);
             let via_from = Tag::try_from(Varint::from(tag)).unwrap();
             assert_eq!(via_from, tag);
         }

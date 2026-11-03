@@ -5,3 +5,4 @@ alwaysApply: true
 ---
 
 - [`AGENTS.md`](AGENTS.md) is the agent entry point (build/test, constraints). Keep it current when commands or standing rules change.
+- In docs and chat, function/method names use `foo()` (with parentheses), not bare `foo`. Types/traits stay bare (`Foo`).

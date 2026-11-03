@@ -7,29 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Breaking** relative to published `0.6.0`, plus additive group preserve / parse helpers. Version bump left for a separate release PR (bump before the next crates.io publish).
+**Breaking** relative to published `0.6.0`, plus additive group preserve / parse helpers and a redesigned streaming Len path. Version bump left for a separate release PR (bump before the next crates.io publish).
 
-Breaking for any caller of the removed varint/tag partial-resume API, or of `read_varint` / `read_tag` as `Result<Option<_>>` (including skip-only code that matched on `None`). Empty complete reads are now `UnexpectedEof`; soft end is a `remaining` / length-bound check (or `read_varints`).
+Breaking for any caller of the removed varint/tag partial-resume API, of `Tag::to_encoded` / `from_encoded` (now `to_varint` / `try_from_varint`), of `FieldNumber::encoded_size`, of `LenBody::is_empty`, of `read_varint` / `read_tag` as `Result<Option<_>>` (including skip-only code that matched on `None`), or of `read_protobuf_fields_with` / `FieldIterFromRead`'s old `FnMut(usize) -> Result<L>` + `L: AsMut<[u8]>` payload builder (including code that named the old default `fn(usize) -> …` type parameter). Empty complete reads are now `UnexpectedEof`; soft end is a caller length-bound / `len()` check (or `read_varints`).
 
 ### Added
 
-- `ReadExtVarint::read_varint_with_raw` — decodes a varint while copying its exact wire bytes into a caller-provided `[u8; MAX_VARINT_BYTES]` (including non-canonical encodings). Complete-read stack is `with_raw` → `read_varint`. `read_varints` soft-stops on empty input via a private `try_read_varint_with_raw` (`Ok(None)`); truncated mid-varint is `UnexpectedEof`.
+- `ReadExtVarint::read_varint_with_raw` — decodes a varint and returns its wire encoding as-is (even if non-canonical). The caller-provided `[u8; MAX_VARINT_BYTES]` is scratch the implementor may use; the returned `raw` slice need not point into it. Complete-read stack is `with_raw` → `read_varint`. `read_varints` soft-stops on empty input via a private `try_read_varint_with_raw` (`Ok(None)`); truncated mid-varint is `UnexpectedEof`.
 - `FieldIterFromSlice::take_until(pred)` — after an `SGroup` tag was consumed, returns a zero-copy `&[u8]` span of the group body through the matching `EGroup` (use with `until_group_ends`). Exact wire bytes.
-- `FieldIterFromRead::copy_until(pred, out)` — same stop semantics as `skip_until` for streaming input; tees exact wire bytes to `out` (including non-canonical varints).
+- `FieldIter::copy_until(pred, out)` — same stop semantics as `skip_until` for streaming input; tees exact wire bytes to `out` (including non-canonical varints).
 - `GroupBody` / `group_body(field_number)` on field iterators — adapter that yields body fields until the matching outermost `EGroup` (consumed, not yielded). Nesting uses a depth counter only; **nested end-group field numbers are not validated** (caller should nest another `group_body` when seeing an inner `SGroup`). Distinct from `until_group_ends`, which keeps a full field-number stack for skip/preserve. Premature end of input before that `EGroup` is `UnexpectedEof`. After the first `None` or a yielded `Err`, further `next` is unspecified (may read past the group); use `Iterator::fuse` for sticky `None`.
 - Contract for skip/preserve mirrors `until_group_ends`: the start-group tag is already consumed (caller writes it to a preserve blob if needed); the helper advances past the matching end-group. Nested groups use the same stack rules. On predicate / decode error, the input cursor may have advanced; `Read` `copy_until` may leave a partial write in `out`.
+- `LenBody<'a, R>` — Len handlers receive it **by value**. `len` fits in `u32`. **Not** [`std::io::Read`] itself: `String` / `Bytes` via consuming `into_read` → `LenBodyRead`; packed scalars via `varints` / `fixed32s` / `fixed64s` → `VarintIterFromLenBody` / `FixedIterFromLenBody`; nested via `fields` / `fields_with`. No public constructor. Child bodies use `scope(n, leftover)`; `Drop` writes unread count into `leftover`, then Len parse discards those bytes from the underlying `Read` (I/O outside `Drop`). Renamed through interim `Take32` / `Budget32`.
+- `LenHandler<R>` — internal Len payload builder bound on `FieldIter` (`handle(field_number, LenBody) -> Result<Payload>`). `VecLenPayload` implements it (`Payload = Vec<u8>`); closures get a blanket impl. Public entrances are `*_with` (`FnMut`) only.
+- `FieldIter<'a, R, T, F>` — streaming field iterator; `T: AsRef<LenBody<'a, R>> + AsMut<LenBody<'a, R>>`, `F: LenHandler<R>` (default `VecLenPayload`). Single `Iterator` impl. Replaces the former `FieldIterFromRead` / `FieldIterMut` names (no aliases).
+- Message `len` / `FieldIter::len` / `LenBody::len` / `WireCursor` lengths are `u32`.
 
 ### Changed
 
-- `ReadExtVarint::read_varint` / `read_varint_with_raw` and `ReadExtTag::read_tag` return `Result<…>` without `Option`. Empty input is `UnexpectedEof` (same as truncated); soft end is a caller `remaining` / length-bound check. `read_varints` soft-stops on empty.
+- `Tag::to_encoded` / `Tag::from_encoded` renamed to `to_varint` / `try_from_varint` (pack/unpack the tag's `Varint` value; not a byte-stream API).
+- `LenBody::remaining` / `FieldIter::remaining` / `WireCursor::remaining` renamed to `len` (`FieldIter` keeps `is_empty`; `LenBody::is_empty` removed). `LenBody::len()` is remaining payload bytes. `LenBodyRead` exposes `remaining()` for bytes still available after `into_read()`.
+- `ReadExtVarint::read_varint` / `read_varint_with_raw` and `ReadExtTag::read_tag` return `Result<…>` without `Option`. Empty input is `UnexpectedEof` (same as truncated); soft end is a caller length-bound / `len()` check. `read_varints` soft-stops on empty.
+- `ReadExtProtobuf::read_protobuf_fields` / `read_protobuf_fields_with` take `&mut self` and `len: u32` (was by-value `self` and host `usize` in 0.6.0). `*_with` takes `F: for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>` (by-value body; HRTB) instead of `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>`. Len bodies are `scope`d with a leftover `u32` slot; after the handler, unread bytes are discarded. Nested decode uses consuming `fields` / `fields_with`. Mid-field truncation under the budget is `UnexpectedEof` (including default `VecLenPayload`; custom `into_read().read_exact` may still surface `IoError`). Streaming field I/O uses `LenBody` (`u32` `len`; bytes/string via `into_read` → `LenBodyRead`); protobuf message `len` is contracted to `<= MAX_MESSAGE_SIZE` (docs + entrance `debug_assert`; release builds do not reject oversized `len`). After a field `Err`, `FieldIter` fuses to `None` (reader/budget may be desynced — abandon). Len handler errors win over post-handler discard I/O errors.
 
 ### Removed
 
+- `FieldNumber::encoded_size`. Tag size needs a wire type; use `Tag::to_varint().varint_size()`, or `FieldNumber::is_tag_single_byte()` when only the 1-byte-tag question matters.
+- `LenBody::is_empty`. Use `len() == 0`, or `LenBodyRead::remaining()` after `into_read()`.
+- `LenBody::fields_handler` / `ReadExtProtobuf::read_protobuf_fields_handler`. Use `fields_with` / `read_protobuf_fields_with` with a closure (`|n, body| handler.handle(n, body)` if needed).
 - Varint/tag partial-resume API: `DecodeState`, `DecodeOutcome`, `TagOutcome` / `Outcome`, `read_varint_partial` / `read_varint_resume`, `read_tag_partial` / `read_tag_resume`. Chunked callers buffer ≤ `MAX_VARINT_BYTES` (or until a terminator) and use complete reads — same model as fixed-width wire types.
 
 ### Internal
 
-- `WireCursor` is Iterator-like: required fragments (`remaining` / `read_varint_with_raw` / fixed / `skip_bytes` / `copy_bytes`) plus default compose methods (`read_varint` / `read_tag` / `skip_field` / `skip_until` / `copy_field` / `copy_until`). Read cursors delegate `read_varint_with_raw` to `ReadExtVarint` (raw in `buf`); `SliceReader` reuses that decode but returns the same-length subslice of the input (zero-copy raw).
+- `WireCursor` is Iterator-like: required fragments (`len` / `read_varint_with_raw` / fixed / `skip_bytes` / `copy_bytes`) plus default compose methods (`read_varint` / `read_tag` / `skip_field` / `skip_until` / `copy_field` / `copy_until`). `buf` is optional scratch for `read_varint_with_raw`; Read cursors typically return `raw` from `buf`, while `SliceReader` returns a same-length subslice of the input (zero-copy).
 
 ## [0.6.0]
 

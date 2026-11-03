@@ -1,9 +1,4 @@
 //! Varint decoding (reading) from `std::io::Read`.
-//!
-//! The reader's EOF (or an existing [`std::io::Take`] bound) is the byte limit;
-//! methods do not take a separate `len` argument. Callers that receive input in
-//! chunks should buffer until a terminator or [`MAX_VARINT_BYTES`] bytes are
-//! available, then call the complete-read APIs.
 
 use crate::wire_format::{MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK};
 use crate::{ProtobufError, Result};
@@ -15,7 +10,7 @@ use super::Varint;
 ///
 /// Yields [`Result<Varint>`] for each varint. Soft-stops when the reader has no
 /// bytes left; a truncated mid-varint is [`ProtobufError::UnexpectedEof`].
-/// Returned by [`ReadExtVarint::read_varints`].
+/// Returned by [`ReadExtVarint::read_varints()`].
 pub struct VarintIterFromRead<R> {
     reader: R,
 }
@@ -86,64 +81,29 @@ fn try_read_varint_with_raw<'a, R: Read>(
 
 /// Extension trait for reading varints from [`Read`] instances.
 ///
-/// Reads until the reader's EOF (or an existing [`std::io::Take`] bound).
-/// Methods do not take a separate byte-budget argument.
-///
-/// - [`read_varint_with_raw`](Self::read_varint_with_raw) /
-///   [`read_varint`](Self::read_varint) — complete reads; empty or truncated
-///   input is [`UnexpectedEof`](ProtobufError::UnexpectedEof) (check a length
-///   bound / `remaining` first for soft end)
-/// - [`read_varints`](Self::read_varints) — soft-stops when no bytes remain;
-///   truncated mid-varint is [`UnexpectedEof`](ProtobufError::UnexpectedEof)
-///
-/// Chunked input: buffer until a terminating byte or [`MAX_VARINT_BYTES`] are
-/// available, then call a complete-read method. There is no mid-varint resume
-/// state; fixed-width wire types already follow the same model.
-///
-/// # Performance Note
-///
-/// When reading from file handles or network streams, consider wrapping the reader
-/// with [`BufReader`](std::io::BufReader) to avoid inefficient byte-by-byte system calls:
-///
-/// ```no_run
-/// use std::io::{BufReader, Read};
-/// use protobuf_core::ReadExtVarint;
-///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let file = std::fs::File::open("data.bin")?;
-/// let mut reader = BufReader::new(file);
-/// let varint = reader.read_varint()?;
-/// # let _ = varint;
-/// # Ok(())
-/// # }
-/// ```
-///
 /// # Example
 /// ```
-/// use ::std::io::Cursor;
 /// use ::protobuf_core::ReadExtVarint;
 ///
-/// let data = vec![0x96, 0x01]; // 150 in varint encoding
-/// let mut reader = Cursor::new(data);
-/// let varint = reader.read_varint().unwrap();
+/// let mut data: &[u8] = &[0x96, 0x01]; // 150 in varint encoding
+/// let varint = data.read_varint().unwrap();
 /// assert_eq!(varint.to_uint64(), 150);
 /// ```
 pub trait ReadExtVarint: Read {
-    /// Read a varint and copy its exact wire bytes into `buf`.
+    /// Read a varint and return its wire encoding as-is (even if non-canonical).
     ///
-    /// Returns `(varint, raw)` where `raw` is `&buf[..n]` (including
-    /// non-canonical encodings). Empty or truncated input is
-    /// [`UnexpectedEof`](ProtobufError::UnexpectedEof); check a length bound
-    /// first for soft end.
+    /// `buf` is scratch the implementor may use; the returned `raw` slice
+    /// borrows for the joint lifetime of `self` and `buf`, but need not point
+    /// into `buf`. Empty or truncated input is
+    /// [`UnexpectedEof`](ProtobufError::UnexpectedEof).
     ///
     /// # Example
     /// ```
-    /// use ::std::io::Cursor;
     /// use ::protobuf_core::{ReadExtVarint, MAX_VARINT_BYTES};
     ///
-    /// let mut reader = Cursor::new(vec![0x96, 0x01, 0x08]);
+    /// let mut data: &[u8] = &[0x96, 0x01, 0x08];
     /// let mut buf = [0u8; MAX_VARINT_BYTES];
-    /// let (varint, raw) = reader.read_varint_with_raw(&mut buf).unwrap();
+    /// let (varint, raw) = data.read_varint_with_raw(&mut buf).unwrap();
     /// assert_eq!(varint.to_uint64(), 150);
     /// assert_eq!(raw, &[0x96, 0x01]);
     /// ```
@@ -158,9 +118,9 @@ pub trait ReadExtVarint: Read {
         try_read_varint_with_raw(self, buf)?.ok_or(ProtobufError::UnexpectedEof)
     }
 
-    /// Read a varint until a complete value.
+    /// Read a varint.
     ///
-    /// Via [`read_varint_with_raw`](Self::read_varint_with_raw) (wire bytes
+    /// Via [`read_varint_with_raw()`](Self::read_varint_with_raw) (wire bytes
     /// discarded). Empty or truncated input is
     /// [`UnexpectedEof`](ProtobufError::UnexpectedEof).
     #[inline]
@@ -172,19 +132,17 @@ pub trait ReadExtVarint: Read {
         Ok(self.read_varint_with_raw(&mut buf)?.0)
     }
 
-    /// Create an iterator that reads multiple varints until soft EOF.
+    /// Create an iterator that reads multiple varints.
     ///
     /// Stops when the reader yields no bytes; a truncated mid-varint is
     /// [`UnexpectedEof`](ProtobufError::UnexpectedEof).
     ///
     /// # Example
     /// ```
-    /// use ::std::io::Cursor;
     /// use ::protobuf_core::{ReadExtVarint, Varint};
     ///
-    /// let data = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
-    /// let mut reader = Cursor::new(data);
-    /// let varints: Vec<Varint> = reader
+    /// let mut data: &[u8] = &[0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
+    /// let varints: Vec<Varint> = data
     ///     .read_varints()
     ///     .collect::<Result<Vec<_>, _>>()
     ///     .unwrap();

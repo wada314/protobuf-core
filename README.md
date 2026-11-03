@@ -25,34 +25,32 @@ This library provides common definitions, constants, enums, and basic logic for 
 
 ### Reading Fields
 
-```rust
-use protobuf_core::{AsRefExtProtobuf, Field};
-
-let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1: 150
-let fields: Vec<Field<&[u8]>> = bytes
-    .read_protobuf_fields()
-    .collect::<Result<Vec<_>, _>>()
-    .unwrap();
-```
-
-The example above is `AsRefExtProtobuf`: `read_protobuf_fields` borrows `Field<&[u8]>` (the slice length is the bound). `ReadExtProtobuf::read_protobuf_fields(len)` / `read_protobuf_fields_with(len, make)` take an explicit message byte budget and wrap the reader in `std::io::Take`. Lower-level `ReadExtVarint` / `ReadExtTag` methods do not take `len`; they read until that reader's EOF (or an existing `Take`). Length-delimited payloads default to `Vec<u8>`; the `*_with` closure is `FnMut(usize) -> Result<L, ProtobufError>` where `L: AsMut<[u8]>`. The payload length is known before its bytes are read. The closure returns at least that many initialized bytes, and the reader overwrites the first `len` of them. A shorter buffer panics. Capture an allocator in the closure when the buffer needs one. Byte iterators are not supported; use a slice or a `Read` (with `len` for field APIs).
-
-Deprecated group wire types (`SGroup` / `EGroup`) are returned as tag-only `FieldValue` variants. The group body stays on the cursor; discard via `skip_until` + `until_group_ends`, preserve via slice `take_until` / Read `copy_until` with the same predicate, or parse with `group_body` — the start tag is already consumed, so write it yourself first when building an unknown-field blob. Prefer `until_group_ends` for skip/preserve (full field-number stack); `group_body` is depth-only and does not check nested end-group numbers — nest another `group_body` when you see an inner `SGroup`.
+Give the library a byte slice. It walks the message one field at a time.
+Each step yields a `Result` of a `Field`: a field number plus a raw value.
+On a slice, length-delimited payloads borrow as `&[u8]`.
 
 ```rust
-use protobuf_core::{AsRefExtProtobuf, FieldValue, WriteExtProtobuf, until_group_ends};
+use assert_matches::assert_matches;
+use protobuf_core::{AsRefExtProtobuf, FieldValue};
 
-let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
-let mut fields = bytes.as_slice().read_protobuf_fields();
-let start = fields.next().unwrap().unwrap();
-assert!(matches!(start.value, FieldValue::SGroup));
+// field 1 varint = 150, field 2 string = "hi"
+let bytes: &[u8] = &[0x08, 0x96, 0x01, 0x12, 0x02, b'h', b'i'];
 
-let mut preserved = Vec::new();
-preserved.write_protobuf_field(&start).unwrap();
-let body = fields.take_until(until_group_ends(start.field_number)).unwrap();
-preserved.extend_from_slice(body);
-assert_eq!(&preserved[..], &bytes[..bytes.len() - 2]);
+let mut fields = bytes.read_protobuf_fields();
+
+let Some(Ok(field)) = fields.next() else { unreachable!() };
+assert_eq!(field.field_number.as_u32(), 1);
+assert_matches!(field.value, FieldValue::Varint(v) if v.to_uint64() == 150);
+
+let Some(Ok(field)) = fields.next() else { unreachable!() };
+assert_eq!(field.field_number.as_u32(), 2);
+// Strings arrive as Len(&[u8]), not &str: proto2 does not UTF-8-check.
+assert_matches!(field.value, FieldValue::Len(s) if s == b"hi");
 ```
+
+For a streaming `std::io::Read` (you pass the message length yourself), see
+`ReadExtProtobuf` on [docs.rs](https://docs.rs/protobuf-core). Groups,
+nested messages, and custom Len handlers are documented there too.
 
 ### Writing Fields
 
