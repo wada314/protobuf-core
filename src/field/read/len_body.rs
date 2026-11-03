@@ -308,9 +308,16 @@ impl<'a, R: Read + ?Sized> Read for LenBodyRead<'a, R> {
         if max == 0 {
             return Ok(0);
         }
-        let n = self.body.reader.read(&mut buf[..max])?;
-        self.body.remaining -= n as u32;
-        Ok(n)
+        loop {
+            match self.body.reader.read(&mut buf[..max]) {
+                Ok(n) => {
+                    self.body.remaining -= n as u32;
+                    return Ok(n);
+                }
+                Err(err) if err.kind() == ::std::io::ErrorKind::Interrupted => continue,
+                Err(err) => return Err(err),
+            }
+        }
     }
 }
 
@@ -527,9 +534,11 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
 /// their bytes in the held [`LenBody`].
 ///
 /// After a yielded [`Err`], further [`next`](Iterator::next) calls return
-/// [`None`] (fused on error). The reader / budget may already be desynced
-/// (for example a mid-discard I/O failure, or a handler panic that skipped
-/// discard); abandon the iterator.
+/// [`None`] (fused on error). Do not call [`skip_until`](Self::skip_until) /
+/// [`copy_until`](Self::copy_until) / [`group_body`](Self::group_body) after
+/// that either — they are not fused and may mis-parse a desynced cursor. The
+/// reader / budget may already be wrong (mid-discard I/O failure, or a handler
+/// panic that skipped discard); abandon the iterator.
 pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
     body: T,
     handler: F,
