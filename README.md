@@ -44,7 +44,7 @@ assert_matches!(field.value, FieldValue::Varint(v) if v.to_uint64() == 150);
 
 let Some(Ok(field)) = fields.next() else { unreachable!() };
 assert_eq!(field.field_number.as_u32(), 2);
-// Strings (and bytes / nested messages) arrive as Len(&[u8]).
+// Strings arrive as Len(&[u8]), not &str: proto2 does not UTF-8-check.
 assert_matches!(field.value, FieldValue::Len(s) if s == b"hi");
 ```
 
