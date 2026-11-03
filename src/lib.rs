@@ -102,8 +102,8 @@
 //! - [`AsRefExtProtobuf`]: from a byte slice (or anything `AsRef<[u8]>`).
 //!   Length-delimited values borrow as [`Field<&[u8]>`].
 //! - [`ReadExtProtobuf`]: from a [`std::io::Read`]. Methods that read
-//!   **fields** take the message length (`len`); lower-level tag/varint
-//!   helpers do not. Length-delimited values default to [`Field<Vec<u8>>`].
+//!   fields require the message length; lower-level tag/varint helpers do
+//!   not. Length-delimited values default to [`Field<Vec<u8>>`].
 //!
 //! On the `Read` path, each length-delimited field is handed to you as a
 //! [`LenBody`]: a view limited to that field's bytes (nested messages,
