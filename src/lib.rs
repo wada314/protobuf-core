@@ -97,11 +97,11 @@
 //!
 //! ## Reading Traits
 //!
-//! Two ways to read fields:
+//! Two ways to read fields; both return an iterator of [`Field`] values:
 //!
 //! - [`AsRefExtProtobuf`]: from a byte slice (or anything `AsRef<[u8]>`).
-//!   Returns an iterator of [`Field<&[u8]>`](Field); for a length-delimited
-//!   field, the payload is a reference to part of the input slice.
+//!   Items are [`Field<&[u8]>`](Field); for a length-delimited field, the
+//!   payload is a reference to part of the input slice.
 //! - [`ReadExtProtobuf`]: from a [`std::io::Read`]. Methods that read
 //!   fields require the message length. Length-delimited values default to
 //!   [`Field<Vec<u8>>`], or you can customize it by passing your own closure
