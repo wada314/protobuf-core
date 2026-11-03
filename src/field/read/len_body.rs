@@ -682,12 +682,12 @@ pub trait ReadExtProtobuf: Read {
     /// For each Len field, `handler` gets a [`LenBody`] covering that field’s
     /// payload. Call the method that matches what you think the field is:
     ///
-    /// - nested message — [`fields()`](LenBody::fields) /
+    /// - nested message: [`fields()`](LenBody::fields) /
     ///   [`fields_with()`](LenBody::fields_with)
-    /// - `bytes` / `string` — [`into_read()`](LenBody::into_read) (then
+    /// - `bytes` / `string`: [`into_read()`](LenBody::into_read) (then
     ///   [`Read`](std::io::Read) helpers)
-    /// - packed repeated varints — [`varints()`](LenBody::varints)
-    /// - packed repeated fixed32 / fixed64 — [`fixed32s()`](LenBody::fixed32s) /
+    /// - packed repeated varints: [`varints()`](LenBody::varints)
+    /// - packed repeated fixed32 / fixed64: [`fixed32s()`](LenBody::fixed32s) /
     ///   [`fixed64s()`](LenBody::fixed64s)
     ///
     /// After `handler` returns, any unread payload bytes are discarded from
