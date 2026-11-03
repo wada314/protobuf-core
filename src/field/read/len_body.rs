@@ -657,33 +657,39 @@ pub trait ReadExtProtobuf: Read {
     /// Read raw protobuf fields from the reader, returning an iterator.
     ///
     /// Borrows `self` and reads fields from the next `len` bytes (the message).
-    ///
-    /// # Contract
-    ///
-    /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
-    /// Returns an iterator that yields fields sequentially.
-    /// Each field contains raw bytes that must be interpreted by the caller.
     /// Length-delimited payloads are `Vec<u8>`.
+    /// `len > MAX_MESSAGE_SIZE` is only checked with `debug_assert` (not in release).
+    ///
+    /// # How `self` is consumed
+    ///
+    /// - Bytes are pulled from `self` only as the iterator advances; `len` is
+    ///   not drained up front.
+    /// - After a successful field yield, that field’s wire bytes are gone from
+    ///   `self` (for Len, any unread payload bytes are discarded before yield).
+    /// - Stopping or dropping the iterator early leaves the unread part of the
+    ///   `len`-byte window still on `self` (the tail is not skipped for you).
+    /// - Running until [`FieldIter::remaining`] is `0` means exactly `len`
+    ///   bytes were consumed from `self`.
+    /// - If `self` ends before those `len` bytes are finished, the next read is
+    ///   [`UnexpectedEof`](crate::ProtobufError::UnexpectedEof) (including a
+    ///   truncated mid-field). After any [`Err`], further `next` is [`None`];
+    ///   abandon the iterator — `self` may already be out of sync.
     fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, LenBody<'_, Self>>
     where
         Self: Sized;
 
-    /// Read raw protobuf fields from the reader, returning an iterator.
+    /// Like [`read_protobuf_fields`](Self::read_protobuf_fields), but each
+    /// length-delimited field is built by `handler` instead of `Vec<u8>`.
     ///
-    /// Borrows `self` and reads fields from the next `len` bytes (the message).
+    /// `handler` receives the Len body **by value** (`remaining()` is the
+    /// payload length). After it returns, unused body bytes are discarded from
+    /// `self`. Nested messages use [`LenBody::fields`] /
+    /// [`fields_with`](LenBody::fields_with); `bytes` / `string` use
+    /// [`LenBody::into_read`]. Wrap a stateful handler as
+    /// `|n, body| my_handler.handle(n, body)`.
     ///
-    /// # Contract
-    ///
-    /// `len` must be `<= MAX_MESSAGE_SIZE` (checked with `debug_assert` only).
-    ///
-    /// `handler` is called once for each length-delimited field. The Len body
-    /// is passed **by value** (`remaining()` at entry is the payload length).
-    /// After return, unused body bytes are discarded. Custom stateful handlers
-    /// can wrap as `|n, body| my_handler.handle(n, body)`.
-    ///
-    /// Nested messages should call [`LenBody::fields`] /
-    /// [`LenBody::fields_with`] on that body (consumes it; keeps `R` fixed).
-    /// For `bytes` / `string`, use [`LenBody::into_read`] and [`Read`] helpers.
+    /// Reader consumption matches
+    /// [`read_protobuf_fields`](Self::read_protobuf_fields).
     ///
     /// # Examples
     ///
