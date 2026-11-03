@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Breaking** relative to published `0.6.0`, plus additive group preserve / parse helpers and a redesigned streaming Len path. Version bump left for a separate release PR (bump before the next crates.io publish).
 
-Breaking for any caller of the removed varint/tag partial-resume API, of `Tag::to_encoded` / `from_encoded` (now `to_varint` / `try_from_varint`), of `FieldNumber::encoded_size`, of `read_varint` / `read_tag` as `Result<Option<_>>` (including skip-only code that matched on `None`), or of `read_protobuf_fields_with` / `FieldIterFromRead`'s old `FnMut(usize) -> Result<L>` + `L: AsMut<[u8]>` payload builder (including code that named the old default `fn(usize) -> …` type parameter). Empty complete reads are now `UnexpectedEof`; soft end is a `remaining` / length-bound check (or `read_varints`).
+Breaking for any caller of the removed varint/tag partial-resume API, of `Tag::to_encoded` / `from_encoded` (now `to_varint` / `try_from_varint`), of `FieldNumber::encoded_size`, of `LenBody::is_empty`, of `read_varint` / `read_tag` as `Result<Option<_>>` (including skip-only code that matched on `None`), or of `read_protobuf_fields_with` / `FieldIterFromRead`'s old `FnMut(usize) -> Result<L>` + `L: AsMut<[u8]>` payload builder (including code that named the old default `fn(usize) -> …` type parameter). Empty complete reads are now `UnexpectedEof`; soft end is a `remaining` / length-bound check (or `read_varints`).
 
 ### Added
 
@@ -26,13 +26,14 @@ Breaking for any caller of the removed varint/tag partial-resume API, of `Tag::t
 ### Changed
 
 - `Tag::to_encoded` / `Tag::from_encoded` renamed to `to_varint` / `try_from_varint` (pack/unpack the tag's `Varint` value; not a byte-stream API).
-- `LenBody::remaining` / `FieldIter::remaining` / `WireCursor::remaining` renamed to `len` (with `is_empty` on the public types). At handler entry, `LenBody::len()` is the payload size.
+- `LenBody::remaining` / `FieldIter::remaining` / `WireCursor::remaining` renamed to `len` (`FieldIter` keeps `is_empty`; `LenBody::is_empty` removed). `LenBody::len()` is the payload size. `LenBodyRead` exposes `remaining()` for bytes still available after `into_read()`.
 - `ReadExtVarint::read_varint` / `read_varint_with_raw` and `ReadExtTag::read_tag` return `Result<…>` without `Option`. Empty input is `UnexpectedEof` (same as truncated); soft end is a caller `remaining` / length-bound check. `read_varints` soft-stops on empty.
 - `ReadExtProtobuf::read_protobuf_fields` / `read_protobuf_fields_with` take `&mut self` and `len: u32` (was by-value `self` and host `usize` in 0.6.0). `*_with` takes `F: for<'t> FnMut(FieldNumber, LenBody<'t, R>) -> Result<L>` (by-value body; HRTB) instead of `FnMut(usize) -> Result<L>` with `L: AsMut<[u8]>`. Len bodies are `scope`d with a leftover `u32` slot; after the handler, unread bytes are discarded. Nested decode uses consuming `fields` / `fields_with`. Mid-field truncation under the budget is `UnexpectedEof` (including default `VecLenPayload`; custom `into_read().read_exact` may still surface `IoError`). Streaming field I/O uses `LenBody` (`u32` `len`; bytes/string via `into_read` → `LenBodyRead`); protobuf message `len` is contracted to `<= MAX_MESSAGE_SIZE` (docs + entrance `debug_assert`; release builds do not reject oversized `len`). After a field `Err`, `FieldIter` fuses to `None` (reader/budget may be desynced — abandon). Len handler errors win over post-handler discard I/O errors.
 
 ### Removed
 
 - `FieldNumber::encoded_size`. Tag size needs a wire type; use `Tag::to_varint().varint_size()`, or `FieldNumber::is_tag_single_byte()` when only the 1-byte-tag question matters.
+- `LenBody::is_empty`. Use `len() == 0`, or `LenBodyRead::remaining()` after `into_read()`.
 - `LenBody::fields_handler` / `ReadExtProtobuf::read_protobuf_fields_handler`. Use `fields_with` / `read_protobuf_fields_with` with a closure (`|n, body| handler.handle(n, body)` if needed).
 - Varint/tag partial-resume API: `DecodeState`, `DecodeOutcome`, `TagOutcome` / `Outcome`, `read_varint_partial` / `read_varint_resume`, `read_tag_partial` / `read_tag_resume`. Chunked callers buffer ≤ `MAX_VARINT_BYTES` (or until a terminator) and use complete reads — same model as fixed-width wire types.
 

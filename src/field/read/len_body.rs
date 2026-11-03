@@ -88,14 +88,9 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
 
     /// Remaining payload length in bytes.
     #[inline]
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u32 {
         self.remaining
-    }
-
-    /// `true` when [`len()`](Self::len) is `0`.
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.remaining == 0
     }
 
     /// Decode one varint from this body (empty body is
@@ -270,10 +265,18 @@ pub struct LenBodyRead<'a, R: ?Sized> {
     body: LenBody<'a, R>,
 }
 
+impl<'a, R: ?Sized> LenBodyRead<'a, R> {
+    /// Bytes still available to read from this view.
+    #[inline]
+    pub fn remaining(&self) -> u32 {
+        self.body.remaining
+    }
+}
+
 impl<'a, R: Read + ?Sized> Read for LenBodyRead<'a, R> {
     #[inline]
     fn read(&mut self, buf: &mut [u8]) -> ::std::io::Result<usize> {
-        let max = buf.len().min(self.body.remaining as usize);
+        let max = buf.len().min(self.remaining() as usize);
         if max == 0 {
             return Ok(0);
         }
@@ -302,7 +305,7 @@ impl<'a, R: Read + ?Sized> Iterator for VarintIterFromLenBody<'a, R> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.body.is_empty() {
+        if self.body.remaining == 0 {
             return None;
         }
         Some(
@@ -326,7 +329,7 @@ impl<'a, R: Read + ?Sized, const N: usize> Iterator for FixedIterFromLenBody<'a,
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.body.is_empty() {
+        if self.body.remaining == 0 {
             return None;
         }
         let mut bytes = [0u8; N];
@@ -558,7 +561,7 @@ where
     /// `true` when [`len()`](Self::len) is `0`.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.body.as_ref().is_empty()
+        self.body.as_ref().remaining == 0
     }
 }
 
@@ -571,7 +574,7 @@ where
     type Item = Result<Field<F::Payload>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.failed || self.body.as_ref().is_empty() {
+        if self.failed || self.body.as_ref().remaining == 0 {
             return None;
         }
         match self.body.as_mut().parse_field_with(&mut self.handler) {
@@ -677,9 +680,9 @@ pub trait ReadExtProtobuf: Read {
     /// let len = data.len() as u32;
     /// let fields: Vec<_> = data
     ///     .read_protobuf_fields_with(len, |_n, body| {
-    ///         let body_len = body.len();
-    ///         let mut buf = vec![0u8; body_len as usize];
-    ///         body.into_read().read_exact(&mut buf)?;
+    ///         let mut reader = body.into_read();
+    ///         let mut buf = vec![0u8; reader.remaining() as usize];
+    ///         reader.read_exact(&mut buf)?;
     ///         Ok(buf.into_boxed_slice())
     ///     })
     ///     .collect::<Result<Vec<_>, _>>()
