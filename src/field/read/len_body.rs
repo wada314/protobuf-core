@@ -42,7 +42,8 @@ use ::std::io::{Read, Write};
 /// - [`varints()`](Self::varints) / [`fixed32s()`](Self::fixed32s) /
 ///   [`fixed64s()`](Self::fixed64s) — packed repeats
 ///
-/// Unread bytes are discarded when the body is finished.
+/// Unread bytes are consumed from the underlying [`Read`] when the body is
+/// finished.
 pub struct LenBody<'a, R: ?Sized> {
     reader: &'a mut R,
     remaining: u32,
