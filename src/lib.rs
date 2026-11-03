@@ -36,6 +36,9 @@
 //! let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1 = 150
 //!
 //! let mut fields = bytes.read_protobuf_fields();
+//! // `next()` → Option<Result<Field<&[u8]>, _>>
+//! // first unwrap: Some (end of message would be None)
+//! // second unwrap: Ok (wire/parse failure would be Err)
 //! let field: Field<&[u8]> = fields.next().unwrap().unwrap();
 //!
 //! assert_eq!(field.field_number.as_u32(), 1);
