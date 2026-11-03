@@ -14,11 +14,11 @@ use ::std::convert::TryFrom;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum WireType {
-    /// Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum)
+    /// Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64, Bool, Enum).
     Varint = 0,
-    /// 64-bit fixed-width values (Fixed64, SFixed64, Double)
+    /// 64-bit fixed-width values (Fixed64, SFixed64, Double).
     Int64 = 1,
-    /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields)
+    /// Length-delimited values (String, Bytes, embedded messages, packed repeated fields).
     Len = 2,
     /// Start group (deprecated). Field readers return [`crate::FieldValue::SGroup`].
     /// The group body follows on the wire; discard it with `skip_until()` +
@@ -28,7 +28,7 @@ pub enum WireType {
     SGroup = 3,
     /// End group (deprecated). Field readers return [`crate::FieldValue::EGroup`].
     EGroup = 4,
-    /// 32-bit fixed-width values (Fixed32, SFixed32, Float)
+    /// 32-bit fixed-width values (Fixed32, SFixed32, Float).
     Int32 = 5,
 }
 

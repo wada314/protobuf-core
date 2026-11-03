@@ -633,7 +633,7 @@ where
 // ReadExtProtobuf
 // ============================================================================
 
-/// Extension trait for reading raw Protocol Buffer fields from `Read` types
+/// Extension trait for reading raw Protocol Buffer fields from `Read` types.
 ///
 /// This trait provides low-level utilities for reading field-by-field from a byte stream.
 /// Each method takes the message length `len: u32` (how many bytes of `self`

@@ -1,4 +1,4 @@
-//! Field reading utilities for Protocol Buffers
+//! Field reading utilities for Protocol Buffers.
 //!
 //! This module provides low-level utilities for reading raw protobuf fields from
 //! `std::io::Read` (with an explicit `u32` message byte budget) and from byte

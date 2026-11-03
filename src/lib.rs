@@ -160,7 +160,7 @@ pub use self::wire_format::{
 use ::std::convert::Infallible;
 use ::thiserror::Error;
 
-/// Unified error type for all protobuf operations
+/// Unified error type for all protobuf operations.
 #[derive(Error, Debug)]
 pub enum ProtobufError {
     #[error("Field number {value} is out of valid range [1, 536_870_911]")]
@@ -207,5 +207,5 @@ impl From<Infallible> for ProtobufError {
     }
 }
 
-/// Custom Result type for protobuf operations
+/// Custom Result type for protobuf operations.
 pub type Result<T> = ::std::result::Result<T, ProtobufError>;

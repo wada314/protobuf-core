@@ -11,7 +11,7 @@ use crate::wire_format::{FIELD_NUMBER_SHIFT, WIRE_TYPE_MASK, WireType};
 use ::std::convert::{From, TryFrom};
 use ::std::io::Read;
 
-/// A protobuf tag containing field number and wire type
+/// A protobuf tag containing field number and wire type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tag {
     pub field_number: FieldNumber,

@@ -1,4 +1,4 @@
-//! Field-level I/O utilities for Protocol Buffers
+//! Field-level I/O utilities for Protocol Buffers.
 //!
 //! This module provides primitive utilities for reading and writing raw protobuf fields.
 //! These are building blocks for constructing higher-level parsers and serializers,
@@ -36,7 +36,7 @@ pub use self::read::{
 };
 pub use self::write::WriteExtProtobuf;
 
-/// A raw field value read from the wire
+/// A raw field value read from the wire.
 ///
 /// This represents the raw bytes of a field value without semantic interpretation.
 /// The caller is responsible for converting these raw values to the appropriate types
@@ -63,11 +63,11 @@ pub enum FieldValue<L> {
     /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`).
     /// The payload is a [`Varint`].
     Varint(Varint),
-    /// 32-bit fixed-width values (`Fixed32`, `SFixed32`, `Float`)
+    /// 32-bit fixed-width values (`Fixed32`, `SFixed32`, `Float`).
     I32([u8; 4]),
-    /// 64-bit fixed-width values (`Fixed64`, `SFixed64`, `Double`)
+    /// 64-bit fixed-width values (`Fixed64`, `SFixed64`, `Double`).
     I64([u8; 8]),
-    /// Length-delimited values (`String`, `Bytes`, embedded messages, packed repeated fields)
+    /// Length-delimited values (`String`, `Bytes`, embedded messages, packed repeated fields).
     Len(L),
     /// Start-group tag (deprecated). No payload bytes follow the tag itself.
     SGroup,
@@ -78,79 +78,79 @@ pub enum FieldValue<L> {
 impl<L> FieldValue<L> {
     // Varint constructors
 
-    /// Create a field value from a Varint
+    /// Create a field value from a Varint.
     pub fn from_varint(varint: Varint) -> Self {
         Self::Varint(varint)
     }
 
-    /// Create a field value from a `UInt64` protobuf type
+    /// Create a field value from a `UInt64` protobuf type.
     pub fn from_uint64(value: u64) -> Self {
         Self::Varint(Varint::from_uint64(value))
     }
 
-    /// Create a field value from a `UInt32` protobuf type
+    /// Create a field value from a `UInt32` protobuf type.
     pub fn from_uint32(value: u32) -> Self {
         Self::Varint(Varint::from_uint32(value))
     }
 
-    /// Create a field value from a `SInt64` protobuf type (ZigZag encoded)
+    /// Create a field value from a `SInt64` protobuf type (ZigZag encoded).
     pub fn from_sint64(value: i64) -> Self {
         Self::Varint(Varint::from_sint64(value))
     }
 
-    /// Create a field value from a `SInt32` protobuf type (ZigZag encoded)
+    /// Create a field value from a `SInt32` protobuf type (ZigZag encoded).
     pub fn from_sint32(value: i32) -> Self {
         Self::Varint(Varint::from_sint32(value))
     }
 
-    /// Create a field value from an `Int64` protobuf type (non-ZigZag)
+    /// Create a field value from an `Int64` protobuf type (non-ZigZag).
     pub fn from_int64(value: i64) -> Self {
         Self::Varint(Varint::from_int64(value))
     }
 
-    /// Create a field value from an `Int32` protobuf type (non-ZigZag)
+    /// Create a field value from an `Int32` protobuf type (non-ZigZag).
     pub fn from_int32(value: i32) -> Self {
         Self::Varint(Varint::from_int32(value))
     }
 
-    /// Create a field value from a `Bool` protobuf type
+    /// Create a field value from a `Bool` protobuf type.
     pub fn from_bool(value: bool) -> Self {
         Self::Varint(Varint::from_bool(value))
     }
 
     // Fixed-width constructors
 
-    /// Create a field value from a `Fixed32` protobuf type
+    /// Create a field value from a `Fixed32` protobuf type.
     pub fn from_fixed32(value: u32) -> Self {
         Self::I32(value.to_le_bytes())
     }
 
-    /// Create a field value from a `SFixed32` protobuf type
+    /// Create a field value from a `SFixed32` protobuf type.
     pub fn from_sfixed32(value: i32) -> Self {
         Self::I32(value.to_le_bytes())
     }
 
-    /// Create a field value from a `Float` protobuf type
+    /// Create a field value from a `Float` protobuf type.
     pub fn from_float(value: f32) -> Self {
         Self::I32(value.to_le_bytes())
     }
 
-    /// Create a field value from a `Fixed64` protobuf type
+    /// Create a field value from a `Fixed64` protobuf type.
     pub fn from_fixed64(value: u64) -> Self {
         Self::I64(value.to_le_bytes())
     }
 
-    /// Create a field value from a `SFixed64` protobuf type
+    /// Create a field value from a `SFixed64` protobuf type.
     pub fn from_sfixed64(value: i64) -> Self {
         Self::I64(value.to_le_bytes())
     }
 
-    /// Create a field value from a `Double` protobuf type
+    /// Create a field value from a `Double` protobuf type.
     pub fn from_double(value: f64) -> Self {
         Self::I64(value.to_le_bytes())
     }
 
-    /// Calculate the encoded size of this field value in bytes (excluding the tag)
+    /// Calculate the encoded size of this field value in bytes (excluding the tag).
     ///
     /// For Len values, this includes the length varint plus the data bytes.
     pub fn encoded_size(&self) -> usize
@@ -173,7 +173,7 @@ impl<L> FieldValue<L> {
     }
 }
 
-/// A raw field read from the wire
+/// A raw field read from the wire.
 ///
 /// Contains the field number and the raw field value.
 /// The caller must interpret the value based on the message schema.
@@ -189,7 +189,7 @@ pub struct Field<L> {
 }
 
 impl<L> Field<L> {
-    /// Create a new field with the given field number and value
+    /// Create a new field with the given field number and value.
     pub fn new(field_number: FieldNumber, value: FieldValue<L>) -> Self {
         Self {
             field_number,
@@ -197,7 +197,7 @@ impl<L> Field<L> {
         }
     }
 
-    /// Calculate the total encoded size of this field in bytes (tag + value)
+    /// Calculate the total encoded size of this field in bytes (tag + value).
     pub fn encoded_size(&self) -> usize
     where
         L: AsRef<[u8]>,

@@ -1,4 +1,4 @@
-//! Field writing utilities for Protocol Buffers
+//! Field writing utilities for Protocol Buffers.
 //!
 //! This module provides low-level utilities for writing raw protobuf fields to byte streams.
 
@@ -9,12 +9,12 @@ use crate::varint::{Varint, WriteExtVarint};
 use crate::wire_format::WireType;
 use ::std::io::Write;
 
-/// Extension trait for writing raw Protocol Buffer fields to `Write` types
+/// Extension trait for writing raw Protocol Buffer fields to `Write` types.
 ///
 /// This trait provides low-level utilities for writing fields to a byte stream.
 /// It is the counterpart to `ReadExtProtobuf` for serialization.
 pub trait WriteExtProtobuf {
-    /// Write a single raw protobuf field to the writer (tag + value)
+    /// Write a single raw protobuf field to the writer (tag + value).
     ///
     /// Returns the number of bytes written.
     ///
@@ -37,7 +37,7 @@ pub trait WriteExtProtobuf {
     /// ```
     fn write_protobuf_field<L: AsRef<[u8]>>(&mut self, field: &Field<L>) -> Result<usize>;
 
-    /// Write multiple raw protobuf fields to the writer
+    /// Write multiple raw protobuf fields to the writer.
     ///
     /// Returns the total number of bytes written.
     ///
