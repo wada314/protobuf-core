@@ -42,12 +42,13 @@ pub use self::write::WriteExtProtobuf;
 /// The caller is responsible for converting these raw values to the appropriate types
 /// based on the field's schema definition.
 ///
-/// `L` is the type for length-delimited values (Len variant).
-///  - Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`
-///    ([`VecLenPayload`]). `read_protobuf_fields_with` takes a closure
-///    ([`LenHandler`] via blanket); `read_protobuf_fields_handler` takes any
-///    [`LenHandler`]. Unused body bytes are discarded after `handle`.
+/// `L` is the type for length-delimited values (Len variant):
 ///  - Slice readers borrow the input as `&'a [u8]`.
+///  - Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`
+///    ([`VecLenPayload`]).
+///  - Custom payloads use `read_protobuf_fields_with` (closure /
+///    [`LenHandler`] via blanket) or `read_protobuf_fields_handler` (any
+///    [`LenHandler`]). Unused body bytes are discarded after `handle`.
 ///
 /// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
 /// does not include the group body. After an `SGroup`, discard the body with
@@ -177,11 +178,11 @@ impl<L> FieldValue<L> {
 /// Contains the field number and the raw field value.
 /// The caller must interpret the value based on the message schema.
 ///
-/// `L` is the type for length-delimited values (FieldValue::Len).
-/// Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`
-/// ([`crate::VecLenPayload`]). Custom Len payloads use
+/// `L` is the type for length-delimited values ([`FieldValue::Len`]):
+/// `&[u8]` from a slice read, `Vec<u8>` by default from `Read`
+/// ([`crate::VecLenPayload`]), or a custom type from
 /// [`crate::ReadExtProtobuf::read_protobuf_fields_with`] /
-/// [`crate::LenHandler`]. Slice readers borrow the input as `&'a [u8]`.
+/// [`crate::LenHandler`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<L> {
     pub field_number: FieldNumber,

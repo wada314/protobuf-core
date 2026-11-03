@@ -70,9 +70,9 @@
 //! ### Fields
 //!
 //! - [`Field<L>`]: Represents a raw protobuf field with a field number and value.
-//!   The `L` type parameter represents the type used for length-delimited values
-//!   (`Vec<u8>` by default from `Read`, a custom type from a Len handler closure, or
-//!   `&'a [u8]` for a slice read).
+//!   The `L` type parameter is the length-delimited payload: `&[u8]` from a slice
+//!   read (as above), `Vec<u8>` by default from `Read`, or a custom type from a
+//!   Len handler.
 //! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
 //!   - `Varint(Varint)`: Variable-width integers (Int32, Int64, UInt32, UInt64, SInt32, SInt64,
 //!     Bool, Enum)
