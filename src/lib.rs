@@ -100,7 +100,7 @@
 //! Two ways to read fields:
 //!
 //! - [`AsRefExtProtobuf`]: from a byte slice (or anything `AsRef<[u8]>`).
-//!   Length-delimited values borrow as [`Field<&[u8]>`].
+//!   Length-delimited values borrow as <code>[Field]&lt;&[u8]&gt;</code>.
 //! - [`ReadExtProtobuf`]: from a [`std::io::Read`]. Methods that read
 //!   fields require the message length; lower-level tag/varint helpers do
 //!   not. Length-delimited values default to [`Field<Vec<u8>>`].
