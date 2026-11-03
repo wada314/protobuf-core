@@ -81,24 +81,6 @@ fn try_read_varint_with_raw<'a, R: Read>(
 
 /// Extension trait for reading varints from [`Read`] instances.
 ///
-/// # Performance Note
-///
-/// When reading from file handles or network streams, consider wrapping the reader
-/// with [`BufReader`](std::io::BufReader) to avoid inefficient byte-by-byte system calls:
-///
-/// ```no_run
-/// use std::io::{BufReader, Read};
-/// use protobuf_core::ReadExtVarint;
-///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let file = std::fs::File::open("data.bin")?;
-/// let mut reader = BufReader::new(file);
-/// let varint = reader.read_varint()?;
-/// # let _ = varint;
-/// # Ok(())
-/// # }
-/// ```
-///
 /// # Example
 /// ```
 /// use ::std::io::Cursor;
