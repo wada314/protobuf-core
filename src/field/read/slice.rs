@@ -15,7 +15,7 @@ use ::std::io::Write;
 // AsRefExtProtobuf
 // ============================================================================
 
-/// Helper struct implementing BufWireCursor for slice-based readers
+/// Helper struct implementing BufWireCursor for slice-based readers.
 pub(crate) struct SliceReader<'a, 'b> {
     pub(crate) slice: &'b mut &'a [u8],
 }
@@ -198,9 +198,9 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
 /// use ::protobuf_core::{AsRefExtProtobuf, FieldValue};
 ///
 /// // field 1 varint = 150, field 2 string = "Hel"
-/// let slice = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
+/// let data = [0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c];
 ///
-/// for field in slice.read_protobuf_fields() {
+/// for field in data.read_protobuf_fields() {
 ///     let field = field.unwrap();
 ///     match field.value {
 ///         FieldValue::Varint(varint) => {
