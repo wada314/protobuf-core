@@ -70,9 +70,13 @@ pub enum FieldValue<L> {
     I64([u8; 8]),
     /// Length-delimited values (`String`, `Bytes`, embedded messages, packed repeated fields).
     Len(L),
-    /// Start-group tag (deprecated). No payload bytes follow the tag itself.
+    /// Start-group tag. Groups are deprecated in the Protocol Buffers language
+    /// since proto2 (prefer nested messages). No payload bytes follow the tag
+    /// itself.
     SGroup,
-    /// End-group tag (deprecated). No payload bytes follow the tag itself.
+    /// End-group tag. Groups are deprecated in the Protocol Buffers language
+    /// since proto2 (prefer nested messages). No payload bytes follow the tag
+    /// itself.
     EGroup,
 }
 

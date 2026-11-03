@@ -80,7 +80,8 @@
 //!   - `I64([u8; 8])`: 64-bit fixed-width values (Fixed64, SFixed64, Double)
 //!   - `Len(L)`: Length-delimited values (String, Bytes, embedded messages, packed repeated
 //!     fields)
-//!   - `SGroup` / `EGroup`: Deprecated group start/end tags
+//!   - `SGroup` / `EGroup`: Group start/end tags (deprecated in the Protocol
+//!     Buffers language since proto2)
 //!
 //! ### Basic Types
 //!
@@ -110,8 +111,8 @@
 //!   view limited to that field's bytes (nested messages, strings/bytes,
 //!   packed repeats). See [`LenBody`] for how to consume it.
 //!
-//! Field iterators also have methods to skip or read the deprecated group
-//! wire feature.
+//! Field iterators also have methods to skip or read groups (a wire feature
+//! deprecated in the Protocol Buffers language since proto2).
 //!
 //! ## Writing Traits
 //!
@@ -167,9 +168,10 @@ pub enum ProtobufError {
 
     /// The tag's low 3 bits were not a known wire type (must be 0–5).
     ///
-    /// Deprecated group types [`WireType::SGroup`] (3) and [`WireType::EGroup`]
-    /// (4) are known wire types; field readers return
-    /// [`FieldValue::SGroup`] / [`FieldValue::EGroup`] for those.
+    /// Group wire types [`WireType::SGroup`] (3) and [`WireType::EGroup`] (4)
+    /// are known values (groups are deprecated in the Protocol Buffers language
+    /// since proto2); field readers return [`FieldValue::SGroup`] /
+    /// [`FieldValue::EGroup`] for those.
     #[error("Invalid wire type: {value} (must be 0-5)")]
     InvalidWireType { value: u8 },
 
