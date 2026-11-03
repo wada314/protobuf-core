@@ -120,8 +120,7 @@
 //!
 //! ## Tag/Varint Traits
 //!
-//! Lower-level tag/varint I/O. Unlike [`ReadExtProtobuf`], the reading methods
-//! do not take a message length.
+//! Lower-level tag/varint I/O:
 //!
 //! - [`ReadExtTag`]: Read tags from `std::io::Read`
 //! - [`ReadExtVarint`]: Read varints from `std::io::Read`

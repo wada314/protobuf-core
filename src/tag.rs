@@ -74,11 +74,9 @@ impl TryFrom<Varint> for Tag {
     }
 }
 
-/// Extension trait for reading tags from Read instances.
+/// Extension trait for reading tags from [`Read`] instances.
 ///
-/// Reads until the reader's EOF (or an existing [`std::io::Take`] bound).
-/// Methods do not take a separate byte-budget argument; they forward to
-/// [`ReadExtVarint`].
+/// Forwards to [`ReadExtVarint`].
 ///
 /// # Example
 /// ```
@@ -91,10 +89,9 @@ impl TryFrom<Varint> for Tag {
 /// assert_eq!(tag.field_number.as_u32(), 1);
 /// ```
 pub trait ReadExtTag {
-    /// Read a tag from this reader until a complete value.
+    /// Read a tag from this reader.
     ///
-    /// Empty or truncated input is [`ProtobufError::UnexpectedEof`]; check a
-    /// length bound first for soft end.
+    /// Empty or truncated input is [`ProtobufError::UnexpectedEof`].
     fn read_tag(&mut self) -> Result<Tag>;
 }
 

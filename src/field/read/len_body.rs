@@ -658,7 +658,7 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// - nested message: [`fields()`](LenBody::fields) /
     ///   [`fields_with()`](LenBody::fields_with)
-    /// - `bytes` / `string`: [`into_read()`](LenBody::into_read) (then
+    /// - `Bytes` / `String`: [`into_read()`](LenBody::into_read) (then
     ///   [`Read`](std::io::Read) helpers)
     /// - packed repeated varints: [`varints()`](LenBody::varints)
     /// - packed repeated fixed32 / fixed64: [`fixed32s()`](LenBody::fixed32s) /
