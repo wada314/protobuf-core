@@ -185,32 +185,43 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
 
 /// Extension trait for reading raw Protocol Buffer fields from slice types
 ///
-/// This trait provides low-level utilities for reading field-by-field from a byte slice.
-/// Each yield is a [`Field<&[u8]>`](crate::Field) value: scalars own their
-/// payload, and only the length-delimited variant holds a borrow into the
-/// source slice.
-/// This trait only splits the slice into raw fields (numbers and wire bytes).
-/// Building a message — choosing which fields mean what, decoding their
-/// values, and assembling your own struct — is up to you.
+/// This trait provides a low-level utility for reading field-by-field from a
+/// byte slice. [`read_protobuf_fields()`](AsRefExtProtobuf::read_protobuf_fields)
+/// returns an iterator of [`Field<&[u8]>`](crate::Field) values; for a
+/// length-delimited field, the payload is a reference to part of the input
+/// slice. This trait only splits the slice into raw fields (numbers and wire
+/// bytes). Building a message — choosing which fields mean what, decoding
+/// their values, and assembling your own struct — is up to you.
 ///
 /// # Example
 /// ```
-/// use ::protobuf_core::AsRefExtProtobuf;
+/// use ::protobuf_core::{AsRefExtProtobuf, FieldValue};
 ///
+/// // field 1 varint = 150, field 2 string = "Hel"
 /// let slice = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
 ///
-/// for field_result in slice.read_protobuf_fields() {
-///     let field = field_result?;
-///     // Process field...
+/// for field in slice.read_protobuf_fields() {
+///     let field = field.unwrap();
+///     match field.value {
+///         FieldValue::Varint(varint) => {
+///             println!("Field {}: {}", field.field_number.as_u32(), varint.to_uint64());
+///         }
+///         FieldValue::Len(data) => {
+///             println!("Field {}: {:?}", field.field_number.as_u32(), data);
+///         }
+///         _ => {}
+///     }
 /// }
-/// # Ok::<(), protobuf_core::ProtobufError>(())
+/// // prints:
+/// // Field 1: 150
+/// // Field 2: [72, 101, 108]
 /// ```
 pub trait AsRefExtProtobuf: AsRef<[u8]> {
-    /// Read raw protobuf fields from the slice, returning an iterator.
+    /// Read raw protobuf fields from the slice, returning an iterator of
+    /// [`Field<&[u8]>`](crate::Field) values.
     ///
-    /// Yields [`Field<&[u8]>`](crate::Field) values. Only
-    /// [`FieldValue::Len`](crate::FieldValue::Len) borrows from the source
-    /// slice; other variants carry owned payloads.
+    /// For a length-delimited field, the payload is a reference to part of
+    /// the input slice.
     ///
     /// This method is available for all types implementing `AsRef<[u8]>`.
     fn read_protobuf_fields(&self) -> FieldIterFromSlice<'_> {
