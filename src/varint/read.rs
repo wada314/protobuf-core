@@ -92,8 +92,8 @@ fn try_read_varint_with_raw<'a, R: Read>(
 pub trait ReadExtVarint: Read {
     /// Read a varint and copy its exact wire bytes into `buf`.
     ///
-    /// Returns `(varint, raw)` where `raw` is `&buf[..n]` (including
-    /// non-canonical encodings). Empty or truncated input is
+    /// Returns `(varint, raw)` where `raw` is `&buf[..n]`: the input's wire
+    /// encoding as-is, even if it is non-canonical. Empty or truncated input is
     /// [`UnexpectedEof`](ProtobufError::UnexpectedEof).
     ///
     /// # Example
