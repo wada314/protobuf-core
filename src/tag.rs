@@ -80,12 +80,10 @@ impl TryFrom<Varint> for Tag {
 ///
 /// # Example
 /// ```
-/// use ::std::io::Cursor;
 /// use ::protobuf_core::ReadExtTag;
 ///
-/// let data = vec![0x08]; // tag 1:0 (field 1, wire type 0)
-/// let mut reader = Cursor::new(data);
-/// let tag = reader.read_tag().unwrap();
+/// let mut data: &[u8] = &[0x08]; // tag 1:0 (field 1, wire type 0)
+/// let tag = data.read_tag().unwrap();
 /// assert_eq!(tag.field_number.as_u32(), 1);
 /// ```
 pub trait ReadExtTag {

@@ -83,12 +83,10 @@ fn try_read_varint_with_raw<'a, R: Read>(
 ///
 /// # Example
 /// ```
-/// use ::std::io::Cursor;
 /// use ::protobuf_core::ReadExtVarint;
 ///
-/// let data = vec![0x96, 0x01]; // 150 in varint encoding
-/// let mut reader = Cursor::new(data);
-/// let varint = reader.read_varint().unwrap();
+/// let mut data: &[u8] = &[0x96, 0x01]; // 150 in varint encoding
+/// let varint = data.read_varint().unwrap();
 /// assert_eq!(varint.to_uint64(), 150);
 /// ```
 pub trait ReadExtVarint: Read {
@@ -100,12 +98,11 @@ pub trait ReadExtVarint: Read {
     ///
     /// # Example
     /// ```
-    /// use ::std::io::Cursor;
     /// use ::protobuf_core::{ReadExtVarint, MAX_VARINT_BYTES};
     ///
-    /// let mut reader = Cursor::new(vec![0x96, 0x01, 0x08]);
+    /// let mut data: &[u8] = &[0x96, 0x01, 0x08];
     /// let mut buf = [0u8; MAX_VARINT_BYTES];
-    /// let (varint, raw) = reader.read_varint_with_raw(&mut buf).unwrap();
+    /// let (varint, raw) = data.read_varint_with_raw(&mut buf).unwrap();
     /// assert_eq!(varint.to_uint64(), 150);
     /// assert_eq!(raw, &[0x96, 0x01]);
     /// ```
@@ -141,12 +138,10 @@ pub trait ReadExtVarint: Read {
     ///
     /// # Example
     /// ```
-    /// use ::std::io::Cursor;
     /// use ::protobuf_core::{ReadExtVarint, Varint};
     ///
-    /// let data = vec![0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
-    /// let mut reader = Cursor::new(data);
-    /// let varints: Vec<Varint> = reader
+    /// let mut data: &[u8] = &[0x96, 0x01, 0x7F]; // 150 and 127 in varint encoding
+    /// let varints: Vec<Varint> = data
     ///     .read_varints()
     ///     .collect::<Result<Vec<_>, _>>()
     ///     .unwrap();
