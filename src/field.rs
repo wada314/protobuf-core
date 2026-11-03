@@ -42,22 +42,22 @@ pub use self::write::WriteExtProtobuf;
 /// The caller is responsible for converting these raw values to the appropriate types
 /// based on the field's schema definition.
 ///
-/// `L` is the type for length-delimited values (Len variant):
-///  - Slice readers borrow the input as `&'a [u8]`.
-///  - Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`
-///    ([`VecLenPayload`]).
-///  - Custom payloads use `read_protobuf_fields_with()` with a closure.
-///    Unused body bytes are discarded after the handler returns.
+/// `L` is the type for length-delimited values ([`Self::Len`]):
+///  - Slice readers borrow the input as `&[u8]`.
+///  - Streaming readers (`Read` with a `len` budget) default to `Vec<u8>`.
+///  - Custom payloads use [`ReadExtProtobuf::read_protobuf_fields_with()`]
+///    with a closure. Unused body bytes are discarded after the handler
+///    returns.
 ///
-/// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the start tag
-/// does not include the group body. After an `SGroup`, discard the body with
-/// [`skip_until()`](crate::FieldIterFromSlice::skip_until) +
-/// [`until_group_ends()`](crate::until_group_ends), preserve it with
-/// [`take_until()`](crate::FieldIterFromSlice::take_until) (slice) or
-/// [`copy_until()`](crate::FieldIter::copy_until) (Read), parse the body
-/// with [`group_body()`](crate::FieldIterFromSlice::group_body) /
-/// [`GroupBody`], or read nested fields until a matching `EGroup` before
-/// the next top-level field.
+/// [`SGroup`](Self::SGroup) / [`EGroup`](Self::EGroup) are tag-only: the fields
+/// between a start-group and its matching end-group are treated as a nested
+/// message. After an `SGroup`, discard that nested message with
+/// [`skip_until()`](FieldIterFromSlice::skip_until) +
+/// [`until_group_ends()`], preserve it with
+/// [`take_until()`](FieldIterFromSlice::take_until) (slice) or
+/// [`copy_until()`](FieldIter::copy_until) (Read), parse it with
+/// [`group_body()`](FieldIterFromSlice::group_body) / [`GroupBody`], or read
+/// nested fields until a matching `EGroup` before the next top-level field.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldValue<L> {
     /// Variable-width integers (`Int32`, `Int64`, `UInt32`, `UInt64`, `SInt32`, `SInt64`, `Bool`, `Enum`).
