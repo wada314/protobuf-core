@@ -34,17 +34,25 @@
 //! use assert_matches::assert_matches;
 //! use protobuf_core::{AsRefExtProtobuf, Field, FieldValue};
 //!
-//! let bytes: &[u8] = &[0x08, 0x96, 0x01]; // field 1 = 150
+//! // field 1 varint = 150, field 2 string = "hi"
+//! let bytes: &[u8] = &[0x08, 0x96, 0x01, 0x12, 0x02, b'h', b'i'];
 //!
 //! let mut fields = bytes.read_protobuf_fields();
-//! // `next()` → Option<Result<Field<&[u8]>, _>>
-//! // first unwrap: Some (end of message would be None)
-//! // second unwrap: Ok (wire/parse failure would be Err)
-//! let field: Field<&[u8]> = fields.next().unwrap().unwrap();
 //!
+//! let field: Field<&[u8]> = {
+//!     let Some(Ok(field)) = fields.next() else { unreachable!() };
+//!     field
+//! };
 //! assert_eq!(field.field_number.as_u32(), 1);
 //! assert_matches!(field.value, FieldValue::Varint(v) if v.to_uint64() == 150);
-//! // Other `FieldValue` variants: I32 / I64 / Len(&[u8]) / SGroup / EGroup
+//!
+//! let field: Field<&[u8]> = {
+//!     let Some(Ok(field)) = fields.next() else { unreachable!() };
+//!     field
+//! };
+//! assert_eq!(field.field_number.as_u32(), 2);
+//! // Strings (and bytes / nested messages) arrive as Len(&[u8]).
+//! assert_matches!(field.value, FieldValue::Len(s) if s == b"hi");
 //! ```
 //!
 //! For a streaming [`std::io::Read`] (with an explicit message length), see
