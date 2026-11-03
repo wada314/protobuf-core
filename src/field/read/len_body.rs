@@ -632,6 +632,7 @@ where
 /// ```
 /// use ::protobuf_core::{FieldValue, ReadExtProtobuf};
 ///
+/// // field 1 varint = 150, field 2 string = "Hel"
 /// let data = &[0x08, 0x96, 0x01, 0x12, 0x03, 0x48, 0x65, 0x6c][..];
 /// let len = data.len() as u32;
 /// let mut reader = data;
