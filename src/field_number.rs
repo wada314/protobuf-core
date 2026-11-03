@@ -52,10 +52,12 @@ impl FieldNumber {
         self.0 >= min && self.0 <= max
     }
 
-    /// Returns the minimum number of bytes needed to encode the tag (field_number + wire_type) as a varint.
+    /// Returns the minimum number of bytes needed to encode a tag for this
+    /// field number as a varint.
     ///
-    /// The tag is encoded as: (field_number << 3) | wire_type
-    /// Since wire_type is 0-7, the maximum tag value is (field_number * 8) + 7
+    /// A tag is `(field_number << 3) | wire_type`. Because `wire_type` is at
+    /// most 7, this uses the maximum tag value `(field_number << 3) | 7` so the
+    /// size is enough for any wire type.
     pub fn encoded_size(&self) -> usize {
         let max_tag_value = (self.0 << 3) | 7; // field_number << 3 + max wire_type (7)
 
