@@ -90,7 +90,7 @@ fn try_read_varint_with_raw<'a, R: Read>(
 /// assert_eq!(varint.to_uint64(), 150);
 /// ```
 pub trait ReadExtVarint: Read {
-    /// Read a varint and copy its exact wire bytes into `buf`.
+    /// Read a varint and return its wire encoding as `raw`.
     ///
     /// Returns `(varint, raw)` where `raw` is `&buf[..n]`: the input's wire
     /// encoding as-is, even if it is non-canonical. Empty or truncated input is
