@@ -623,8 +623,9 @@ where
 /// Each method takes an explicit message byte budget `len: u32`. Length-delimited
 /// payloads default to `Vec<u8>`.
 /// [`read_protobuf_fields_with`](ReadExtProtobuf::read_protobuf_fields_with)
-/// takes a Len-building closure. It does not provide semantic interpretation —
-/// that is the caller's responsibility.
+/// takes a Len-building closure. This trait only splits the stream into raw
+/// fields (numbers and wire bytes); turning those into ints, strings, or
+/// nested messages is up to you.
 ///
 /// # Example
 /// ```
