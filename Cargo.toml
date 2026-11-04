@@ -18,3 +18,7 @@ assert_matches = "1.5"
 default = ["read", "write"]
 read = []
 write = []
+
+# Explicitly do not inherit a parent workspace's [workspace.lints]
+# (e.g. when vendored as a puroro submodule).
+[lints]
