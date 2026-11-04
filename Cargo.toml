@@ -24,5 +24,9 @@ assert_matches = "1.5"
 # Explicitly do not inherit a parent workspace's [workspace.lints]
 # (e.g. when vendored as a puroro submodule).
 [lints.clippy]
-# Pedantic by default; keep CamelCase protobuf names backticked in docs.
+# Selected pedantic lints for this wire-primitives crate.
+# Keep CamelCase protobuf names backticked in docs.
 doc_markdown = "warn"
+# Intentional bit reinterpretation / proven-safe casts use scoped `allow`.
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"

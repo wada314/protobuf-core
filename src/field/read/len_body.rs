@@ -275,6 +275,7 @@ impl<'a, R: ?Sized> LenBodyRead<'a, R> {
 
 impl<'a, R: Read + ?Sized> Read for LenBodyRead<'a, R> {
     #[inline]
+    #[allow(clippy::cast_possible_truncation)] // `n <= max <= remaining` (u32) by construction.
     fn read(&mut self, buf: &mut [u8]) -> ::std::io::Result<usize> {
         let max = buf.len().min(self.remaining() as usize);
         if max == 0 {
@@ -339,6 +340,7 @@ impl<'a, R: Read + ?Sized, const N: usize> Iterator for FixedIterFromLenBody<'a,
 
 /// Read up to `buf.len()` bytes from `body`, capped by remaining (soft `Ok(0)`).
 #[inline]
+#[allow(clippy::cast_possible_truncation)] // `n <= max <= remaining` (u32) by construction.
 fn read_body<R: Read + ?Sized>(body: &mut LenBody<'_, R>, buf: &mut [u8]) -> Result<usize> {
     let max = buf.len().min(body.remaining as usize);
     if max == 0 {
@@ -370,6 +372,7 @@ fn read_body_exact<R: Read + ?Sized>(body: &mut LenBody<'_, R>, mut buf: &mut [u
 
 /// Discard exactly `left` bytes from `reader`.
 #[inline]
+#[allow(clippy::cast_possible_truncation)] // Chunk size ≤ 256; `n` was taken from `u32` via `min`.
 fn discard_reader_bytes<R: Read + ?Sized>(reader: &mut R, mut left: u32) -> Result<()> {
     let mut buf = [0u8; 256];
     while left > 0 {
@@ -450,6 +453,7 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
     }
 
     #[inline]
+    #[allow(clippy::cast_possible_truncation)] // Chunk size ≤ 256; `n` was taken from `u32` via `min`.
     fn skip_bytes(&mut self, mut length: u32) -> Result<()> {
         let mut buf = [0u8; 256];
         while length > 0 {
@@ -461,6 +465,7 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
     }
 
     #[inline]
+    #[allow(clippy::cast_possible_truncation)] // Chunk size ≤ 256; `n` / `length` originate as u32.
     fn copy_bytes<W: Write>(&mut self, length: u32, out: &mut W) -> Result<usize> {
         let mut left = length;
         let mut buf = [0u8; 256];
@@ -745,6 +750,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::cast_possible_truncation)] // Tiny fixtures; Len APIs take u32.
 mod tests {
     use crate::field::FieldValue;
     use ::std::io::Read;
@@ -1165,6 +1171,7 @@ mod tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::cast_possible_truncation)] // Tiny fixtures; Len APIs take u32.
 mod len_payload {
     use super::{LenBody, ReadExtProtobuf};
     use crate::varint::Varint;

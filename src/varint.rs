@@ -57,6 +57,7 @@ impl Varint {
     }
 
     /// Create a Varint from `i64`, assuming `SInt64` protobuf type.
+    #[allow(clippy::cast_sign_loss)] // ZigZag: operate on two's-complement bits as u64.
     pub fn from_sint64(value: i64) -> Self {
         // ZigZag on unsigned bits. Negating `i64::MIN` overflows, so do not use `-value`.
         let zigzag_value = ((value as u64) << 1) ^ ((value >> 63) as u64);
@@ -70,12 +71,14 @@ impl Varint {
     }
 
     /// Create a Varint from `i64`, assuming `Int64` protobuf type.
+    #[allow(clippy::cast_sign_loss)] // Int64 wire: store two's-complement bits in the varint.
     pub fn from_int64(value: i64) -> Self {
         let bytes = (value as u64).to_le_bytes();
         Self(bytes)
     }
 
     /// Create a Varint from `i32`, assuming `Int32` protobuf type.
+    #[allow(clippy::cast_sign_loss)] // Int32 wire: sign-extend then store bits as u64.
     pub fn from_int32(value: i32) -> Self {
         let bytes = (value as u64).to_le_bytes();
         Self(bytes)
@@ -110,6 +113,7 @@ impl Varint {
 
     /// Convert to `i32`, assuming `SInt32` protobuf type.
     /// Returns an error if the value is out of range for `i32`.
+    #[allow(clippy::cast_sign_loss)] // Error payload keeps the ZigZag-decoded i64 bits as u64.
     pub fn try_to_sint32(&self) -> Result<i32> {
         let sint64_value = self.to_sint64();
         i32::try_from(sint64_value).map_err(|_| ProtobufError::VarintDowncastOutOfRange {
@@ -125,6 +129,7 @@ impl Varint {
 
     /// Convert to `i32`, assuming `Int32` protobuf type.
     /// Returns an error if the value is out of range for `i32`.
+    #[allow(clippy::cast_sign_loss)] // Error payload keeps the Int64 bits as u64.
     pub fn try_to_int32(&self) -> Result<i32> {
         let value = self.to_int64();
         i32::try_from(value).map_err(|_| ProtobufError::VarintDowncastOutOfRange {
@@ -170,6 +175,7 @@ impl Varint {
     /// assert_eq!(count, 2);
     /// assert_eq!(&bytes[..count], &[0x96, 0x01]);
     /// ```
+    #[allow(clippy::cast_possible_truncation)] // Payload bits are masked to 7 bits before `as u8`.
     pub fn encode(&self) -> ([u8; MAX_VARINT_BYTES], usize) {
         let value = self.to_uint64();
         let mut bytes = [0u8; MAX_VARINT_BYTES];
