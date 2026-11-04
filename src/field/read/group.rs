@@ -214,6 +214,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::cast_possible_truncation)] // Tiny fixtures; Len APIs take u32.
 mod group_body_adapter {
     use crate::field_number::FieldNumber;
     use crate::{AsRefExtProtobuf, ReadExtProtobuf};
@@ -414,6 +415,7 @@ mod group_body_adapter {
 }
 
 #[cfg(test)]
+#[allow(clippy::cast_possible_truncation)] // Tiny fixtures; Len APIs take u32.
 mod group_preserve {
     use super::until_group_ends;
     use crate::field_number::FieldNumber;
@@ -761,6 +763,7 @@ mod group_preserve {
 }
 
 #[cfg(test)]
+#[allow(clippy::cast_possible_truncation)] // Tiny fixtures; Len APIs take u32.
 mod group_skip {
     use super::super::slice::SliceReader;
     use super::super::wire::WireCursor;

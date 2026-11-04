@@ -126,6 +126,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::cast_possible_truncation)] // Tiny fixtures; Len APIs take u32.
 mod tests {
     use super::*;
     use crate::field_number::FieldNumber;
