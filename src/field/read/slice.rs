@@ -21,7 +21,7 @@ use ::std::io::Write;
 // AsRefExtProtobuf
 // ============================================================================
 
-/// Helper struct implementing BufWireCursor for slice-based readers.
+/// Helper struct implementing `BufWireCursor` for slice-based readers.
 pub(crate) struct SliceReader<'a, 'b> {
     pub(crate) slice: &'b mut &'a [u8],
 }
