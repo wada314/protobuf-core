@@ -98,12 +98,12 @@ impl<L> FieldValue<L> {
         Self::Varint(Varint::from_uint32(value))
     }
 
-    /// Create a field value from a `SInt64` protobuf type (ZigZag encoded).
+    /// Create a field value from a `SInt64` protobuf type (`ZigZag` encoded).
     pub fn from_sint64(value: i64) -> Self {
         Self::Varint(Varint::from_sint64(value))
     }
 
-    /// Create a field value from a `SInt32` protobuf type (ZigZag encoded).
+    /// Create a field value from a `SInt32` protobuf type (`ZigZag` encoded).
     pub fn from_sint32(value: i32) -> Self {
         Self::Varint(Varint::from_sint32(value))
     }

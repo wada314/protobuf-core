@@ -86,10 +86,10 @@
 //!   read (as above), `Vec<u8>` by default from `Read`, or a custom type from a
 //!   Len handler.
 //! - [`FieldValue<L>`]: Represents the raw value of a field. It can be:
-//!   - <code>Varint([Varint])</code>: Variable-width integers (Int32, Int64, UInt32, UInt64,
-//!     SInt32, SInt64, Bool, Enum)
-//!   - `I32([u8; 4])`: 32-bit fixed-width values (Fixed32, SFixed32, Float)
-//!   - `I64([u8; 8])`: 64-bit fixed-width values (Fixed64, SFixed64, Double)
+//!   - <code>Varint([Varint])</code>: Variable-width integers (Int32, Int64, `UInt32`, `UInt64`,
+//!     `SInt32`, `SInt64`, Bool, Enum)
+//!   - `I32([u8; 4])`: 32-bit fixed-width values (Fixed32, `SFixed32`, Float)
+//!   - `I64([u8; 8])`: 64-bit fixed-width values (Fixed64, `SFixed64`, Double)
 //!   - `Len(L)`: Length-delimited values (String, Bytes, embedded messages, packed repeated
 //!     fields)
 //!   - `SGroup` / `EGroup`: Group start/end tags (deprecated in the Protocol
