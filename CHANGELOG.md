@@ -41,6 +41,7 @@ Breaking for any caller of the removed varint/tag partial-resume API, of `Tag::t
 ### Internal
 
 - `WireCursor` is Iterator-like: required fragments (`len` / `read_varint_with_raw` / fixed / `skip_bytes` / `copy_bytes`) plus default compose methods (`read_varint` / `read_tag` / `skip_field` / `skip_until` / `copy_field` / `copy_until`). `buf` is optional scratch for `read_varint_with_raw`; Read cursors typically return `raw` from `buf`, while `SliceReader` returns a same-length subslice of the input (zero-copy).
+- Slice `SliceReader::read_tag()` decodes a 1-byte tag, then a 2-byte tag, without building a `Varint` or the 10-byte scratch. A 3-byte-or-longer tag, and a continued first byte with no second byte, still use `read_varint()`. Value varints and length prefixes are unchanged. `copy_field()` still uses `read_varint_with_raw()` so non-canonical tag bytes are preserved. Streaming `read_tag()` is unchanged.
 
 ## [0.6.0]
 

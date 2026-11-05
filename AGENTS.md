@@ -22,6 +22,7 @@ RUSTDOCFLAGS='-D warnings' cargo doc --no-deps
 ## Constraints (do not reverse these)
 
 - **Sync only.** No async public API, no `StreamExt*` traits. Callers buffer bytes and use sync parse. There is no tag/varint `*_partial` / `*_resume`; a varint is at most 10 bytes, so chunked callers buffer until a terminator or `MAX_VARINT_BYTES` then call the complete-read APIs (same model as fixed-width wire types).
+- **Do not specialize general varint decode.** `src/varint.rs` stays a reference implementation. The one exception is a slice field tag: `SliceReader::read_tag()` tries one byte (field numbers 1–15), then two bytes (16–2047), then `read_varint()`. Value varints, length prefixes, and `copy_field()` (non-canonical tag bytes via `read_varint_with_raw()`) stay on the general reader. Do not copy that check onto every `Read`: a streaming cursor cannot peek, so the long tail would need a second decoder.
 - **No field-level partial/resume** (`read_field_partial()`).
 - **No full message types.** Public surface is wire primitives and raw field I/O: constants, `Varint`, `Tag`, `Field` / `FieldValue`, extension traits, plus streaming Len helpers (`LenBody`, `LenBodyRead`, `LenHandler`, `VecLenPayload`, `FieldIter`, packed iters). Do not add generated-message / `google.protobuf.*` APIs here.
 - **Do not confuse Rust types with protobuf types.** Name conversions after the protobuf type (`from_sint32()`, `to_uint64()`), not the Rust integer.

@@ -12,7 +12,7 @@ use crate::field::FieldValue;
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
-use crate::wire_format::MAX_VARINT_BYTES;
+use crate::wire_format::{MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK};
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
 use ::std::io::Write;
@@ -30,6 +30,37 @@ impl WireCursor for SliceReader<'_, '_> {
     #[inline]
     fn len(&self) -> u32 {
         u32::try_from(self.slice.len()).unwrap_or(u32::MAX)
+    }
+
+    /// Tags are usually one byte (field numbers 1–15) and otherwise two
+    /// (16–2047). Both are decoded here, without a [`Varint`] or the 10-byte
+    /// scratch that [`read_varint()`](WireCursor::read_varint) uses.
+    ///
+    /// Three or more bytes, and a continued first byte with no second byte,
+    /// fall back to that general reader so truncation and overlong tags keep
+    /// its errors. Value varints and length prefixes are not specialized.
+    /// [`WireCursor::copy_field()`] still reads the tag with
+    /// [`read_varint_with_raw()`](WireCursor::read_varint_with_raw) so a
+    /// non-canonical encoding is copied unchanged.
+    #[inline]
+    fn read_tag(&mut self) -> Result<Tag> {
+        let slice = *self.slice;
+        let Some(&b0) = slice.first() else {
+            return Tag::try_from_varint(self.read_varint()?);
+        };
+        if b0 < VARINT_CONTINUATION_BIT {
+            *self.slice = &slice[1..];
+            return Tag::try_from_tag_value(u32::from(b0));
+        }
+        // Otherwise the tag is almost always exactly one more byte.
+        if let Some(&b1) = slice.get(1) {
+            if b1 < VARINT_CONTINUATION_BIT {
+                *self.slice = &slice[2..];
+                let value = u32::from(b0 & VARINT_PAYLOAD_MASK) | (u32::from(b1) << 7);
+                return Tag::try_from_tag_value(value);
+            }
+        }
+        Tag::try_from_varint(self.read_varint()?)
     }
 
     #[inline]
@@ -447,6 +478,30 @@ mod tests {
             .unwrap();
         assert!(matches!(truncated_len, Err(ProtobufError::UnexpectedEof)));
 
+        // Field 2048 is the first 3-byte tag: (2048 << 3) = 16384 = 0x80 0x80 0x01.
+        let three_byte_tag = &[0x80, 0x80, 0x01, 0x01][..];
+        let fields: Vec<_> = three_byte_tag
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields[0].field_number.as_u32(), 2048);
+        match &fields[0].value {
+            FieldValue::Varint(varint) => assert_eq!(varint.to_uint64(), 1),
+            other => panic!("expected varint, got {other:?}"),
+        }
+
+        // Overlong 2-byte encoding of field 1, wire type varint (canonical is 0x08).
+        let overlong_tag = &[0x88, 0x00, 0x01][..];
+        let fields: Vec<_> = overlong_tag
+            .read_protobuf_fields()
+            .collect::<::std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fields[0].field_number.as_u32(), 1);
+        match &fields[0].value {
+            FieldValue::Varint(varint) => assert_eq!(varint.to_uint64(), 1),
+            other => panic!("expected varint, got {other:?}"),
+        }
+
         let length_past_u32 = [0x0A, 0x80, 0x80, 0x80, 0x80, 0x10][..]
             .read_protobuf_fields()
             .next()
@@ -458,6 +513,49 @@ mod tests {
                 target_type: "u32",
             })
         ));
+
+        // 1-byte tag with an unknown wire type, then a valid field. The bad tag
+        // is consumed, so the following field is still readable.
+        let mut bad_wire = [0x0E, 0x08, 0x01][..].read_protobuf_fields();
+        assert!(matches!(
+            bad_wire.next(),
+            Some(Err(ProtobufError::InvalidWireType { value: 6 }))
+        ));
+        let next = bad_wire.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 1);
+        match next.value {
+            FieldValue::Varint(varint) => assert_eq!(varint.to_uint64(), 1),
+            other => panic!("expected varint, got {other:?}"),
+        }
+
+        // Overlong 2-byte encoding of field number 0. Same consume-then-error.
+        let mut bad_number = [0x80, 0x00, 0x08, 0x02][..].read_protobuf_fields();
+        assert!(matches!(
+            bad_number.next(),
+            Some(Err(ProtobufError::FieldNumberOutOfRange { value: 0 }))
+        ));
+        let next = bad_number.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 1);
+        match next.value {
+            FieldValue::Varint(varint) => assert_eq!(varint.to_uint64(), 2),
+            other => panic!("expected varint, got {other:?}"),
+        }
+
+        // Continued tag byte with nothing after it. Consumed, so the iterator ends.
+        let mut truncated_tag = [0x80][..].read_protobuf_fields();
+        assert!(matches!(
+            truncated_tag.next(),
+            Some(Err(ProtobufError::UnexpectedEof))
+        ));
+        assert!(truncated_tag.next().is_none());
+
+        // Largest 2-byte tag (field 2047, wire type varint) then a 1-byte field.
+        //  (2047 << 3) = 16376 = 0xF8 0x7F.
+        let mut wide = [0xF8, 0x7F, 0x03, 0x08, 0x01][..].read_protobuf_fields();
+        wide.skip_until(|tag| Ok(tag.field_number.as_u32() == 2047))
+            .unwrap();
+        let next = wide.next().unwrap().unwrap();
+        assert_eq!(next.field_number.as_u32(), 1);
 
         // Wire types 3 and 4 are group tags; field readers return them as values.
         for (byte, expected) in [(0x0Bu8, FieldValue::SGroup), (0x0C, FieldValue::EGroup)] {

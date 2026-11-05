@@ -36,17 +36,24 @@ impl Tag {
     /// This is not a byte-stream read; use [`ReadExtTag`] to read wire bytes.
     pub fn try_from_varint(varint: Varint) -> Result<Self> {
         let value = varint.try_to_uint32()?;
+        Self::try_from_tag_value(value)
+    }
+
+    /// Unpack a tag from its integer value (`(field_number << 3) | wire_type`).
+    ///
+    /// Same checks as [`try_from_varint()`](Self::try_from_varint). Slice tag
+    /// reads use this for 1- and 2-byte tags, which always fit in `u32`, so
+    /// they do not build a [`Varint`].
+    pub(crate) fn try_from_tag_value(value: u32) -> Result<Self> {
         let field_number_value = value >> FIELD_NUMBER_SHIFT;
         let wire_type_value = value & WIRE_TYPE_MASK;
 
-        // Create field number
         let field_number = FieldNumber::try_new(field_number_value).map_err(|value| {
             ProtobufError::FieldNumberOutOfRange {
                 value: i64::from(value),
             }
         })?;
 
-        // Parse wire type
         let wire_type = WireType::try_from(wire_type_value as u8)?;
 
         Ok(Self {

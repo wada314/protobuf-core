@@ -65,6 +65,13 @@ pub(crate) trait WireCursor {
 
     /// Read a tag (field number + wire type).
     ///
+    /// A tag varint is one byte for field numbers 1–15 and two bytes for
+    /// 16–2047. Wider tags are rare. This default still uses
+    /// [`read_varint()`](Self::read_varint). The slice cursor overrides it
+    /// and checks those two widths first. A streaming cursor stays here: it
+    /// cannot look ahead without consuming bytes, so the long tail would need
+    /// a second varint decoder.
+    ///
     /// Empty input is [`ProtobufError::UnexpectedEof`]. Invalid field numbers
     /// and wire types surface as [`ProtobufError`].
     #[inline(always)]
