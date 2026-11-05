@@ -12,7 +12,7 @@ use crate::field::FieldValue;
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
-use crate::wire_format::MAX_VARINT_BYTES;
+use crate::wire_format::{MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK};
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
 use ::std::io::Write;
@@ -20,6 +20,24 @@ use ::std::io::Write;
 // ============================================================================
 // AsRefExtProtobuf
 // ============================================================================
+
+/// Decode a 1- or 2-byte varint from the front of `slice` without copying.
+///
+/// Returns `None` when the value needs 3+ bytes, or when the second byte is
+/// missing (the caller uses the general reader, which reports truncation).
+#[inline(always)]
+fn short_slice_varint(slice: &[u8]) -> Option<(u64, usize)> {
+    let b0 = *slice.first()?;
+    if b0 < VARINT_CONTINUATION_BIT {
+        return Some((u64::from(b0), 1));
+    }
+    let b1 = *slice.get(1)?;
+    if b1 < VARINT_CONTINUATION_BIT {
+        let value = u64::from(b0 & VARINT_PAYLOAD_MASK) | (u64::from(b1) << 7);
+        return Some((value, 2));
+    }
+    None
+}
 
 /// Helper struct implementing `BufWireCursor` for slice-based readers.
 pub(crate) struct SliceReader<'a, 'b> {
@@ -30,6 +48,21 @@ impl WireCursor for SliceReader<'_, '_> {
     #[inline]
     fn len(&self) -> u32 {
         u32::try_from(self.slice.len()).unwrap_or(u32::MAX)
+    }
+
+    /// 1- and 2-byte varints skip the `Read::bytes` scratch path.
+    ///
+    /// Tags and short length prefixes are almost always this wide. Longer
+    /// values fall back to `read_varint_with_raw`.
+    #[inline(always)]
+    fn read_varint(&mut self) -> Result<Varint> {
+        let slice = *self.slice;
+        if let Some((value, len)) = short_slice_varint(slice) {
+            *self.slice = &slice[len..];
+            return Ok(Varint::from_uint64(value));
+        }
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        Ok(self.read_varint_with_raw(&mut buf)?.0)
     }
 
     #[inline]
