@@ -83,7 +83,9 @@ impl TryFrom<Varint> for Tag {
 
 /// Extension trait for reading tags from [`Read`] instances.
 ///
-/// Forwards to [`ReadExtVarint`].
+/// A tag is usually one byte (field numbers 1–15) and otherwise two
+/// (16–2047), so this calls
+/// [`ReadExtVarint::read_varint_likely_short()`](crate::varint::ReadExtVarint::read_varint_likely_short).
 ///
 /// # Example
 /// ```
@@ -108,7 +110,7 @@ where
     fn read_tag(&mut self) -> Result<Tag> {
         use crate::varint::ReadExtVarint;
 
-        Tag::try_from_varint(self.read_varint()?)
+        Tag::try_from_varint(self.read_varint_likely_short()?)
     }
 }
 
@@ -237,6 +239,32 @@ mod tests {
         let mut reader = Cursor::new(data);
         let tag = reader.read_tag().unwrap();
         assert_eq!(tag.field_number, FieldNumber::try_new(1).unwrap());
+        assert_eq!(tag.wire_type, WireType::Varint);
+    }
+
+    #[test]
+    fn test_read_ext_tag_two_and_three_byte() {
+        use super::ReadExtTag;
+        use ::std::io::Cursor;
+
+        // Field 16, wire type varint: (16 << 3) = 128.
+        let mut reader = Cursor::new(vec![0x80, 0x01]);
+        let tag = reader.read_tag().unwrap();
+        assert_eq!(tag.field_number.as_u32(), 16);
+        assert_eq!(tag.wire_type, WireType::Varint);
+        assert_eq!(reader.position(), 2);
+
+        // Field 2048, wire type varint: (2048 << 3) = 16384.
+        let mut reader = Cursor::new(vec![0x80, 0x80, 0x01]);
+        let tag = reader.read_tag().unwrap();
+        assert_eq!(tag.field_number.as_u32(), 2048);
+        assert_eq!(tag.wire_type, WireType::Varint);
+        assert_eq!(reader.position(), 3);
+
+        // Overlong 2-byte encoding of field 1, wire type varint (canonical 0x08).
+        let mut reader = Cursor::new(vec![0x88, 0x00]);
+        let tag = reader.read_tag().unwrap();
+        assert_eq!(tag.field_number.as_u32(), 1);
         assert_eq!(tag.wire_type, WireType::Varint);
     }
 

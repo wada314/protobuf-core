@@ -4,6 +4,9 @@
 //! and conversion to various protobuf integer types.
 //!
 //! This is a **reference implementation**. Not optimized for performance.
+//! [`ReadExtVarint::read_varint_likely_short`](crate::ReadExtVarint::read_varint_likely_short)
+//! is the opt-in that assumes one byte, then two, and finishes any longer
+//! value with this same decoder.
 
 use crate::wire_format::{MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK};
 use crate::{ProtobufError, Result};
@@ -12,6 +15,7 @@ use ::std::io::Write;
 mod read;
 
 // Read helpers for `read_varints` (re-exported at the crate root).
+pub(crate) use read::try_decode_short_varint;
 #[allow(unused_imports)]
 pub use read::{ReadExtVarint, VarintIterFromRead};
 /// A decoded varint value.

@@ -33,6 +33,42 @@ impl<R: Read> Iterator for VarintIterFromRead<R> {
 // ReadExtVarint
 // ============================================================================
 
+/// One byte from `reader`.
+///
+/// `Ok(None)` is EOF. [`ErrorKind::Interrupted`](std::io::ErrorKind::Interrupted)
+/// is retried, matching [`Read::bytes`](std::io::Read::bytes).
+#[inline]
+fn read_u8<R: Read>(reader: &mut R) -> Result<Option<u8>> {
+    let mut byte = [0u8; 1];
+    loop {
+        match reader.read(&mut byte) {
+            Ok(0) => return Ok(None),
+            Ok(_) => return Ok(Some(byte[0])),
+            Err(err) if err.kind() == ::std::io::ErrorKind::Interrupted => continue,
+            Err(err) => return Err(err.into()),
+        }
+    }
+}
+
+/// If this varint ends in one byte, or in two when `second` is present, return
+/// `(value, len)`.
+///
+/// `None` means `first` continues and `second` is absent or also continues.
+/// Callers that already consumed those bytes finish the value with the
+/// general varint decoder.
+#[inline]
+pub(crate) fn try_decode_short_varint(first: u8, second: Option<u8>) -> Option<(u64, usize)> {
+    if first < VARINT_CONTINUATION_BIT {
+        return Some((u64::from(first), 1));
+    }
+    let second = second?;
+    if second < VARINT_CONTINUATION_BIT {
+        let value = u64::from(first & VARINT_PAYLOAD_MASK) | (u64::from(second) << 7);
+        return Some((value, 2));
+    }
+    None
+}
+
 /// Decode one varint from `reader`, copying every consumed wire byte into `buf`.
 ///
 /// - `Ok(None)` — soft empty (no bytes available)
@@ -40,16 +76,28 @@ impl<R: Read> Iterator for VarintIterFromRead<R> {
 /// - `Err(UnexpectedEof)` — started a varint but ran out of bytes
 /// - other `Err` — invalid encoding
 #[inline]
-#[allow(clippy::unbuffered_bytes)] // Varint needs byte-at-a-time; prefer BufReader upstream.
 fn try_read_varint_with_raw<'a, R: Read>(
     reader: &'a mut R,
     buf: &'a mut [u8; MAX_VARINT_BYTES],
 ) -> Result<Option<(Varint, &'a [u8])>> {
-    let mut decoded_value = 0u64;
-    let mut shift = 0u32;
-    let mut n = 0usize;
+    try_read_varint_with_raw_from(reader, buf, 0, 0, 0)
+}
 
-    for byte_result in reader.by_ref().bytes().take(MAX_VARINT_BYTES) {
+/// Continue a varint whose first `n` bytes are already in `buf`.
+///
+/// `decoded_value` / `shift` are the partial decode of that prefix. `n == 0`
+/// reads a whole varint. The prefix bytes are not read again.
+#[inline]
+#[allow(clippy::unbuffered_bytes)] // Varint needs byte-at-a-time; prefer BufReader upstream.
+fn try_read_varint_with_raw_from<'a, R: Read>(
+    reader: &'a mut R,
+    buf: &'a mut [u8; MAX_VARINT_BYTES],
+    mut decoded_value: u64,
+    mut shift: u32,
+    mut n: usize,
+) -> Result<Option<(Varint, &'a [u8])>> {
+    let remaining = MAX_VARINT_BYTES - n;
+    for byte_result in reader.by_ref().bytes().take(remaining) {
         let byte = byte_result?;
         buf[n] = byte;
         n += 1;
@@ -130,6 +178,58 @@ pub trait ReadExtVarint: Read {
     {
         let mut buf = [0u8; MAX_VARINT_BYTES];
         Ok(self.read_varint_with_raw(&mut buf)?.0)
+    }
+
+    /// Read a varint that is usually one byte and otherwise two.
+    ///
+    /// Same value as [`read_varint()`](Self::read_varint), including
+    /// non-canonical encodings. The first byte is checked on its own; if it
+    /// continues, the second byte is assumed to finish the value. Anything
+    /// longer is finished by the same decoder as [`read_varint()`](Self::read_varint).
+    ///
+    /// Use this for a tag, a bool, a small enum, or a short length. Callers
+    /// that need the original wire bytes use
+    /// [`read_varint_with_raw()`](Self::read_varint_with_raw).
+    ///
+    /// # Example
+    /// ```
+    /// use ::protobuf_core::ReadExtVarint;
+    ///
+    /// // 1-byte value, then a 2-byte value (150).
+    /// let mut data: &[u8] = &[0x01, 0x96, 0x01];
+    /// assert_eq!(data.read_varint_likely_short().unwrap().to_uint64(), 1);
+    /// assert_eq!(data.read_varint_likely_short().unwrap().to_uint64(), 150);
+    /// ```
+    #[inline]
+    fn read_varint_likely_short(&mut self) -> Result<Varint>
+    where
+        Self: Sized,
+    {
+        let Some(first) = read_u8(self)? else {
+            return Err(ProtobufError::UnexpectedEof);
+        };
+        // A terminating first byte must not pull another byte: it may be the
+        // last byte of the reader (for example an end-group tag).
+        let second = if first < VARINT_CONTINUATION_BIT {
+            None
+        } else {
+            read_u8(self)?
+        };
+        if let Some((value, _)) = try_decode_short_varint(first, second) {
+            return Ok(Varint::from_uint64(value));
+        }
+        let Some(second) = second else {
+            return Err(ProtobufError::UnexpectedEof);
+        };
+        // Two continuation bytes already consumed. Same decoder for the tail.
+        let mut buf = [0u8; MAX_VARINT_BYTES];
+        buf[0] = first;
+        buf[1] = second;
+        let decoded =
+            u64::from(first & VARINT_PAYLOAD_MASK) | (u64::from(second & VARINT_PAYLOAD_MASK) << 7);
+        try_read_varint_with_raw_from(self, &mut buf, decoded, 14, 2)?
+            .map(|(varint, _)| varint)
+            .ok_or(ProtobufError::UnexpectedEof)
     }
 
     /// Create an iterator that reads multiple varints.
@@ -447,5 +547,133 @@ mod tests {
             reader.read_varint(),
             Err(ProtobufError::UnexpectedEof)
         ));
+    }
+
+    #[test]
+    fn test_read_varint_likely_short_matches_read_varint() {
+        use crate::varint::WriteExtVarint;
+        use crate::wire_format::{MAX_1_BYTE_VARINT, MAX_2_BYTE_VARINT, MAX_3_BYTE_VARINT};
+        use ::std::io::Cursor;
+
+        let values = [
+            0,
+            1,
+            MAX_1_BYTE_VARINT,
+            MAX_1_BYTE_VARINT + 1,
+            150,
+            MAX_2_BYTE_VARINT,
+            MAX_2_BYTE_VARINT + 1,
+            MAX_3_BYTE_VARINT,
+            u64::MAX,
+        ];
+        for value in values {
+            let mut buffer = Vec::new();
+            buffer.write_varint(&Varint::from_uint64(value)).unwrap();
+            let mut general = Cursor::new(buffer.clone());
+            let mut short = Cursor::new(buffer);
+            assert_eq!(
+                general.read_varint().unwrap().to_uint64(),
+                short.read_varint_likely_short().unwrap().to_uint64(),
+                "{value:#x}"
+            );
+        }
+
+        // Overlong and multi-byte tails, including a full 10-byte value.
+        let wires: &[&[u8]] = &[
+            &[0x81, 0x00],
+            &[0x80, 0x80, 0x01],
+            &[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00],
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01],
+        ];
+        for wire in wires {
+            let mut general = Cursor::new(*wire);
+            let mut short = Cursor::new(*wire);
+            assert_eq!(
+                general.read_varint().unwrap().to_uint64(),
+                short.read_varint_likely_short().unwrap().to_uint64(),
+                "{wire:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_read_varint_likely_short_truncation_and_overflow() {
+        use ::std::io::{Cursor, Read};
+
+        let mut reader = Cursor::new(Vec::<u8>::new());
+        assert!(matches!(
+            reader.read_varint_likely_short(),
+            Err(ProtobufError::UnexpectedEof)
+        ));
+
+        // One continuation byte and nothing after it. That byte is consumed.
+        let mut reader = Cursor::new(vec![0x80u8, 0x01]);
+        assert!(matches!(
+            reader.by_ref().take(1).read_varint_likely_short(),
+            Err(ProtobufError::UnexpectedEof)
+        ));
+        assert_eq!(reader.position(), 1);
+
+        // Two continuation bytes, then EOF. Both are consumed.
+        let mut reader = Cursor::new(vec![0x80u8, 0x80]);
+        assert!(matches!(
+            reader.read_varint_likely_short(),
+            Err(ProtobufError::UnexpectedEof)
+        ));
+        assert_eq!(reader.position(), 2);
+
+        let mut reader = Cursor::new(vec![
+            0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02,
+        ]);
+        assert!(matches!(
+            reader.read_varint_likely_short(),
+            Err(ProtobufError::VarintTooLong)
+        ));
+    }
+
+    #[test]
+    fn test_read_varint_likely_short_retries_interrupted() {
+        use ::std::io::{self, Read};
+
+        // Fails with `ErrorKind::Interrupted` for the first `interrupts_left`
+        // calls, then copies one byte at a time.
+        struct InterruptThen {
+            data: &'static [u8],
+            pos: usize,
+            interrupts_left: usize,
+        }
+
+        impl Read for InterruptThen {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if self.interrupts_left > 0 {
+                    self.interrupts_left -= 1;
+                    return Err(io::Error::new(io::ErrorKind::Interrupted, "interrupted"));
+                }
+                if self.pos >= self.data.len() || buf.is_empty() {
+                    return Ok(0);
+                }
+                buf[0] = self.data[self.pos];
+                self.pos += 1;
+                Ok(1)
+            }
+        }
+
+        let mut reader = InterruptThen {
+            data: &[0x96, 0x01],
+            pos: 0,
+            interrupts_left: 2,
+        };
+        assert_eq!(reader.read_varint_likely_short().unwrap().to_uint64(), 150);
+
+        // Third byte goes through the general decoder, which also retries.
+        let mut reader = InterruptThen {
+            data: &[0x80, 0x80, 0x01],
+            pos: 0,
+            interrupts_left: 1,
+        };
+        assert_eq!(
+            reader.read_varint_likely_short().unwrap().to_uint64(),
+            16384
+        );
     }
 }

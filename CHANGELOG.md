@@ -14,6 +14,7 @@ Breaking for any caller of the removed varint/tag partial-resume API, of `Tag::t
 ### Added
 
 - `ext` module — re-exports the I/O extension traits (`AsRefExtProtobuf`, `ReadExtProtobuf`, `ReadExtTag`, `ReadExtVarint`, `WriteExtProtobuf`, `WriteExtVarint`) for a single `use protobuf_core::ext::*;`. Additive; crate-root trait re-exports are unchanged.
+- `ReadExtVarint::read_varint_likely_short` — same value as `read_varint`, including non-canonical encodings. Checks one byte, then assumes the second byte finishes the value, then continues with the general decoder. For a tag, a bool, a small enum, or a short length. Wire bytes still come from `read_varint_with_raw`. `ReadExtTag::read_tag` calls it. `read_varint` itself is unchanged.
 - `ReadExtVarint::read_varint_with_raw` — decodes a varint and returns its wire encoding as-is (even if non-canonical). The caller-provided `[u8; MAX_VARINT_BYTES]` is scratch the implementor may use; the returned `raw` slice need not point into it. Complete-read stack is `with_raw` → `read_varint`. `read_varints` soft-stops on empty input via a private `try_read_varint_with_raw` (`Ok(None)`); truncated mid-varint is `UnexpectedEof`.
 - `FieldIterFromSlice::take_until(pred)` — after an `SGroup` tag was consumed, returns a zero-copy `&[u8]` span of the group body through the matching `EGroup` (use with `until_group_ends`). Exact wire bytes.
 - `FieldIter::copy_until(pred, out)` — same stop semantics as `skip_until` for streaming input; tees exact wire bytes to `out` (including non-canonical varints).
@@ -41,7 +42,7 @@ Breaking for any caller of the removed varint/tag partial-resume API, of `Tag::t
 ### Internal
 
 - `WireCursor` is Iterator-like: required fragments (`len` / `read_varint_with_raw` / fixed / `skip_bytes` / `copy_bytes`) plus default compose methods (`read_varint` / `read_tag` / `skip_field` / `skip_until` / `copy_field` / `copy_until`). `buf` is optional scratch for `read_varint_with_raw`; Read cursors typically return `raw` from `buf`, while `SliceReader` returns a same-length subslice of the input (zero-copy).
-- Slice `SliceReader::read_tag()` decodes a 1-byte tag, then a 2-byte tag, without building a `Varint` or the 10-byte scratch. A 3-byte-or-longer tag, and a continued first byte with no second byte, still use `read_varint()`. Value varints and length prefixes are unchanged. `copy_field()` still uses `read_varint_with_raw()` so non-canonical tag bytes are preserved. Streaming `read_tag()` is unchanged.
+- Slice `SliceReader::read_tag()` decodes a 1-byte tag, then a 2-byte tag, via `try_decode_short_varint()`, without building a `Varint` or the 10-byte scratch. A 3-byte-or-longer tag, and a continued first byte with no second byte, still use `read_varint()`. Value varints and length prefixes are unchanged. `copy_field()` still uses `read_varint_with_raw()` so non-canonical tag bytes are preserved. `WireCursor::read_tag()` on `LenBody` is unchanged (`LenBody` is not `Read`).
 
 ## [0.6.0]
 

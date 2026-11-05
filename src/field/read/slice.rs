@@ -11,8 +11,8 @@ use crate::field::Field;
 use crate::field::FieldValue;
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
-use crate::varint::Varint;
-use crate::wire_format::{MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK};
+use crate::varint::{Varint, try_decode_short_varint};
+use crate::wire_format::MAX_VARINT_BYTES;
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
 use ::std::io::Write;
@@ -33,8 +33,9 @@ impl WireCursor for SliceReader<'_, '_> {
     }
 
     /// Tags are usually one byte (field numbers 1–15) and otherwise two
-    /// (16–2047). Both are decoded here, without a [`Varint`] or the 10-byte
-    /// scratch that [`read_varint()`](WireCursor::read_varint) uses.
+    /// (16–2047). [`try_decode_short_varint()`] decodes those widths here,
+    /// without a [`Varint`] or the 10-byte scratch that
+    /// [`read_varint()`](WireCursor::read_varint) uses.
     ///
     /// Three or more bytes, and a continued first byte with no second byte,
     /// fall back to that general reader so truncation and overlong tags keep
@@ -45,20 +46,13 @@ impl WireCursor for SliceReader<'_, '_> {
     #[inline]
     fn read_tag(&mut self) -> Result<Tag> {
         let slice = *self.slice;
-        let Some(&b0) = slice.first() else {
+        let Some(&first) = slice.first() else {
             return Tag::try_from_varint(self.read_varint()?);
         };
-        if b0 < VARINT_CONTINUATION_BIT {
-            *self.slice = &slice[1..];
-            return Tag::try_from_tag_value(u32::from(b0));
-        }
-        // Otherwise the tag is almost always exactly one more byte.
-        if let Some(&b1) = slice.get(1) {
-            if b1 < VARINT_CONTINUATION_BIT {
-                *self.slice = &slice[2..];
-                let value = u32::from(b0 & VARINT_PAYLOAD_MASK) | (u32::from(b1) << 7);
-                return Tag::try_from_tag_value(value);
-            }
+        if let Some((value, len)) = try_decode_short_varint(first, slice.get(1).copied()) {
+            *self.slice = &slice[len..];
+            let tag_value = u32::try_from(value).expect("a 1- or 2-byte varint fits in u32");
+            return Tag::try_from_tag_value(tag_value);
         }
         Tag::try_from_varint(self.read_varint()?)
     }
