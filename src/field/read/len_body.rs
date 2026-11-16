@@ -496,16 +496,11 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
 /// An error from [`next()`](Iterator::next), [`skip_until()`](Self::skip_until),
 /// or [`copy_until()`](Self::copy_until) is moved out on that call. Another
 /// call is unspecified: a wire error may already have consumed bytes, and the
-/// iterator does not remember the failure. A budget above
-/// [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE) is parked on the iterator
-/// until that first call, so the call consumes nothing. Nested iterators from
-/// [`LenBody::fields()`] start with no parked error.
+/// iterator does not remember the failure.
 pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
     body: T,
     handler: F,
-    /// Error not yet moved to the caller. A budget past `MAX_MESSAGE_SIZE`
-    /// is parked here. Empty after it is taken, and while parsing is still
-    /// going.
+    /// Error not yet moved to the caller. Empty after it is taken.
     error: Option<ProtobufError>,
     _marker: ::std::marker::PhantomData<&'a mut R>,
 }
