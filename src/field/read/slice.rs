@@ -4,7 +4,6 @@ use super::group::GroupBody;
 #[cfg(doc)]
 #[allow(unused_imports)]
 use super::group::until_group_ends;
-use super::sticky_error::StickyError;
 use super::wire::{BufWireCursor, WireCursor};
 use crate::field::Field;
 #[cfg(doc)]
@@ -92,10 +91,11 @@ impl<'a> BufWireCursor<&'a [u8]> for SliceReader<'a, '_> {
 /// Iterator for reading raw protobuf fields sequentially from a byte slice.
 pub struct FieldIterFromSlice<'a> {
     slice: &'a [u8],
-    /// Message-size error. Empty unless the slice is longer than
-    /// `MAX_MESSAGE_SIZE`. Later reads return it and do not continue.
-    /// A parse error is not stored here.
-    error: StickyError,
+    /// Error not yet moved to the caller. A slice longer than
+    /// `MAX_MESSAGE_SIZE` parks [`ProtobufError::SizeLimitExceeded`] here.
+    error: Option<ProtobufError>,
+    /// Set once an error has been moved out. Later reads do not run.
+    fused: bool,
 }
 
 impl<'a> FieldIterFromSlice<'a> {
@@ -125,11 +125,19 @@ impl<'a> FieldIterFromSlice<'a> {
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        self.error.check()?;
-        SliceReader {
-            slice: &mut self.slice,
+        match super::poll_iter(&mut self.error, &mut self.fused) {
+            super::IterPoll::Fused => return Err(ProtobufError::Stopped),
+            super::IterPoll::Error(err) => return Err(err),
+            super::IterPoll::Ready => {}
         }
+        match (SliceReader {
+            slice: &mut self.slice,
+        })
         .skip_until(pred)
+        {
+            Ok(()) => Ok(()),
+            Err(err) => Err(super::fuse_err(&mut self.fused, err)),
+        }
     }
 
     /// Advance past fields until `pred` returns `Ok(true)`, returning the exact
@@ -185,8 +193,10 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
     type Item = Result<Field<&'a [u8]>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Err(err) = self.error.check() {
-            return Some(Err(err));
+        match super::poll_iter(&mut self.error, &mut self.fused) {
+            super::IterPoll::Fused => return None,
+            super::IterPoll::Error(err) => return Some(Err(err)),
+            super::IterPoll::Ready => {}
         }
         let mut reader = SliceReader {
             slice: &mut self.slice,
@@ -194,9 +204,14 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
         if reader.is_empty() {
             return None;
         }
-        Some(reader.parse_field())
+        match reader.parse_field() {
+            Ok(field) => Some(Ok(field)),
+            Err(err) => Some(Err(super::fuse_err(&mut self.fused, err))),
+        }
     }
 }
+
+impl ::std::iter::FusedIterator for FieldIterFromSlice<'_> {}
 
 /// Extension trait for reading raw Protocol Buffer fields from slice types.
 ///
@@ -238,17 +253,20 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
     /// For a length-delimited field, the payload is a reference to part of
     /// the input slice.
     ///
-    /// A slice longer than [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE) is
-    /// stored as [`ProtobufError::SizeLimitExceeded`]. [`Iterator::next`] and
-    /// [`FieldIterFromSlice::skip_until`] keep returning it and do not read.
-    /// A wire-type `Len` prefix longer than
-    /// [`MAX_STRING_SIZE`](crate::MAX_STRING_SIZE) is the same error after
+    /// A slice longer than [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE) parks
+    /// [`ProtobufError::SizeLimitExceeded`] until the first [`Iterator::next`]
+    /// or [`FieldIterFromSlice::skip_until`] moves it out. That call does not
+    /// read. Later `next` yields `None`. Later `skip_until` returns
+    /// [`ProtobufError::Stopped`]. A wire error from those methods is moved
+    /// out once the same way. A wire-type `Len` prefix longer than
+    /// [`MAX_STRING_SIZE`](crate::MAX_STRING_SIZE) is the same size error after
     /// the tag and length varint are consumed.
     fn read_protobuf_fields(&self) -> FieldIterFromSlice<'_> {
         let slice = self.as_ref();
         FieldIterFromSlice {
             slice,
-            error: StickyError::from_message_len(slice.len()),
+            error: crate::wire_format::ensure_message_size(slice.len()).err(),
+            fused: false,
         }
     }
 }
@@ -499,24 +517,26 @@ mod tests {
 
         let bytes = [0x08u8, 0x01];
         let fields = bytes.read_protobuf_fields();
-        assert!(fields.error.is_empty());
+        assert!(fields.error.is_none());
+        assert!(!fields.fused);
     }
 
     #[test]
-    fn stored_slice_error_reports_without_reading() {
-        use super::{FieldIterFromSlice, StickyError};
+    fn stored_slice_error_moves_out_once_without_reading() {
+        use super::FieldIterFromSlice;
         use crate::{MAX_MESSAGE_SIZE, ProtobufError};
 
         // A real slice longer than `MAX_MESSAGE_SIZE` is not allocated here.
         // `ensure_message_size` covers that predicate; this locks the iterator
-        // once `read_protobuf_fields` has stored the error.
+        // once `read_protobuf_fields` has parked the error.
         let bytes = [0x08u8, 0x01, 0xAA];
         let mut fields = FieldIterFromSlice {
             slice: &bytes,
-            error: StickyError::from_error(ProtobufError::SizeLimitExceeded {
+            error: Some(ProtobufError::SizeLimitExceeded {
                 value: 3,
                 limit: MAX_MESSAGE_SIZE,
             }),
+            fused: false,
         };
         let err = fields.next().unwrap().unwrap_err();
         assert!(matches!(
@@ -526,24 +546,24 @@ mod tests {
                 limit: MAX_MESSAGE_SIZE
             }
         ));
-        let again = fields.next().unwrap().unwrap_err();
-        assert!(matches!(
-            again,
-            ProtobufError::SizeLimitExceeded {
-                value: 3,
-                limit: MAX_MESSAGE_SIZE
-            }
-        ));
+        assert!(fields.next().is_none());
         assert_eq!(fields.slice, &bytes);
         let skip = fields.skip_until(|_| Ok(true)).unwrap_err();
-        assert!(matches!(
-            skip,
-            ProtobufError::SizeLimitExceeded {
-                limit: MAX_MESSAGE_SIZE,
-                ..
-            }
-        ));
+        assert!(matches!(skip, ProtobufError::Stopped));
         assert_eq!(fields.slice, &bytes);
+    }
+
+    #[test]
+    fn slice_parse_error_is_moved_out_once() {
+        use super::AsRefExtProtobuf;
+        use crate::ProtobufError;
+
+        let bytes = [0x0Fu8, 0x08, 0x01];
+        let mut fields = bytes.read_protobuf_fields();
+        let err = fields.next().unwrap().unwrap_err();
+        assert!(matches!(err, ProtobufError::InvalidWireType { value: 7 }));
+        assert!(fields.next().is_none());
+        assert_eq!(fields.slice, &[0x08, 0x01]);
     }
 
     #[test]

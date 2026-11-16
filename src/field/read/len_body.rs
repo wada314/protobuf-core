@@ -15,7 +15,6 @@ use super::group::until_group_ends;
 #[cfg(doc)]
 #[allow(unused_imports)]
 use super::slice::FieldIterFromSlice;
-use super::sticky_error::StickyError;
 use super::wire::WireCursor;
 use crate::field::{Field, FieldValue};
 use crate::field_number::FieldNumber;
@@ -193,7 +192,8 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         FieldIter {
             body: self,
             handler: VecLenPayload,
-            error: StickyError::empty(),
+            error: None,
+            fused: false,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -211,7 +211,8 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         FieldIter {
             body: self,
             handler,
-            error: StickyError::empty(),
+            error: None,
+            fused: false,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -495,18 +496,22 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
 /// their bytes in the held [`LenBody`].
 ///
 /// An error from [`next()`](Iterator::next), [`skip_until()`](Self::skip_until),
-/// or [`copy_until()`](Self::copy_until) is stored. Later calls keep returning
-/// that error and do not read further. A wire error may already have consumed
-/// bytes. A budget above [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE) is
-/// stored up front as [`ProtobufError::SizeLimitExceeded`], so those calls
-/// consume nothing. Nested iterators from [`LenBody::fields()`] start with
-/// no stored error.
+/// or [`copy_until()`](Self::copy_until) is moved out once and the iterator
+/// fuses. Later `next` yields `None`. Later `skip_until` / `copy_until` return
+/// [`ProtobufError::Stopped`] and do not read further. A wire error may
+/// already have consumed bytes. A budget above
+/// [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE) is parked on the iterator
+/// until that first call, so the call consumes nothing. Nested iterators from
+/// [`LenBody::fields()`] start with no parked error.
 pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
     body: T,
     handler: F,
-    /// First read error, or a budget past `MAX_MESSAGE_SIZE`. Later reads
-    /// return it and do not continue.
-    error: StickyError,
+    /// Error not yet moved to the caller. A budget past `MAX_MESSAGE_SIZE`
+    /// is parked here. Empty after it is taken, and while parsing is still
+    /// going.
+    error: Option<ProtobufError>,
+    /// Set once an error has been moved out. Later reads do not run.
+    fused: bool,
     _marker: ::std::marker::PhantomData<&'a mut R>,
 }
 
@@ -528,9 +533,15 @@ where
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        self.error.check()?;
-        let skipped = WireCursor::skip_until(self.body.as_mut(), pred);
-        self.error.capture(skipped)
+        match super::poll_iter(&mut self.error, &mut self.fused) {
+            super::IterPoll::Fused => return Err(ProtobufError::Stopped),
+            super::IterPoll::Error(err) => return Err(err),
+            super::IterPoll::Ready => {}
+        }
+        match WireCursor::skip_until(self.body.as_mut(), pred) {
+            Ok(()) => Ok(()),
+            Err(err) => Err(super::fuse_err(&mut self.fused, err)),
+        }
     }
 
     /// Iterate fields until the matching end-group for `field_number`.
@@ -560,9 +571,15 @@ where
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
-        self.error.check()?;
-        let copied = WireCursor::copy_until(self.body.as_mut(), pred, out);
-        self.error.capture(copied)
+        match super::poll_iter(&mut self.error, &mut self.fused) {
+            super::IterPoll::Fused => return Err(ProtobufError::Stopped),
+            super::IterPoll::Error(err) => return Err(err),
+            super::IterPoll::Ready => {}
+        }
+        match WireCursor::copy_until(self.body.as_mut(), pred, out) {
+            Ok(n) => Ok(n),
+            Err(err) => Err(super::fuse_err(&mut self.fused, err)),
+        }
     }
 
     /// Bytes still in this iterator's message / body length.
@@ -587,15 +604,27 @@ where
     type Item = Result<Field<F::Payload>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Err(err) = self.error.check() {
-            return Some(Err(err));
+        match super::poll_iter(&mut self.error, &mut self.fused) {
+            super::IterPoll::Fused => return None,
+            super::IterPoll::Error(err) => return Some(Err(err)),
+            super::IterPoll::Ready => {}
         }
         if self.body.as_ref().remaining == 0 {
             return None;
         }
-        let parsed = self.body.as_mut().parse_field_with(&mut self.handler);
-        Some(self.error.capture(parsed))
+        match self.body.as_mut().parse_field_with(&mut self.handler) {
+            Ok(field) => Some(Ok(field)),
+            Err(err) => Some(Err(super::fuse_err(&mut self.fused, err))),
+        }
     }
+}
+
+impl<'a, R, T, F> ::std::iter::FusedIterator for FieldIter<'a, R, T, F>
+where
+    R: Read + ?Sized,
+    T: AsRef<LenBody<'a, R>> + AsMut<LenBody<'a, R>>,
+    F: LenHandler<R>,
+{
 }
 
 // ============================================================================
@@ -643,10 +672,12 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// Borrows `self` and reads fields from the next `len` bytes (the message).
     /// Length-delimited payloads are `Vec<u8>`.
-    /// `len > MAX_MESSAGE_SIZE` is stored as
-    /// [`ProtobufError::SizeLimitExceeded`]. [`Iterator::next`],
-    /// [`FieldIter::skip_until`], and [`FieldIter::copy_until`] keep returning
-    /// it and do not read (debug and release).
+    /// `len > MAX_MESSAGE_SIZE` is parked as
+    /// [`ProtobufError::SizeLimitExceeded`] until the first [`Iterator::next`],
+    /// [`FieldIter::skip_until`], or [`FieldIter::copy_until`] moves it out.
+    /// That call does not read (debug and release). Later `next` yields
+    /// `None`. Later `skip_until` / `copy_until` return
+    /// [`ProtobufError::Stopped`].
     ///
     /// # How `self` is consumed
     ///
@@ -658,10 +689,12 @@ pub trait ReadExtProtobuf: Read {
     ///   `len`-byte window still on `self` (the tail is not skipped for you).
     /// - If `self` ends before those `len` bytes are finished, the read is
     ///   [`UnexpectedEof`](ProtobufError::UnexpectedEof) (including a
-    ///   truncated mid-field). Any error from this iterator is stored. Later
-    ///   [`next`](Iterator::next) / [`skip_until`](FieldIter::skip_until) /
-    ///   [`copy_until`](FieldIter::copy_until) calls return it again and do
-    ///   not read. Bytes already pulled stay pulled.
+    ///   truncated mid-field). The iterator moves that error out once and
+    ///   fuses. Later [`next`](Iterator::next) yields `None`. Later
+    ///   [`skip_until`](FieldIter::skip_until) /
+    ///   [`copy_until`](FieldIter::copy_until) return
+    ///   [`Stopped`](ProtobufError::Stopped) and do not read. Bytes already
+    ///   pulled stay pulled.
     fn read_protobuf_fields(&mut self, len: u32) -> FieldIter<'_, Self, LenBody<'_, Self>>
     where
         Self: Sized;
@@ -729,7 +762,8 @@ where
         FieldIter {
             body: LenBody::new(self, len),
             handler: VecLenPayload,
-            error: StickyError::from_message_len(len as usize),
+            error: crate::wire_format::ensure_message_size(len as usize).err(),
+            fused: false,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -746,7 +780,8 @@ where
         FieldIter {
             body: LenBody::new(self, len),
             handler,
-            error: StickyError::from_message_len(len as usize),
+            error: crate::wire_format::ensure_message_size(len as usize).err(),
+            fused: false,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -1162,7 +1197,7 @@ mod tests {
     }
 
     #[test]
-    fn field_iter_repeats_a_parse_error() {
+    fn field_iter_moves_a_parse_error_out_once() {
         use super::ReadExtProtobuf;
         use crate::ProtobufError;
         use ::std::io::Cursor;
@@ -1170,13 +1205,38 @@ mod tests {
         // Invalid wire type, then a valid varint that must not be parsed later.
         let bytes = [0x0F, 0x08, 0x01];
         let mut cursor = Cursor::new(bytes);
-        let mut fields = cursor.read_protobuf_fields(bytes.len() as u32);
+        {
+            let mut fields = cursor.read_protobuf_fields(bytes.len() as u32);
+            let err = fields.next().unwrap().unwrap_err();
+            assert!(matches!(err, ProtobufError::InvalidWireType { value: 7 }));
+            assert!(fields.next().is_none());
+            let skip = fields.skip_until(|_| Ok(true)).unwrap_err();
+            assert!(matches!(skip, ProtobufError::Stopped));
+        }
+        assert_eq!(cursor.position(), 1);
+    }
+
+    #[test]
+    fn field_iter_moves_io_error_out_with_os_code() {
+        use super::ReadExtProtobuf;
+        use crate::ProtobufError;
+        use ::std::io::{Error, Read};
+
+        struct Boom;
+        impl Read for Boom {
+            fn read(&mut self, _buf: &mut [u8]) -> ::std::io::Result<usize> {
+                Err(Error::from_raw_os_error(5))
+            }
+        }
+
+        let mut reader = Boom;
+        let mut fields = reader.read_protobuf_fields(1);
         let err = fields.next().unwrap().unwrap_err();
-        assert!(matches!(err, ProtobufError::InvalidWireType { value: 7 }));
-        let again = fields.next().unwrap().unwrap_err();
-        assert!(matches!(again, ProtobufError::InvalidWireType { value: 7 }));
-        let skip = fields.skip_until(|_| Ok(true)).unwrap_err();
-        assert!(matches!(skip, ProtobufError::InvalidWireType { value: 7 }));
+        let ProtobufError::IoError(io_err) = err else {
+            panic!("expected IoError, got {err:?}");
+        };
+        assert_eq!(io_err.raw_os_error(), Some(5));
+        assert!(fields.next().is_none());
     }
 }
 
@@ -1816,20 +1876,9 @@ mod len_payload {
                 ProtobufError::SizeLimitExceeded { value, limit }
                     if value == u64::from(budget) && limit == MAX_MESSAGE_SIZE
             ));
-            let again = fields.next().unwrap().unwrap_err();
-            assert!(matches!(
-                again,
-                ProtobufError::SizeLimitExceeded { value, limit }
-                    if value == u64::from(budget) && limit == MAX_MESSAGE_SIZE
-            ));
+            assert!(fields.next().is_none());
             let skip = fields.skip_until(|_| Ok(true)).unwrap_err();
-            assert!(matches!(
-                skip,
-                ProtobufError::SizeLimitExceeded {
-                    limit: MAX_MESSAGE_SIZE,
-                    ..
-                }
-            ));
+            assert!(matches!(skip, ProtobufError::Stopped));
         }
         assert_eq!(reader.position(), 0);
     }

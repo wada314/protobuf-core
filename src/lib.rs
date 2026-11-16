@@ -222,11 +222,13 @@ pub enum ProtobufError {
     /// (string, bytes, embedded message, or packed repeated — this crate does
     /// not distinguish them). `value` is the rejected length in bytes.
     ///
-    /// A top-level rejection is stored on the iterator.
+    /// A top-level rejection sits on the iterator until the first
     /// [`FieldIter::next()`] / [`FieldIter::skip_until()`] /
     /// [`FieldIter::copy_until()`] (and the [`FieldIterFromSlice`] equivalents)
-    /// keep returning that error and consume no bytes. A `Len`-prefix rejection
-    /// consumes the tag and the length varint, then leaves the payload unread.
+    /// moves it out. Those calls consume no bytes. Later `next` yields `None`.
+    /// Later `skip_until` / `copy_until` return [`Stopped`](Self::Stopped).
+    /// A `Len`-prefix rejection consumes the tag and the length varint, then
+    /// leaves the payload unread. That error is also moved out once.
     /// A length above `u32::MAX` is
     /// [`VarintDowncastOutOfRange`](Self::VarintDowncastOutOfRange) instead.
     /// A length within the limit whose payload bytes are missing is
@@ -247,19 +249,21 @@ pub enum ProtobufError {
     ///         ..
     ///     }
     /// ));
-    /// let again = fields.next().unwrap().unwrap_err();
-    /// assert!(matches!(
-    ///     again,
-    ///     ProtobufError::SizeLimitExceeded {
-    ///         limit: MAX_MESSAGE_SIZE,
-    ///         ..
-    ///     }
-    /// ));
+    /// assert!(fields.next().is_none());
     /// drop(fields);
     /// assert_eq!(reader.position(), 0);
     /// ```
     #[error("Size {value} exceeds the limit of {limit} bytes")]
     SizeLimitExceeded { value: u64, limit: usize },
+
+    /// [`FieldIter::skip_until()`] or [`FieldIter::copy_until()`] (or the
+    /// [`FieldIterFromSlice`] equivalents) ran after this iterator had already
+    /// moved an error out to the caller.
+    ///
+    /// [`Iterator::next`] yields `None` in that state. The original error is
+    /// moved once, so an [`IoError`](Self::IoError) keeps its OS code and source.
+    #[error("field iterator already returned an error")]
+    Stopped,
 }
 
 impl From<Infallible> for ProtobufError {

@@ -12,8 +12,37 @@
 mod group;
 mod len_body;
 mod slice;
-mod sticky_error;
 pub(crate) mod wire;
+
+/// One step of a field iterator that may already have failed.
+pub(crate) enum IterPoll {
+    /// No error yet. The caller may read.
+    Ready,
+    /// Pending error, moved out. The iterator is now fused.
+    Error(crate::ProtobufError),
+    /// An error was already moved out. `next` yields `None`.
+    Fused,
+}
+
+/// Move a not-yet-delivered error out, or report that the iterator is fused.
+pub(crate) fn poll_iter(error: &mut Option<crate::ProtobufError>, fused: &mut bool) -> IterPoll {
+    if *fused {
+        return IterPoll::Fused;
+    }
+    match error.take() {
+        Some(err) => {
+            *fused = true;
+            IterPoll::Error(err)
+        }
+        None => IterPoll::Ready,
+    }
+}
+
+/// Remember that `err` is being moved out to the caller.
+pub(crate) fn fuse_err(fused: &mut bool, err: crate::ProtobufError) -> crate::ProtobufError {
+    *fused = true;
+    err
+}
 
 pub use self::group::{GroupBody, until_group_ends};
 pub use self::len_body::{
