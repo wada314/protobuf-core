@@ -14,24 +14,6 @@ mod len_body;
 mod slice;
 pub(crate) mod wire;
 
-/// Move out a parked message-size error, or rebuild it after it was delivered.
-///
-/// The rebuilt value is two integers. Wire errors are not stored here.
-pub(crate) fn take_message_limit(
-    error: &mut Option<crate::ProtobufError>,
-    reported: &mut Option<(u64, usize)>,
-) -> Option<crate::ProtobufError> {
-    if let Some((value, limit)) = *reported {
-        return Some(crate::ProtobufError::SizeLimitExceeded { value, limit });
-    }
-    let err = error.take()?;
-    if let crate::ProtobufError::SizeLimitExceeded { value, limit } = err {
-        *reported = Some((value, limit));
-        return Some(crate::ProtobufError::SizeLimitExceeded { value, limit });
-    }
-    Some(err)
-}
-
 pub use self::group::{GroupBody, until_group_ends};
 pub use self::len_body::{
     FieldIter, FixedIterFromLenBody, LenBody, LenBodyRead, LenHandler, ReadExtProtobuf,

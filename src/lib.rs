@@ -225,12 +225,10 @@ pub enum ProtobufError {
     /// A top-level rejection sits on the iterator until the first
     /// [`FieldIter::next()`] / [`FieldIter::skip_until()`] /
     /// [`FieldIter::copy_until()`] (and the [`FieldIterFromSlice`] equivalents)
-    /// moves it out. That call consumes no bytes. Later
-    /// [`FieldIter::next()`] yields `None`. Later [`FieldIter::skip_until()`]
-    /// / [`FieldIter::copy_until()`] (and the [`FieldIterFromSlice`]
-    /// equivalents) return that error and do not read. A `Len`-prefix
-    /// rejection consumes the tag and the length varint, then leaves the
-    /// payload unread. Another call after that field error is unspecified.
+    /// moves it out. That call consumes no bytes. A `Len`-prefix rejection
+    /// consumes the tag and the length varint, then leaves the payload unread.
+    /// Either error is moved out once. Another call after that `Err` is
+    /// unspecified.
     /// A length above `u32::MAX` is
     /// [`VarintDowncastOutOfRange`](Self::VarintDowncastOutOfRange) instead.
     /// A length within the limit whose payload bytes are missing is
@@ -246,15 +244,6 @@ pub enum ProtobufError {
     /// let err = fields.next().unwrap().unwrap_err();
     /// assert!(matches!(
     ///     err,
-    ///     ProtobufError::SizeLimitExceeded {
-    ///         limit: MAX_MESSAGE_SIZE,
-    ///         ..
-    ///     }
-    /// ));
-    /// assert!(fields.next().is_none());
-    /// let again = fields.skip_until(|_| Ok(true)).unwrap_err();
-    /// assert!(matches!(
-    ///     again,
     ///     ProtobufError::SizeLimitExceeded {
     ///         limit: MAX_MESSAGE_SIZE,
     ///         ..
