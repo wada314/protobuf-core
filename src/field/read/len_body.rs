@@ -21,7 +21,7 @@ use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
 use crate::wire_format::{
-    MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK, WireType,
+    MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK, WireType, ensure_message_size,
 };
 use crate::{ProtobufError, Result};
 use ::std::convert::{AsMut, AsRef};
@@ -726,7 +726,7 @@ where
         FieldIter {
             body: LenBody::new(self, len),
             handler: VecLenPayload,
-            error: crate::wire_format::ensure_message_size(len as usize).err(),
+            error: ensure_message_size(len as usize).err(),
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -743,7 +743,7 @@ where
         FieldIter {
             body: LenBody::new(self, len),
             handler,
-            error: crate::wire_format::ensure_message_size(len as usize).err(),
+            error: ensure_message_size(len as usize).err(),
             _marker: ::std::marker::PhantomData,
         }
     }

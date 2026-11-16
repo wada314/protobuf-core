@@ -12,7 +12,7 @@ use crate::field::FieldValue;
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
-use crate::wire_format::MAX_VARINT_BYTES;
+use crate::wire_format::{MAX_VARINT_BYTES, ensure_message_size};
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
 use ::std::io::Write;
@@ -248,7 +248,7 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
         let slice = self.as_ref();
         FieldIterFromSlice {
             slice,
-            error: crate::wire_format::ensure_message_size(slice.len()).err(),
+            error: ensure_message_size(slice.len()).err(),
         }
     }
 }
