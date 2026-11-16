@@ -64,10 +64,9 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 /// `None`, wrap with [`Iterator::fuse()`] (for example
 /// `fields.group_body(n).fuse()`).
 ///
-/// After a yielded [`Err`] from a [`FieldIter`] / [`FieldIterFromSlice`], that
-/// inner iterator is fused, so its later `next` is `None`. This adapter turns
-/// that `None` into [`UnexpectedEof`](ProtobufError::UnexpectedEof) because the
-/// end-group tag was not seen. The adapter itself does not fuse.
+/// After a yielded [`Err`], another `next()` is unspecified. The cursor may
+/// already have advanced. Typical callers stop at the first error (`?`,
+/// `collect::<Result<_, _>>()`, `try_for_each`).
 ///
 /// # Nesting model (depth only)
 ///
