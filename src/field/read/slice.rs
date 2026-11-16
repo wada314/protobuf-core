@@ -12,7 +12,7 @@ use crate::field::FieldValue;
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
-use crate::wire_format::MAX_VARINT_BYTES;
+use crate::wire_format::{MAX_MESSAGE_SIZE, MAX_VARINT_BYTES};
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
 use ::std::io::Write;
@@ -91,6 +91,10 @@ impl<'a> BufWireCursor<&'a [u8]> for SliceReader<'a, '_> {
 /// Iterator for reading raw protobuf fields sequentially from a byte slice.
 pub struct FieldIterFromSlice<'a> {
     slice: &'a [u8],
+    /// `slice` was longer than [`MAX_MESSAGE_SIZE`] when this iterator was built.
+    oversized: bool,
+    /// Set after the oversized budget has been reported from [`Iterator::next`].
+    failed: bool,
 }
 
 impl<'a> FieldIterFromSlice<'a> {
@@ -120,10 +124,26 @@ impl<'a> FieldIterFromSlice<'a> {
     where
         P: FnMut(Tag) -> Result<bool>,
     {
+        self.reject_oversized()?;
         SliceReader {
             slice: &mut self.slice,
         }
         .skip_until(pred)
+    }
+
+    /// Slice longer than `MAX_MESSAGE_SIZE`: report it and do not read.
+    ///
+    /// `next()` fuses to `None` after the first report. `skip_until()` keeps
+    /// returning this error, so it does not parse the rejected slice.
+    fn reject_oversized(&mut self) -> Result<()> {
+        if !self.oversized {
+            return Ok(());
+        }
+        self.failed = true;
+        Err(ProtobufError::SizeLimitExceeded {
+            value: u64::try_from(self.slice.len()).unwrap_or(u64::MAX),
+            limit: MAX_MESSAGE_SIZE,
+        })
     }
 
     /// Advance past fields until `pred` returns `Ok(true)`, returning the exact
@@ -179,6 +199,12 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
     type Item = Result<Field<&'a [u8]>>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.failed {
+            return None;
+        }
+        if let Err(err) = self.reject_oversized() {
+            return Some(Err(err));
+        }
         let mut reader = SliceReader {
             slice: &mut self.slice,
         };
@@ -228,9 +254,19 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
     ///
     /// For a length-delimited field, the payload is a reference to part of
     /// the input slice.
+    ///
+    /// A slice longer than [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE) is
+    /// [`ProtobufError::SizeLimitExceeded`] from the first
+    /// [`Iterator::next`] or [`FieldIterFromSlice::skip_until`]. That call
+    /// does not read. A wire-type `Len` prefix longer than
+    /// [`MAX_STRING_SIZE`](crate::MAX_STRING_SIZE) is the same error after
+    /// the tag and length varint are consumed.
     fn read_protobuf_fields(&self) -> FieldIterFromSlice<'_> {
+        let slice = self.as_ref();
         FieldIterFromSlice {
-            slice: self.as_ref(),
+            slice,
+            oversized: crate::wire_format::ensure_message_size(slice.len()).is_err(),
+            failed: false,
         }
     }
 }
@@ -466,5 +502,89 @@ mod tests {
             assert_eq!(field.field_number.as_u32(), 1);
             assert_eq!(field.value, expected);
         }
+    }
+
+    fn len_field_claiming(payload_len: u64) -> Vec<u8> {
+        let mut bytes = vec![0x0Au8];
+        let (encoded, n) = crate::Varint::from_uint64(payload_len).encode();
+        bytes.extend_from_slice(&encoded[..n]);
+        bytes
+    }
+
+    #[test]
+    fn small_slice_is_not_marked_oversized() {
+        use super::AsRefExtProtobuf;
+
+        let bytes = [0x08u8, 0x01];
+        let fields = bytes.read_protobuf_fields();
+        assert!(!fields.oversized);
+        assert!(!fields.failed);
+    }
+
+    #[test]
+    fn oversized_slice_flag_reports_without_reading() {
+        use super::FieldIterFromSlice;
+        use crate::{MAX_MESSAGE_SIZE, ProtobufError};
+
+        // A real slice longer than `MAX_MESSAGE_SIZE` is not allocated here.
+        // `ensure_message_size` covers that predicate; this locks the iterator
+        // once the flag is set the way `read_protobuf_fields` sets it.
+        let bytes = [0x08u8, 0x01, 0xAA];
+        let mut fields = FieldIterFromSlice {
+            slice: &bytes,
+            oversized: true,
+            failed: false,
+        };
+        let err = fields.next().unwrap().unwrap_err();
+        assert!(matches!(
+            err,
+            ProtobufError::SizeLimitExceeded {
+                value: 3,
+                limit: MAX_MESSAGE_SIZE
+            }
+        ));
+        assert!(fields.next().is_none());
+        assert_eq!(fields.slice, &bytes);
+        let skip = fields.skip_until(|_| Ok(true)).unwrap_err();
+        assert!(matches!(
+            skip,
+            ProtobufError::SizeLimitExceeded {
+                limit: MAX_MESSAGE_SIZE,
+                ..
+            }
+        ));
+        assert_eq!(fields.slice, &bytes);
+    }
+
+    #[test]
+    fn slice_len_prefix_over_string_limit_leaves_tail() {
+        use super::AsRefExtProtobuf;
+        use crate::{MAX_STRING_SIZE, ProtobufError};
+
+        let mut bytes = len_field_claiming(u64::try_from(MAX_STRING_SIZE).unwrap() + 1);
+        let prefix_len = bytes.len();
+        bytes.extend_from_slice(&[0xAA, 0xBB]);
+        let mut fields = bytes.read_protobuf_fields();
+        let err = fields.next().unwrap().unwrap_err();
+        assert!(matches!(
+            err,
+            ProtobufError::SizeLimitExceeded { value, limit }
+                if value == u64::try_from(MAX_STRING_SIZE).unwrap() + 1 && limit == MAX_STRING_SIZE
+        ));
+        assert_eq!(fields.slice, &bytes[prefix_len..]);
+    }
+
+    #[test]
+    fn slice_len_prefix_at_string_limit_is_truncated() {
+        use super::AsRefExtProtobuf;
+        use crate::{MAX_STRING_SIZE, ProtobufError};
+
+        let mut bytes = len_field_claiming(u64::try_from(MAX_STRING_SIZE).unwrap());
+        let prefix_len = bytes.len();
+        bytes.extend_from_slice(&[0xAA]);
+        let mut fields = bytes.read_protobuf_fields();
+        let err = fields.next().unwrap().unwrap_err();
+        assert!(matches!(err, ProtobufError::UnexpectedEof));
+        assert_eq!(fields.slice, &bytes[prefix_len..]);
     }
 }

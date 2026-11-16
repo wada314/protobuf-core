@@ -193,6 +193,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             body: self,
             handler: VecLenPayload,
             failed: false,
+            oversized: false,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -211,6 +212,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             body: self,
             handler,
             failed: false,
+            oversized: false,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -233,7 +235,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             WireType::Int32 => FieldValue::I32(WireCursor::read_fixed(self)?),
             WireType::Int64 => FieldValue::I64(WireCursor::read_fixed(self)?),
             WireType::Len => {
-                let length = WireCursor::read_varint(self)?.try_to_uint32()?;
+                let length = WireCursor::read_len_prefix(self)?;
                 if length > self.len() {
                     return Err(ProtobufError::UnexpectedEof);
                 }
@@ -499,10 +501,19 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
 /// that either — they are not fused and may mis-parse a desynced cursor. The
 /// reader / budget may already be wrong (mid-discard I/O failure, or a handler
 /// panic that skipped discard); abandon the iterator.
+///
+/// A top-level budget above [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE) is
+/// [`ProtobufError::SizeLimitExceeded`] from the first `next` / `skip_until` /
+/// `copy_until`, and that call does not read. Nested iterators from
+/// [`LenBody::fields()`] are not checked again: their body already passed
+/// [`MAX_STRING_SIZE`](crate::MAX_STRING_SIZE).
 pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
     body: T,
     handler: F,
     failed: bool,
+    /// Top-level `len` was above [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE).
+    /// Nested iterators leave this `false`.
+    oversized: bool,
     _marker: ::std::marker::PhantomData<&'a mut R>,
 }
 
@@ -524,6 +535,7 @@ where
     where
         P: FnMut(Tag) -> Result<bool>,
     {
+        self.reject_oversized_budget()?;
         WireCursor::skip_until(self.body.as_mut(), pred)
     }
 
@@ -554,7 +566,24 @@ where
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
+        self.reject_oversized_budget()?;
         WireCursor::copy_until(self.body.as_mut(), pred, out)
+    }
+
+    /// Top-level budget above `MAX_MESSAGE_SIZE`: report it and do not read.
+    ///
+    /// Marks the iterator failed so a later `next()` fuses to `None`.
+    /// `skip_until()` / `copy_until()` keep returning this error while
+    /// `oversized` stays set, so they do not parse the rejected budget.
+    fn reject_oversized_budget(&mut self) -> Result<()> {
+        if !self.oversized {
+            return Ok(());
+        }
+        self.failed = true;
+        Err(ProtobufError::SizeLimitExceeded {
+            value: u64::from(self.body.as_ref().len()),
+            limit: MAX_MESSAGE_SIZE,
+        })
     }
 
     /// Bytes still in this iterator's message / body length.
@@ -581,6 +610,9 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         if self.failed || self.body.as_ref().remaining == 0 {
             return None;
+        }
+        if let Err(err) = self.reject_oversized_budget() {
+            return Some(Err(err));
         }
         match self.body.as_mut().parse_field_with(&mut self.handler) {
             Ok(field) => Some(Ok(field)),
@@ -637,7 +669,9 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// Borrows `self` and reads fields from the next `len` bytes (the message).
     /// Length-delimited payloads are `Vec<u8>`.
-    /// `len > MAX_MESSAGE_SIZE` is only checked with `debug_assert` (not in release).
+    /// `len > MAX_MESSAGE_SIZE` is [`ProtobufError::SizeLimitExceeded`] from the
+    /// first [`Iterator::next`], [`FieldIter::skip_until`], or
+    /// [`FieldIter::copy_until`] (debug and release). That call does not read.
     ///
     /// # How `self` is consumed
     ///
@@ -715,14 +749,11 @@ where
     where
         Self: Sized,
     {
-        debug_assert!(
-            (len as usize) <= MAX_MESSAGE_SIZE,
-            "message budget exceeds MAX_MESSAGE_SIZE"
-        );
         FieldIter {
             body: LenBody::new(self, len),
             handler: VecLenPayload,
             failed: false,
+            oversized: crate::wire_format::ensure_message_size(len as usize).is_err(),
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -736,14 +767,11 @@ where
         Self: Sized,
         F: for<'t> FnMut(FieldNumber, LenBody<'t, Self>) -> Result<L>,
     {
-        debug_assert!(
-            (len as usize) <= MAX_MESSAGE_SIZE,
-            "message budget exceeds MAX_MESSAGE_SIZE"
-        );
         FieldIter {
             body: LenBody::new(self, len),
             handler,
             failed: false,
+            oversized: crate::wire_format::ensure_message_size(len as usize).is_err(),
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -1764,5 +1792,173 @@ mod len_payload {
                 })),
             }
         );
+    }
+
+    fn len_field_claiming(payload_len: u64) -> Vec<u8> {
+        let mut bytes = vec![0x0Au8];
+        let (encoded, n) = crate::Varint::from_uint64(payload_len).encode();
+        bytes.extend_from_slice(&encoded[..n]);
+        bytes
+    }
+
+    #[test]
+    fn message_budget_at_limit_still_parses() {
+        use super::ReadExtProtobuf;
+        use crate::{MAX_MESSAGE_SIZE, ProtobufError};
+        use ::std::io::Cursor;
+
+        let bytes = [0x08u8, 0x01];
+        let mut reader = Cursor::new(bytes);
+        let budget = u32::try_from(MAX_MESSAGE_SIZE).unwrap();
+        let mut fields = reader.read_protobuf_fields(budget);
+        let field = fields.next().unwrap().unwrap();
+        assert_eq!(field.field_number.as_u32(), 1);
+        let err = fields.next().unwrap().unwrap_err();
+        assert!(matches!(err, ProtobufError::UnexpectedEof));
+    }
+
+    #[test]
+    fn message_budget_over_limit_reads_nothing() {
+        use super::ReadExtProtobuf;
+        use crate::{MAX_MESSAGE_SIZE, ProtobufError};
+        use ::std::io::Cursor;
+
+        let bytes = [0x08u8, 0x01, 0xAA];
+        let mut reader = Cursor::new(bytes);
+        let budget = u32::try_from(MAX_MESSAGE_SIZE).unwrap() + 1;
+        {
+            let mut fields = reader.read_protobuf_fields(budget);
+            let err = fields.next().unwrap().unwrap_err();
+            assert!(matches!(
+                err,
+                ProtobufError::SizeLimitExceeded { value, limit }
+                    if value == u64::from(budget) && limit == MAX_MESSAGE_SIZE
+            ));
+            assert!(fields.next().is_none());
+            let skip = fields.skip_until(|_| Ok(true)).unwrap_err();
+            assert!(matches!(
+                skip,
+                ProtobufError::SizeLimitExceeded {
+                    limit: MAX_MESSAGE_SIZE,
+                    ..
+                }
+            ));
+        }
+        assert_eq!(reader.position(), 0);
+    }
+
+    #[test]
+    fn message_budget_over_limit_does_not_call_handler() {
+        use super::ReadExtProtobuf;
+        use crate::ProtobufError;
+        use ::std::io::Cursor;
+
+        let bytes = [0x0Au8, 0x01, b'x'];
+        let mut reader = Cursor::new(bytes);
+        let budget = u32::MAX;
+        let mut called = false;
+        {
+            let mut fields = reader.read_protobuf_fields_with(budget, |_n, _body| {
+                called = true;
+                Ok(())
+            });
+            let err = fields.next().unwrap().unwrap_err();
+            assert!(matches!(err, ProtobufError::SizeLimitExceeded { .. }));
+        }
+        assert!(!called);
+        assert_eq!(reader.position(), 0);
+    }
+
+    #[test]
+    fn len_prefix_over_string_limit_leaves_payload_unread() {
+        use super::ReadExtProtobuf;
+        use crate::{MAX_STRING_SIZE, ProtobufError};
+        use ::std::io::Cursor;
+
+        let mut bytes = len_field_claiming(u64::try_from(MAX_STRING_SIZE).unwrap() + 1);
+        let prefix_len = bytes.len();
+        bytes.extend_from_slice(&[0xAA, 0xBB]);
+        let mut reader = Cursor::new(bytes);
+        let budget = reader.get_ref().len() as u32;
+        {
+            let mut fields = reader.read_protobuf_fields(budget);
+            let err = fields.next().unwrap().unwrap_err();
+            assert!(matches!(
+                err,
+                ProtobufError::SizeLimitExceeded { value, limit }
+                    if value == u64::try_from(MAX_STRING_SIZE).unwrap() + 1
+                        && limit == MAX_STRING_SIZE
+            ));
+        }
+        assert_eq!(reader.position(), prefix_len as u64);
+        assert_eq!(&reader.get_ref()[prefix_len..], &[0xAA, 0xBB]);
+    }
+
+    #[test]
+    fn len_prefix_over_string_limit_skips_and_copies_nothing_past_prefix() {
+        use super::ReadExtProtobuf;
+        use crate::{MAX_STRING_SIZE, ProtobufError};
+        use ::std::io::Cursor;
+
+        let claimed = u64::try_from(MAX_STRING_SIZE).unwrap() + 1;
+        let mut bytes = len_field_claiming(claimed);
+        let prefix_len = bytes.len();
+        bytes.extend_from_slice(&[0xAA, 0xBB]);
+
+        let mut reader = Cursor::new(bytes.clone());
+        let budget = bytes.len() as u32;
+        {
+            let mut fields = reader.read_protobuf_fields(budget);
+            let err = fields.skip_until(|_| Ok(true)).unwrap_err();
+            assert!(matches!(
+                err,
+                ProtobufError::SizeLimitExceeded {
+                    limit: MAX_STRING_SIZE,
+                    ..
+                }
+            ));
+        }
+        assert_eq!(reader.position(), prefix_len as u64);
+
+        let mut reader = Cursor::new(bytes);
+        let mut copied = Vec::new();
+        {
+            let mut fields = reader.read_protobuf_fields(budget);
+            let err = fields.copy_until(|_| Ok(true), &mut copied).unwrap_err();
+            assert!(matches!(
+                err,
+                ProtobufError::SizeLimitExceeded {
+                    value,
+                    limit: MAX_STRING_SIZE,
+                } if value == claimed
+            ));
+        }
+        assert_eq!(copied.len(), prefix_len);
+        assert_eq!(reader.position(), prefix_len as u64);
+        assert_eq!(&reader.get_ref()[prefix_len..], &[0xAA, 0xBB]);
+    }
+
+    #[test]
+    fn len_prefix_at_string_limit_is_truncated_not_rejected() {
+        use super::ReadExtProtobuf;
+        use crate::{MAX_STRING_SIZE, ProtobufError};
+        use ::std::io::Cursor;
+
+        let mut bytes = len_field_claiming(u64::try_from(MAX_STRING_SIZE).unwrap());
+        let prefix_len = bytes.len();
+        bytes.extend_from_slice(&[0xAA]);
+        let mut called = false;
+        let mut reader = Cursor::new(bytes);
+        let budget = reader.get_ref().len() as u32;
+        {
+            let mut fields = reader.read_protobuf_fields_with(budget, |_n, _body| {
+                called = true;
+                Ok(())
+            });
+            let err = fields.next().unwrap().unwrap_err();
+            assert!(matches!(err, ProtobufError::UnexpectedEof));
+        }
+        assert!(!called);
+        assert_eq!(reader.position(), prefix_len as u64);
     }
 }

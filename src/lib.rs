@@ -143,7 +143,9 @@
 //! The library also provides various constants related to the protobuf wire format:
 //!
 //! - Field number limits: [`MIN_FIELD_NUMBER`], [`MAX_FIELD_NUMBER`]
-//! - Size limits: [`MAX_MESSAGE_SIZE`], [`MAX_STRING_SIZE`], [`MAX_VARINT_BYTES`]
+//! - Size limits: [`MAX_MESSAGE_SIZE`], [`MAX_STRING_SIZE`], [`MAX_VARINT_BYTES`].
+//!   Readers reject a message or length-delimited payload above the first two
+//!   with [`ProtobufError::SizeLimitExceeded`] (debug and release).
 //! - Wire format constants: [`FIXED32_BYTES`], [`FIXED64_BYTES`], etc.
 
 pub mod ext;
@@ -212,6 +214,44 @@ pub enum ProtobufError {
 
     #[error("I/O error: {0}")]
     IoError(#[from] ::std::io::Error),
+
+    /// A message or length-delimited payload is larger than this crate allows.
+    ///
+    /// `limit` is [`MAX_MESSAGE_SIZE`] for a top-level message budget or input
+    /// slice, and [`MAX_STRING_SIZE`] for a wire-type `Len` length prefix
+    /// (string, bytes, embedded message, or packed repeated — this crate does
+    /// not distinguish them). `value` is the rejected length in bytes.
+    ///
+    /// A top-level rejection is reported from the first
+    /// [`FieldIter::next()`] / [`FieldIter::skip_until()`] /
+    /// [`FieldIter::copy_until()`] (or the [`FieldIterFromSlice`] equivalents)
+    /// and consumes no bytes. Further [`FieldIter::next()`] calls then return
+    /// [`None`]. A `Len`-prefix rejection consumes the tag and the length
+    /// varint, then leaves the payload unread. A length above `u32::MAX` is
+    /// [`VarintDowncastOutOfRange`](Self::VarintDowncastOutOfRange) instead.
+    /// A length within the limit whose payload bytes are missing is
+    /// [`UnexpectedEof`](Self::UnexpectedEof).
+    ///
+    /// ```
+    /// use ::protobuf_core::{MAX_MESSAGE_SIZE, ProtobufError, ReadExtProtobuf};
+    /// use ::std::io::Cursor;
+    ///
+    /// let mut reader = Cursor::new([0x08u8, 0x01]);
+    /// let len = u32::try_from(MAX_MESSAGE_SIZE).unwrap() + 1;
+    /// let mut fields = reader.read_protobuf_fields(len);
+    /// let err = fields.next().unwrap().unwrap_err();
+    /// assert!(matches!(
+    ///     err,
+    ///     ProtobufError::SizeLimitExceeded {
+    ///         limit: MAX_MESSAGE_SIZE,
+    ///         ..
+    ///     }
+    /// ));
+    /// drop(fields);
+    /// assert_eq!(reader.position(), 0);
+    /// ```
+    #[error("Size {value} exceeds the limit of {limit} bytes")]
+    SizeLimitExceeded { value: u64, limit: usize },
 }
 
 impl From<Infallible> for ProtobufError {
