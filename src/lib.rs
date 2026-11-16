@@ -226,8 +226,8 @@ pub enum ProtobufError {
     /// [`FieldIter::next()`] / [`FieldIter::skip_until()`] /
     /// [`FieldIter::copy_until()`] (and the [`FieldIterFromSlice`] equivalents)
     /// keep returning that error and consume no bytes. A `Len`-prefix rejection
-    /// consumes the tag and the length
-    /// varint, then leaves the payload unread. A length above `u32::MAX` is
+    /// consumes the tag and the length varint, then leaves the payload unread.
+    /// A length above `u32::MAX` is
     /// [`VarintDowncastOutOfRange`](Self::VarintDowncastOutOfRange) instead.
     /// A length within the limit whose payload bytes are missing is
     /// [`UnexpectedEof`](Self::UnexpectedEof).
