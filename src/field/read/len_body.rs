@@ -193,6 +193,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             body: self,
             handler: VecLenPayload,
             error: None,
+            reported_limit: None,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -211,6 +212,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             body: self,
             handler,
             error: None,
+            reported_limit: None,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -495,13 +497,18 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
 ///
 /// An error from [`next()`](Iterator::next), [`skip_until()`](Self::skip_until),
 /// or [`copy_until()`](Self::copy_until) is moved out on that call. Another
-/// call is unspecified: a wire error may already have consumed bytes, and the
-/// iterator does not remember the failure.
+/// call after a wire error is unspecified: bytes may already have been
+/// consumed, and the iterator does not remember that failure. After a parked
+/// message-size error has been moved out, [`next()`](Iterator::next) yields
+/// `None`, and [`skip_until()`](Self::skip_until) / [`copy_until()`](Self::copy_until)
+/// return that error without reading.
 pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
     body: T,
     handler: F,
     /// Error not yet moved to the caller. Empty after it is taken.
     error: Option<ProtobufError>,
+    /// Message-size error already returned. `next` then yields `None`.
+    reported_limit: Option<(u64, usize)>,
     _marker: ::std::marker::PhantomData<&'a mut R>,
 }
 
@@ -523,7 +530,7 @@ where
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        if let Some(err) = self.error.take() {
+        if let Some(err) = super::take_message_limit(&mut self.error, &mut self.reported_limit) {
             return Err(err);
         }
         WireCursor::skip_until(self.body.as_mut(), pred)
@@ -556,7 +563,7 @@ where
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
-        if let Some(err) = self.error.take() {
+        if let Some(err) = super::take_message_limit(&mut self.error, &mut self.reported_limit) {
             return Err(err);
         }
         WireCursor::copy_until(self.body.as_mut(), pred, out)
@@ -584,7 +591,10 @@ where
     type Item = Result<Field<F::Payload>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(err) = self.error.take() {
+        if self.reported_limit.is_some() {
+            return None;
+        }
+        if let Some(err) = super::take_message_limit(&mut self.error, &mut self.reported_limit) {
             return Some(Err(err));
         }
         if self.body.as_ref().remaining == 0 {
@@ -642,8 +652,10 @@ pub trait ReadExtProtobuf: Read {
     /// `len > MAX_MESSAGE_SIZE` is parked as
     /// [`ProtobufError::SizeLimitExceeded`] until the first [`Iterator::next`],
     /// [`FieldIter::skip_until`], or [`FieldIter::copy_until`] moves it out.
-    /// That call does not read (debug and release). Another call after an
-    /// `Err` is unspecified.
+    /// That call does not read (debug and release). Later `next` yields
+    /// `None`. Later `skip_until` / `copy_until` return that error and do not
+    /// read. A wire error is moved out on the call that produced it. Another
+    /// call after a wire error is unspecified.
     ///
     /// # How `self` is consumed
     ///
@@ -727,6 +739,7 @@ where
             body: LenBody::new(self, len),
             handler: VecLenPayload,
             error: ensure_message_size(len as usize).err(),
+            reported_limit: None,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -744,6 +757,7 @@ where
             body: LenBody::new(self, len),
             handler,
             error: ensure_message_size(len as usize).err(),
+            reported_limit: None,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -1834,6 +1848,16 @@ mod len_payload {
                 ProtobufError::SizeLimitExceeded { value, limit }
                     if value == u64::from(budget) && limit == MAX_MESSAGE_SIZE
             ));
+            assert!(fields.next().is_none());
+            let skip = fields.skip_until(|_| Ok(true)).unwrap_err();
+            assert!(matches!(
+                skip,
+                ProtobufError::SizeLimitExceeded {
+                    limit: MAX_MESSAGE_SIZE,
+                    ..
+                }
+            ));
+            assert_eq!(fields.len(), budget);
         }
         assert_eq!(reader.position(), 0);
     }

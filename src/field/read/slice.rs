@@ -94,6 +94,8 @@ pub struct FieldIterFromSlice<'a> {
     /// Error not yet moved to the caller. A slice longer than
     /// `MAX_MESSAGE_SIZE` parks [`ProtobufError::SizeLimitExceeded`] here.
     error: Option<ProtobufError>,
+    /// Message-size error already returned. `next` then yields `None`.
+    reported_limit: Option<(u64, usize)>,
 }
 
 impl<'a> FieldIterFromSlice<'a> {
@@ -123,7 +125,7 @@ impl<'a> FieldIterFromSlice<'a> {
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        if let Some(err) = self.error.take() {
+        if let Some(err) = super::take_message_limit(&mut self.error, &mut self.reported_limit) {
             return Err(err);
         }
         SliceReader {
@@ -185,7 +187,10 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
     type Item = Result<Field<&'a [u8]>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(err) = self.error.take() {
+        if self.reported_limit.is_some() {
+            return None;
+        }
+        if let Some(err) = super::take_message_limit(&mut self.error, &mut self.reported_limit) {
             return Some(Err(err));
         }
         let mut reader = SliceReader {
@@ -241,14 +246,17 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
     /// A slice longer than [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE) parks
     /// [`ProtobufError::SizeLimitExceeded`] until the first [`Iterator::next`]
     /// or [`FieldIterFromSlice::skip_until`] moves it out. That call does not
-    /// read. Another call after an `Err` is unspecified. A wire-type `Len`
-    /// prefix longer than [`MAX_STRING_SIZE`](crate::MAX_STRING_SIZE) is the
+    /// read. Later `next` yields `None`. Later `skip_until` returns that
+    /// error and does not read. A wire error is moved out on the call that
+    /// produced it. Another call after a wire error is unspecified. A
+    /// wire-type `Len` prefix longer than [`MAX_STRING_SIZE`](crate::MAX_STRING_SIZE) is the
     /// same size error after the tag and length varint are consumed.
     fn read_protobuf_fields(&self) -> FieldIterFromSlice<'_> {
         let slice = self.as_ref();
         FieldIterFromSlice {
             slice,
             error: ensure_message_size(slice.len()).err(),
+            reported_limit: None,
         }
     }
 }
@@ -518,6 +526,7 @@ mod tests {
                 value: 3,
                 limit: MAX_MESSAGE_SIZE,
             }),
+            reported_limit: None,
         };
         let err = fields.next().unwrap().unwrap_err();
         assert!(matches!(
@@ -525,6 +534,16 @@ mod tests {
             ProtobufError::SizeLimitExceeded {
                 value: 3,
                 limit: MAX_MESSAGE_SIZE
+            }
+        ));
+        assert!(fields.next().is_none());
+        assert_eq!(fields.slice, &bytes);
+        let skip = fields.skip_until(|_| Ok(true)).unwrap_err();
+        assert!(matches!(
+            skip,
+            ProtobufError::SizeLimitExceeded {
+                value: 3,
+                limit: MAX_MESSAGE_SIZE,
             }
         ));
         assert_eq!(fields.slice, &bytes);
