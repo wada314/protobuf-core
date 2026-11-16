@@ -21,7 +21,7 @@ use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
 use crate::wire_format::{
-    MAX_MESSAGE_SIZE, MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK, WireType,
+    MAX_VARINT_BYTES, VARINT_CONTINUATION_BIT, VARINT_PAYLOAD_MASK, WireType,
 };
 use crate::{ProtobufError, Result};
 use ::std::convert::{AsMut, AsRef};
@@ -193,7 +193,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             body: self,
             handler: VecLenPayload,
             failed: false,
-            oversized: false,
+            rejected: None,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -212,7 +212,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
             body: self,
             handler,
             failed: false,
-            oversized: false,
+            rejected: None,
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -495,7 +495,7 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
 /// Len body bytes discarded after the handler). Fields never yielded leave
 /// their bytes in the held [`LenBody`].
 ///
-/// After a yielded [`Err`], further [`next()`](Iterator::next) calls return
+/// After a wire parse [`Err`], further [`next()`](Iterator::next) calls return
 /// [`None`] (fused on error). Do not call [`skip_until()`](Self::skip_until) /
 /// [`copy_until()`](Self::copy_until) / [`group_body()`](Self::group_body) after
 /// that either — they are not fused and may mis-parse a desynced cursor. The
@@ -503,17 +503,20 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
 /// panic that skipped discard); abandon the iterator.
 ///
 /// A top-level budget above [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE) is
-/// [`ProtobufError::SizeLimitExceeded`] from the first `next` / `skip_until` /
-/// `copy_until`, and that call does not read. Nested iterators from
-/// [`LenBody::fields()`] are not checked again: their body already passed
-/// [`MAX_STRING_SIZE`](crate::MAX_STRING_SIZE).
+/// stored as [`ProtobufError::SizeLimitExceeded`]. While that error is
+/// present, [`next()`](Iterator::next), [`skip_until()`](Self::skip_until),
+/// and [`copy_until()`](Self::copy_until) keep returning it and do not read.
+/// Nested iterators from [`LenBody::fields()`] store no error: their body
+/// already passed [`MAX_STRING_SIZE`](crate::MAX_STRING_SIZE).
 pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
     body: T,
     handler: F,
     failed: bool,
-    /// Top-level `len` was above [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE).
-    /// Nested iterators leave this `false`.
-    oversized: bool,
+    /// Present when every read must fail with this error and consume nothing.
+    /// Top-level budgets above `MAX_MESSAGE_SIZE` store
+    /// [`ProtobufError::SizeLimitExceeded`]. Nested iterators leave this
+    /// [`None`].
+    rejected: Option<ProtobufError>,
     _marker: ::std::marker::PhantomData<&'a mut R>,
 }
 
@@ -535,7 +538,7 @@ where
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        self.reject_oversized_budget()?;
+        self.rejection()?;
         WireCursor::skip_until(self.body.as_mut(), pred)
     }
 
@@ -566,24 +569,16 @@ where
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
-        self.reject_oversized_budget()?;
+        self.rejection()?;
         WireCursor::copy_until(self.body.as_mut(), pred, out)
     }
 
-    /// Top-level budget above `MAX_MESSAGE_SIZE`: report it and do not read.
-    ///
-    /// Marks the iterator failed so a later `next()` fuses to `None`.
-    /// `skip_until()` / `copy_until()` keep returning this error while
-    /// `oversized` stays set, so they do not parse the rejected budget.
-    fn reject_oversized_budget(&mut self) -> Result<()> {
-        if !self.oversized {
-            return Ok(());
+    /// Fail with the stored rejection. The error stays stored.
+    fn rejection(&self) -> Result<()> {
+        match &self.rejected {
+            Some(err) => Err(err.repeat()),
+            None => Ok(()),
         }
-        self.failed = true;
-        Err(ProtobufError::SizeLimitExceeded {
-            value: u64::from(self.body.as_ref().len()),
-            limit: MAX_MESSAGE_SIZE,
-        })
     }
 
     /// Bytes still in this iterator's message / body length.
@@ -608,11 +603,11 @@ where
     type Item = Result<Field<F::Payload>>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if let Err(err) = self.rejection() {
+            return Some(Err(err));
+        }
         if self.failed || self.body.as_ref().remaining == 0 {
             return None;
-        }
-        if let Err(err) = self.reject_oversized_budget() {
-            return Some(Err(err));
         }
         match self.body.as_mut().parse_field_with(&mut self.handler) {
             Ok(field) => Some(Ok(field)),
@@ -669,9 +664,10 @@ pub trait ReadExtProtobuf: Read {
     ///
     /// Borrows `self` and reads fields from the next `len` bytes (the message).
     /// Length-delimited payloads are `Vec<u8>`.
-    /// `len > MAX_MESSAGE_SIZE` is [`ProtobufError::SizeLimitExceeded`] from the
-    /// first [`Iterator::next`], [`FieldIter::skip_until`], or
-    /// [`FieldIter::copy_until`] (debug and release). That call does not read.
+    /// `len > MAX_MESSAGE_SIZE` is stored as
+    /// [`ProtobufError::SizeLimitExceeded`]. [`Iterator::next`],
+    /// [`FieldIter::skip_until`], and [`FieldIter::copy_until`] keep returning
+    /// it and do not read (debug and release).
     ///
     /// # How `self` is consumed
     ///
@@ -753,7 +749,7 @@ where
             body: LenBody::new(self, len),
             handler: VecLenPayload,
             failed: false,
-            oversized: crate::wire_format::ensure_message_size(len as usize).is_err(),
+            rejected: crate::wire_format::ensure_message_size(len as usize).err(),
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -771,7 +767,7 @@ where
             body: LenBody::new(self, len),
             handler,
             failed: false,
-            oversized: crate::wire_format::ensure_message_size(len as usize).is_err(),
+            rejected: crate::wire_format::ensure_message_size(len as usize).err(),
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -1834,7 +1830,12 @@ mod len_payload {
                 ProtobufError::SizeLimitExceeded { value, limit }
                     if value == u64::from(budget) && limit == MAX_MESSAGE_SIZE
             ));
-            assert!(fields.next().is_none());
+            let again = fields.next().unwrap().unwrap_err();
+            assert!(matches!(
+                again,
+                ProtobufError::SizeLimitExceeded { value, limit }
+                    if value == u64::from(budget) && limit == MAX_MESSAGE_SIZE
+            ));
             let skip = fields.skip_until(|_| Ok(true)).unwrap_err();
             assert!(matches!(
                 skip,

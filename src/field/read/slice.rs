@@ -12,7 +12,7 @@ use crate::field::FieldValue;
 use crate::field_number::FieldNumber;
 use crate::tag::Tag;
 use crate::varint::Varint;
-use crate::wire_format::{MAX_MESSAGE_SIZE, MAX_VARINT_BYTES};
+use crate::wire_format::MAX_VARINT_BYTES;
 use crate::{ProtobufError, Result};
 use ::std::convert::AsRef;
 use ::std::io::Write;
@@ -91,10 +91,10 @@ impl<'a> BufWireCursor<&'a [u8]> for SliceReader<'a, '_> {
 /// Iterator for reading raw protobuf fields sequentially from a byte slice.
 pub struct FieldIterFromSlice<'a> {
     slice: &'a [u8],
-    /// `slice` was longer than [`MAX_MESSAGE_SIZE`] when this iterator was built.
-    oversized: bool,
-    /// Set after the oversized budget has been reported from [`Iterator::next`].
-    failed: bool,
+    /// Present when every read must fail with this error and consume nothing.
+    /// A slice longer than `MAX_MESSAGE_SIZE` stores
+    /// [`ProtobufError::SizeLimitExceeded`].
+    rejected: Option<ProtobufError>,
 }
 
 impl<'a> FieldIterFromSlice<'a> {
@@ -124,26 +124,19 @@ impl<'a> FieldIterFromSlice<'a> {
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        self.reject_oversized()?;
+        self.rejection()?;
         SliceReader {
             slice: &mut self.slice,
         }
         .skip_until(pred)
     }
 
-    /// Slice longer than `MAX_MESSAGE_SIZE`: report it and do not read.
-    ///
-    /// `next()` fuses to `None` after the first report. `skip_until()` keeps
-    /// returning this error, so it does not parse the rejected slice.
-    fn reject_oversized(&mut self) -> Result<()> {
-        if !self.oversized {
-            return Ok(());
+    /// Fail with the stored rejection. The error stays stored.
+    fn rejection(&self) -> Result<()> {
+        match &self.rejected {
+            Some(err) => Err(err.repeat()),
+            None => Ok(()),
         }
-        self.failed = true;
-        Err(ProtobufError::SizeLimitExceeded {
-            value: u64::try_from(self.slice.len()).unwrap_or(u64::MAX),
-            limit: MAX_MESSAGE_SIZE,
-        })
     }
 
     /// Advance past fields until `pred` returns `Ok(true)`, returning the exact
@@ -199,10 +192,7 @@ impl<'a> Iterator for FieldIterFromSlice<'a> {
     type Item = Result<Field<&'a [u8]>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.failed {
-            return None;
-        }
-        if let Err(err) = self.reject_oversized() {
+        if let Err(err) = self.rejection() {
             return Some(Err(err));
         }
         let mut reader = SliceReader {
@@ -256,17 +246,16 @@ pub trait AsRefExtProtobuf: AsRef<[u8]> {
     /// the input slice.
     ///
     /// A slice longer than [`MAX_MESSAGE_SIZE`](crate::MAX_MESSAGE_SIZE) is
-    /// [`ProtobufError::SizeLimitExceeded`] from the first
-    /// [`Iterator::next`] or [`FieldIterFromSlice::skip_until`]. That call
-    /// does not read. A wire-type `Len` prefix longer than
+    /// stored as [`ProtobufError::SizeLimitExceeded`]. [`Iterator::next`] and
+    /// [`FieldIterFromSlice::skip_until`] keep returning it and do not read.
+    /// A wire-type `Len` prefix longer than
     /// [`MAX_STRING_SIZE`](crate::MAX_STRING_SIZE) is the same error after
     /// the tag and length varint are consumed.
     fn read_protobuf_fields(&self) -> FieldIterFromSlice<'_> {
         let slice = self.as_ref();
         FieldIterFromSlice {
             slice,
-            oversized: crate::wire_format::ensure_message_size(slice.len()).is_err(),
-            failed: false,
+            rejected: crate::wire_format::ensure_message_size(slice.len()).err(),
         }
     }
 }
@@ -517,23 +506,24 @@ mod tests {
 
         let bytes = [0x08u8, 0x01];
         let fields = bytes.read_protobuf_fields();
-        assert!(!fields.oversized);
-        assert!(!fields.failed);
+        assert!(fields.rejected.is_none());
     }
 
     #[test]
-    fn oversized_slice_flag_reports_without_reading() {
+    fn stored_slice_rejection_reports_without_reading() {
         use super::FieldIterFromSlice;
         use crate::{MAX_MESSAGE_SIZE, ProtobufError};
 
         // A real slice longer than `MAX_MESSAGE_SIZE` is not allocated here.
         // `ensure_message_size` covers that predicate; this locks the iterator
-        // once the flag is set the way `read_protobuf_fields` sets it.
+        // once `read_protobuf_fields` has stored the error.
         let bytes = [0x08u8, 0x01, 0xAA];
         let mut fields = FieldIterFromSlice {
             slice: &bytes,
-            oversized: true,
-            failed: false,
+            rejected: Some(ProtobufError::SizeLimitExceeded {
+                value: 3,
+                limit: MAX_MESSAGE_SIZE,
+            }),
         };
         let err = fields.next().unwrap().unwrap_err();
         assert!(matches!(
@@ -543,7 +533,14 @@ mod tests {
                 limit: MAX_MESSAGE_SIZE
             }
         ));
-        assert!(fields.next().is_none());
+        let again = fields.next().unwrap().unwrap_err();
+        assert!(matches!(
+            again,
+            ProtobufError::SizeLimitExceeded {
+                value: 3,
+                limit: MAX_MESSAGE_SIZE
+            }
+        ));
         assert_eq!(fields.slice, &bytes);
         let skip = fields.skip_until(|_| Ok(true)).unwrap_err();
         assert!(matches!(

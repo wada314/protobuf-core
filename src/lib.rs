@@ -222,11 +222,11 @@ pub enum ProtobufError {
     /// (string, bytes, embedded message, or packed repeated — this crate does
     /// not distinguish them). `value` is the rejected length in bytes.
     ///
-    /// A top-level rejection is reported from the first
+    /// A top-level rejection is stored on the iterator.
     /// [`FieldIter::next()`] / [`FieldIter::skip_until()`] /
-    /// [`FieldIter::copy_until()`] (or the [`FieldIterFromSlice`] equivalents)
-    /// and consumes no bytes. Further [`FieldIter::next()`] calls then return
-    /// [`None`]. A `Len`-prefix rejection consumes the tag and the length
+    /// [`FieldIter::copy_until()`] (and the [`FieldIterFromSlice`] equivalents)
+    /// keep returning that error and consume no bytes. A `Len`-prefix rejection
+    /// consumes the tag and the length
     /// varint, then leaves the payload unread. A length above `u32::MAX` is
     /// [`VarintDowncastOutOfRange`](Self::VarintDowncastOutOfRange) instead.
     /// A length within the limit whose payload bytes are missing is
@@ -247,6 +247,14 @@ pub enum ProtobufError {
     ///         ..
     ///     }
     /// ));
+    /// let again = fields.next().unwrap().unwrap_err();
+    /// assert!(matches!(
+    ///     again,
+    ///     ProtobufError::SizeLimitExceeded {
+    ///         limit: MAX_MESSAGE_SIZE,
+    ///         ..
+    ///     }
+    /// ));
     /// drop(fields);
     /// assert_eq!(reader.position(), 0);
     /// ```
@@ -257,6 +265,38 @@ pub enum ProtobufError {
 impl From<Infallible> for ProtobufError {
     fn from(_: Infallible) -> Self {
         unreachable!()
+    }
+}
+
+impl ProtobufError {
+    /// Another owned copy of this error.
+    ///
+    /// Field iterators store one rejection and return it from every read.
+    /// [`IoError`](Self::IoError) keeps the kind and the display text. Its
+    /// source chain is not copied. Iterators only store
+    /// [`SizeLimitExceeded`](Self::SizeLimitExceeded).
+    pub(crate) fn repeat(&self) -> Self {
+        match self {
+            Self::FieldNumberOutOfRange { value } => Self::FieldNumberOutOfRange { value: *value },
+            Self::InvalidWireType { value } => Self::InvalidWireType { value: *value },
+            Self::MismatchedEndGroup { expected, got } => Self::MismatchedEndGroup {
+                expected: *expected,
+                got: *got,
+            },
+            Self::VarintDowncastOutOfRange { value, target_type } => {
+                Self::VarintDowncastOutOfRange {
+                    value: *value,
+                    target_type,
+                }
+            }
+            Self::VarintTooLong => Self::VarintTooLong,
+            Self::UnexpectedEof => Self::UnexpectedEof,
+            Self::IoError(err) => Self::IoError(::std::io::Error::new(err.kind(), err.to_string())),
+            Self::SizeLimitExceeded { value, limit } => Self::SizeLimitExceeded {
+                value: *value,
+                limit: *limit,
+            },
+        }
     }
 }
 
