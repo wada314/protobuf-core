@@ -12,6 +12,7 @@
 mod group;
 mod len_body;
 mod slice;
+mod sticky_error;
 pub(crate) mod wire;
 
 pub use self::group::{GroupBody, until_group_ends};

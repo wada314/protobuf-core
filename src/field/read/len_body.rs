@@ -15,6 +15,7 @@ use super::group::until_group_ends;
 #[cfg(doc)]
 #[allow(unused_imports)]
 use super::slice::FieldIterFromSlice;
+use super::sticky_error::StickyError;
 use super::wire::WireCursor;
 use crate::field::{Field, FieldValue};
 use crate::field_number::FieldNumber;
@@ -192,7 +193,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         FieldIter {
             body: self,
             handler: VecLenPayload,
-            rejected: None,
+            error: StickyError::empty(),
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -210,7 +211,7 @@ impl<'a, R: Read + ?Sized> LenBody<'a, R> {
         FieldIter {
             body: self,
             handler,
-            rejected: None,
+            error: StickyError::empty(),
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -503,9 +504,9 @@ impl<'a, R: Read + ?Sized> WireCursor for LenBody<'a, R> {
 pub struct FieldIter<'a, R: ?Sized, T, F = VecLenPayload> {
     body: T,
     handler: F,
-    /// Error from a read, or a budget past `MAX_MESSAGE_SIZE`. Later reads
+    /// First read error, or a budget past `MAX_MESSAGE_SIZE`. Later reads
     /// return it and do not continue.
-    rejected: Option<ProtobufError>,
+    error: StickyError,
     _marker: ::std::marker::PhantomData<&'a mut R>,
 }
 
@@ -527,11 +528,9 @@ where
     where
         P: FnMut(Tag) -> Result<bool>,
     {
-        self.rejection()?;
-        match WireCursor::skip_until(self.body.as_mut(), pred) {
-            Ok(()) => Ok(()),
-            Err(err) => Err(self.remember(err)),
-        }
+        self.error.check()?;
+        let skipped = WireCursor::skip_until(self.body.as_mut(), pred);
+        self.error.capture(skipped)
     }
 
     /// Iterate fields until the matching end-group for `field_number`.
@@ -561,26 +560,9 @@ where
         P: FnMut(Tag) -> Result<bool>,
         W: Write,
     {
-        self.rejection()?;
-        match WireCursor::copy_until(self.body.as_mut(), pred, out) {
-            Ok(n) => Ok(n),
-            Err(err) => Err(self.remember(err)),
-        }
-    }
-
-    /// Fail with the stored rejection. The error stays stored.
-    fn rejection(&self) -> Result<()> {
-        match &self.rejected {
-            Some(err) => Err(err.repeat()),
-            None => Ok(()),
-        }
-    }
-
-    /// Keep `err` and return another owned copy for this call.
-    fn remember(&mut self, err: ProtobufError) -> ProtobufError {
-        let shown = err.repeat();
-        self.rejected = Some(err);
-        shown
+        self.error.check()?;
+        let copied = WireCursor::copy_until(self.body.as_mut(), pred, out);
+        self.error.capture(copied)
     }
 
     /// Bytes still in this iterator's message / body length.
@@ -605,16 +587,14 @@ where
     type Item = Result<Field<F::Payload>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Err(err) = self.rejection() {
+        if let Err(err) = self.error.check() {
             return Some(Err(err));
         }
         if self.body.as_ref().remaining == 0 {
             return None;
         }
-        match self.body.as_mut().parse_field_with(&mut self.handler) {
-            Ok(field) => Some(Ok(field)),
-            Err(err) => Some(Err(self.remember(err))),
-        }
+        let parsed = self.body.as_mut().parse_field_with(&mut self.handler);
+        Some(self.error.capture(parsed))
     }
 }
 
@@ -749,7 +729,7 @@ where
         FieldIter {
             body: LenBody::new(self, len),
             handler: VecLenPayload,
-            rejected: crate::wire_format::ensure_message_size(len as usize).err(),
+            error: StickyError::from_message_len(len as usize),
             _marker: ::std::marker::PhantomData,
         }
     }
@@ -766,7 +746,7 @@ where
         FieldIter {
             body: LenBody::new(self, len),
             handler,
-            rejected: crate::wire_format::ensure_message_size(len as usize).err(),
+            error: StickyError::from_message_len(len as usize),
             _marker: ::std::marker::PhantomData,
         }
     }

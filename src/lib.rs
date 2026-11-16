@@ -268,37 +268,5 @@ impl From<Infallible> for ProtobufError {
     }
 }
 
-impl ProtobufError {
-    /// Another owned copy of this error.
-    ///
-    /// Field iterators store one rejection and return it from every read.
-    /// [`IoError`](Self::IoError) keeps the kind and the display text. Its
-    /// source chain is not copied. Iterators only store
-    /// [`SizeLimitExceeded`](Self::SizeLimitExceeded).
-    pub(crate) fn repeat(&self) -> Self {
-        match self {
-            Self::FieldNumberOutOfRange { value } => Self::FieldNumberOutOfRange { value: *value },
-            Self::InvalidWireType { value } => Self::InvalidWireType { value: *value },
-            Self::MismatchedEndGroup { expected, got } => Self::MismatchedEndGroup {
-                expected: *expected,
-                got: *got,
-            },
-            Self::VarintDowncastOutOfRange { value, target_type } => {
-                Self::VarintDowncastOutOfRange {
-                    value: *value,
-                    target_type,
-                }
-            }
-            Self::VarintTooLong => Self::VarintTooLong,
-            Self::UnexpectedEof => Self::UnexpectedEof,
-            Self::IoError(err) => Self::IoError(::std::io::Error::new(err.kind(), err.to_string())),
-            Self::SizeLimitExceeded { value, limit } => Self::SizeLimitExceeded {
-                value: *value,
-                limit: *limit,
-            },
-        }
-    }
-}
-
 /// Custom Result type for protobuf operations.
 pub type Result<T> = ::std::result::Result<T, ProtobufError>;
