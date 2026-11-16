@@ -258,6 +258,7 @@ impl<T> AsRefExtProtobuf for T where T: AsRef<[u8]> + ?Sized {}
 #[cfg(test)]
 mod tests {
     use crate::field::FieldValue;
+    use crate::varint::Varint;
 
     #[test]
     fn test_as_ref_ext_read_varint_field() {
@@ -488,7 +489,7 @@ mod tests {
 
     fn len_field_claiming(payload_len: u64) -> Vec<u8> {
         let mut bytes = vec![0x0Au8];
-        let (encoded, n) = crate::Varint::from_uint64(payload_len).encode();
+        let (encoded, n) = Varint::from_uint64(payload_len).encode();
         bytes.extend_from_slice(&encoded[..n]);
         bytes
     }

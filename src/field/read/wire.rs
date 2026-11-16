@@ -3,7 +3,7 @@
 use crate::field::{Field, FieldValue};
 use crate::tag::Tag;
 use crate::varint::Varint;
-use crate::wire_format::{MAX_VARINT_BYTES, WireType};
+use crate::wire_format::{MAX_VARINT_BYTES, WireType, ensure_len_payload_size};
 use crate::{ProtobufError, Result};
 use ::std::io::Write;
 
@@ -63,7 +63,7 @@ pub(crate) trait WireCursor {
     #[inline]
     fn read_len_prefix(&mut self) -> Result<u32> {
         let length = self.read_varint()?.try_to_uint32()?;
-        crate::wire_format::ensure_len_payload_size(length)
+        ensure_len_payload_size(length)
     }
 
     /// Read exactly `N` bytes (fixed-width wire types).
@@ -157,8 +157,7 @@ pub(crate) trait WireCursor {
             WireType::Len => {
                 let (len_varint, len_raw) = self.read_varint_with_raw(&mut buf)?;
                 written += write_all_len(out, len_raw)?;
-                let length =
-                    crate::wire_format::ensure_len_payload_size(len_varint.try_to_uint32()?)?;
+                let length = ensure_len_payload_size(len_varint.try_to_uint32()?)?;
                 written += self.copy_bytes(length, out)?;
             }
             WireType::SGroup | WireType::EGroup => {}
