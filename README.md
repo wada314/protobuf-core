@@ -52,6 +52,10 @@ For a streaming `std::io::Read` (you pass the message length yourself), see
 `ReadExtProtobuf` on [docs.rs](https://docs.rs/protobuf-core). Groups,
 nested messages, and custom Len handlers are documented there too.
 
+Readers reject a message larger than 2 GiB (`MAX_MESSAGE_SIZE`) and a
+length-delimited payload larger than 2 GiB (`MAX_STRING_SIZE`) with
+`ProtobufError::SizeLimitExceeded`. A length equal to either limit is allowed.
+
 ### Writing Fields
 
 ```rust

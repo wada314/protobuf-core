@@ -4,6 +4,7 @@
 //! implementing Protocol Buffers encoding and decoding according to the
 //! official wire format specification.
 
+use crate::ProtobufError;
 use crate::field_number::FieldNumber;
 use ::std::convert::TryFrom;
 
@@ -51,7 +52,7 @@ impl TryFrom<u8> for WireType {
             3 => Ok(WireType::SGroup),
             4 => Ok(WireType::EGroup),
             5 => Ok(WireType::Int32),
-            _ => Err(crate::ProtobufError::InvalidWireType { value }),
+            _ => Err(ProtobufError::InvalidWireType { value }),
         }
     }
 }
@@ -65,10 +66,56 @@ pub const MAX_FIELD_NUMBER: FieldNumber = FieldNumber::MAX;
 pub const MIN_FIELD_NUMBER: FieldNumber = FieldNumber::MIN;
 
 /// Maximum message size when serialized (2 GiB).
+///
+/// [`crate::ReadExtProtobuf::read_protobuf_fields()`] and
+/// [`crate::AsRefExtProtobuf::read_protobuf_fields()`] reject a larger budget
+/// or slice with [`ProtobufError::SizeLimitExceeded`]. The check runs on the
+/// first read (`next`, `skip_until`, `copy_until`), and that read consumes no
+/// bytes. A length equal to this limit is allowed.
 pub const MAX_MESSAGE_SIZE: usize = 2 * 1024 * 1024 * 1024;
 
-/// Maximum string/bytes field size (2 GiB).
+/// Maximum length-delimited payload size (2 GiB).
+///
+/// Applies to every wire-type `Len` length prefix. This crate does not
+/// distinguish string, bytes, embedded message, and packed repeated. A larger
+/// decoded length is [`ProtobufError::SizeLimitExceeded`] after the tag and
+/// the length varint are consumed. A prefix above `u32::MAX` is
+/// [`ProtobufError::VarintDowncastOutOfRange`] instead. A prefix within this
+/// limit whose payload is missing is [`ProtobufError::UnexpectedEof`].
+/// A length equal to this limit is allowed.
 pub const MAX_STRING_SIZE: usize = 2 * 1024 * 1024 * 1024;
+
+/// Reject a top-level message budget or slice longer than [`MAX_MESSAGE_SIZE`].
+#[inline]
+pub(crate) fn ensure_message_size(len: usize) -> crate::Result<()> {
+    if len > MAX_MESSAGE_SIZE {
+        Err(ProtobufError::SizeLimitExceeded {
+            value: u64::try_from(len).unwrap_or(u64::MAX),
+            limit: MAX_MESSAGE_SIZE,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+/// Reject a wire-type `Len` payload longer than [`MAX_STRING_SIZE`].
+///
+/// Call after `Varint::try_to_uint32()` so a prefix above `u32::MAX` stays
+/// [`ProtobufError::VarintDowncastOutOfRange`].
+#[inline]
+pub(crate) fn ensure_len_payload_size(len: u32) -> crate::Result<u32> {
+    // `u32` lengths fit in `usize` on every target that can hold `MAX_STRING_SIZE` (2 GiB).
+    #[allow(clippy::cast_possible_truncation)]
+    let len_usize = len as usize;
+    if len_usize > MAX_STRING_SIZE {
+        Err(ProtobufError::SizeLimitExceeded {
+            value: u64::from(len),
+            limit: MAX_STRING_SIZE,
+        })
+    } else {
+        Ok(len)
+    }
+}
 
 /// Bit mask for extracting the wire type from a tag.
 ///
@@ -151,7 +198,7 @@ mod tests {
         // Test invalid wire types
         let result = WireType::try_from(6);
         assert!(result.is_err());
-        if let Err(crate::ProtobufError::InvalidWireType { value }) = result {
+        if let Err(ProtobufError::InvalidWireType { value }) = result {
             assert_eq!(value, 6);
         } else {
             panic!("Expected InvalidWireType error");
@@ -159,11 +206,36 @@ mod tests {
 
         let result = WireType::try_from(255);
         assert!(result.is_err());
-        if let Err(crate::ProtobufError::InvalidWireType { value }) = result {
+        if let Err(ProtobufError::InvalidWireType { value }) = result {
             assert_eq!(value, 255);
         } else {
             panic!("Expected InvalidWireType error");
         }
+    }
+
+    #[test]
+    fn size_limits_are_inclusive() {
+        assert!(ensure_message_size(MAX_MESSAGE_SIZE).is_ok());
+        let over_message = MAX_MESSAGE_SIZE + 1;
+        assert!(matches!(
+            ensure_message_size(over_message),
+            Err(ProtobufError::SizeLimitExceeded { value, limit })
+                if value == u64::try_from(over_message).unwrap() && limit == MAX_MESSAGE_SIZE
+        ));
+
+        let max_string = u32::try_from(MAX_STRING_SIZE).unwrap();
+        assert_eq!(ensure_len_payload_size(max_string).unwrap(), max_string);
+        let over_string = max_string + 1;
+        assert!(matches!(
+            ensure_len_payload_size(over_string),
+            Err(ProtobufError::SizeLimitExceeded { value, limit })
+                if value == u64::from(over_string) && limit == MAX_STRING_SIZE
+        ));
+        assert!(matches!(
+            ensure_len_payload_size(u32::MAX),
+            Err(ProtobufError::SizeLimitExceeded { value, limit })
+                if value == u64::from(u32::MAX) && limit == MAX_STRING_SIZE
+        ));
     }
 
     #[test]

@@ -64,10 +64,9 @@ pub fn until_group_ends(field_number: FieldNumber) -> impl FnMut(Tag) -> Result<
 /// `None`, wrap with [`Iterator::fuse()`] (for example
 /// `fields.group_body(n).fuse()`).
 ///
-/// After a yielded [`Err`], further `next()` calls are likewise unspecified
-/// (the cursor may already have advanced). Typical `Result`-item consumers
-/// stop at the first error (`?`, `collect::<Result<_, _>>()`,
-/// `try_for_each`, …); this adapter does not fuse on `Err`.
+/// After a yielded [`Err`], another `next()` is unspecified. The cursor may
+/// already have advanced. Typical callers stop at the first error (`?`,
+/// `collect::<Result<_, _>>()`, `try_for_each`).
 ///
 /// # Nesting model (depth only)
 ///
