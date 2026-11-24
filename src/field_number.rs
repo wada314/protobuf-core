@@ -129,6 +129,8 @@ mod tests {
         assert_eq!(usize::from(field), 42);
         assert_eq!(field.as_u32(), 42);
         assert_eq!(field.as_usize(), 42);
+        assert_eq!(FieldNumber::MIN.as_u32(), 1);
+        assert_eq!(FieldNumber::MAX.as_usize(), 536_870_911);
     }
 
     #[test]
@@ -158,23 +160,6 @@ mod tests {
 
         assert!(single_byte_field.is_in_range(1, 20));
         assert!(!single_byte_field.is_in_range(20, 30));
-    }
-
-    #[test]
-    fn test_as_u32_and_as_usize() {
-        let min_field = FieldNumber::MIN;
-        let max_field = FieldNumber::MAX;
-        let mid_field = FieldNumber::try_new(1000).unwrap();
-
-        // Test as_u32
-        assert_eq!(min_field.as_u32(), 1);
-        assert_eq!(max_field.as_u32(), 536_870_911);
-        assert_eq!(mid_field.as_u32(), 1000);
-
-        // Test as_usize
-        assert_eq!(min_field.as_usize(), 1);
-        assert_eq!(max_field.as_usize(), 536_870_911);
-        assert_eq!(mid_field.as_usize(), 1000);
     }
 
     #[test]

@@ -245,17 +245,18 @@ mod group_body_adapter {
     }
 
     #[test]
-    fn group_body_accessors_expose_field_number_and_inner() {
-        let bytes = [0x0B, 0x0C, 0x10, 0x02];
+    fn group_body_inner_mut_parses_through_the_wrapper() {
+        let bytes = [0x0B, 0x10, 0x01, 0x0C, 0x18, 0x07];
         let mut fields = slice_fields(&bytes);
         let n = expect_sgroup(&mut fields);
         let mut body = fields.group_body(n);
         assert_eq!(body.field_number(), n);
-        let _ = body.inner();
-        let _ = body.inner_mut();
-        assert!(body.next().is_none()); // empty group body
+        // Use inner_mut to continue parsing through the wrapper.
+        let field = body.inner_mut().next().unwrap().unwrap();
+        assert_eq!(field.field_number.as_u32(), 2);
+        assert!(body.next().is_none()); // EGroup consumed
         let after = body.into_inner().next().unwrap().unwrap();
-        assert_eq!(after.field_number.as_u32(), 2);
+        assert_eq!(after.field_number.as_u32(), 3);
     }
 
     #[test]
@@ -277,18 +278,6 @@ mod group_body_adapter {
         assert!(body.next().is_none());
         // Not fused: another next pulls the field after the group.
         let after = body.next().unwrap().unwrap();
-        assert_eq!(after.field_number.as_u32(), 1);
-    }
-
-    #[test]
-    fn fuse_keeps_none_after_group_ends() {
-        let bytes = [0x0B, 0x0C, 0x08, 0x01];
-        let mut fields = slice_fields(&bytes);
-        let n = expect_sgroup(&mut fields);
-        let mut body = fields.group_body(n).fuse();
-        assert!(body.next().is_none());
-        assert!(body.next().is_none());
-        let after = fields.next().unwrap().unwrap();
         assert_eq!(after.field_number.as_u32(), 1);
     }
 

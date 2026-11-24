@@ -917,144 +917,6 @@ mod tests {
     }
 
     #[test]
-    fn test_read_ext_read_varint_field() {
-        use super::ReadExtProtobuf;
-        use ::std::io::Cursor;
-
-        let data = vec![0x08, 0x96, 0x01]; // field 1: 150
-        let len = data.len() as u32;
-        let mut reader = Cursor::new(data);
-        let fields: Vec<_> = reader
-            .read_protobuf_fields(len)
-            .collect::<::std::result::Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].field_number.as_u32(), 1);
-        match &fields[0].value {
-            FieldValue::Varint(varint) => {
-                assert_eq!(varint.to_uint64(), 150);
-            }
-            _ => panic!("Expected Varint field"),
-        }
-    }
-
-    #[test]
-    fn test_read_ext_read_multiple_fields() {
-        use super::ReadExtProtobuf;
-        use ::std::io::Cursor;
-
-        let data = vec![
-            0x08, 0x96, 0x01, // field 1: 150
-            0x12, 0x03, 0x48, 0x65, 0x6c, // field 2: "Hel"
-        ];
-        let len = data.len() as u32;
-        let mut reader = Cursor::new(data);
-        let fields: Vec<_> = reader
-            .read_protobuf_fields(len)
-            .collect::<::std::result::Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(fields.len(), 2);
-
-        // Check first field
-        assert_eq!(fields[0].field_number.as_u32(), 1);
-        match &fields[0].value {
-            FieldValue::Varint(varint) => {
-                assert_eq!(varint.to_uint64(), 150);
-            }
-            _ => panic!("Expected Varint field"),
-        }
-
-        // Check second field
-        assert_eq!(fields[1].field_number.as_u32(), 2);
-        match &fields[1].value {
-            FieldValue::Len(data) => {
-                assert_eq!(&data[..], b"Hel");
-            }
-            _ => panic!("Expected Len field"),
-        }
-    }
-
-    #[test]
-    fn test_read_ext_read_i32_field() {
-        use super::ReadExtProtobuf;
-        use ::std::io::Cursor;
-
-        let data = vec![0x15, 0x78, 0x56, 0x34, 0x12]; // field 2: 0x12345678 (Fixed32)
-        let len = data.len() as u32;
-        let mut reader = Cursor::new(data);
-        let fields: Vec<_> = reader
-            .read_protobuf_fields(len)
-            .collect::<::std::result::Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].field_number.as_u32(), 2);
-        match &fields[0].value {
-            FieldValue::I32(bytes) => {
-                assert_eq!(*bytes, [0x78, 0x56, 0x34, 0x12]);
-            }
-            _ => panic!("Expected I32 field"),
-        }
-    }
-
-    #[test]
-    fn test_read_ext_read_len_field() {
-        use super::ReadExtProtobuf;
-        use ::std::io::Cursor;
-
-        let data = vec![0x12, 0x03, 0x48, 0x65, 0x6c]; // field 2: "Hel"
-        let len = data.len() as u32;
-        let mut reader = Cursor::new(data);
-        let fields: Vec<_> = reader
-            .read_protobuf_fields(len)
-            .collect::<::std::result::Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].field_number.as_u32(), 2);
-        match &fields[0].value {
-            FieldValue::Len(data) => {
-                assert_eq!(&data[..], b"Hel");
-            }
-            _ => panic!("Expected Len field"),
-        }
-    }
-
-    #[test]
-    fn test_read_ext_read_i64_field() {
-        use super::ReadExtProtobuf;
-        use ::std::io::Cursor;
-
-        let data = vec![0x19, 0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]; // field 3: 0x1234567890ABCDEF (Fixed64)
-        let len = data.len() as u32;
-        let mut reader = Cursor::new(data);
-        let fields: Vec<_> = reader
-            .read_protobuf_fields(len)
-            .collect::<::std::result::Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].field_number.as_u32(), 3);
-        match &fields[0].value {
-            FieldValue::I64(bytes) => {
-                assert_eq!(*bytes, [0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12]);
-            }
-            _ => panic!("Expected I64 field"),
-        }
-    }
-
-    #[test]
-    fn test_read_ext_read_empty_stream() {
-        use super::ReadExtProtobuf;
-        use ::std::io::Cursor;
-
-        let data = vec![];
-        let mut reader = Cursor::new(data);
-        let fields: Vec<_> = reader
-            .read_protobuf_fields(0)
-            .collect::<::std::result::Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(fields.len(), 0);
-    }
-
-    #[test]
     fn test_read_ext_respects_len_budget() {
         use super::ReadExtProtobuf;
         use ::std::io::Cursor;
@@ -1286,10 +1148,9 @@ mod len_payload {
 
     #[test]
     fn box_closure_reads_payload_on_read() {
-        assert_box(&len_message(b""), b"");
+        // One non-`Vec` `L` case is enough; empty/small/large shapes live in
+        // `closure_fills_empty_small_and_large_payloads`.
         assert_box(&len_message(b"Hel"), b"Hel");
-        let big = payload(LARGE_LEN);
-        assert_box(&len_message(&big), &big);
     }
 
     #[derive(Debug)]

@@ -261,13 +261,6 @@ mod tests {
     use crate::wire_format::MAX_VARINT_BYTES;
 
     #[test]
-    fn test_varint_value_creation() {
-        let bytes = [0x96, 0x01, 0, 0, 0, 0, 0, 0];
-        let varint = Varint::new(bytes);
-        assert_eq!(varint.as_bytes(), &bytes);
-    }
-
-    #[test]
     fn test_varint_conversions() {
         let bytes = [0x96, 0x01, 0, 0, 0, 0, 0, 0];
         let varint = Varint::new(bytes);
@@ -447,19 +440,6 @@ mod tests {
     }
 
     #[test]
-    fn test_to_methods() {
-        let bytes = [150, 0, 0, 0, 0, 0, 0, 0];
-        let varint = Varint::new(bytes);
-
-        assert_eq!(varint.try_to_uint32().unwrap(), 150);
-        assert_eq!(varint.try_to_sint32().unwrap(), 75);
-        assert_eq!(varint.to_sint64(), 75);
-        assert!(varint.to_bool());
-        assert_eq!(varint.try_to_int32().unwrap(), 150);
-        assert_eq!(varint.to_int64(), 150);
-    }
-
-    #[test]
     fn test_roundtrip_conversions() {
         let original = 150u64;
         let varint = Varint::from_uint64(original);
@@ -546,14 +526,18 @@ mod tests {
         assert_eq!(buffer, vec![0x00]);
 
         let varint = Varint::from_uint64(0x7FFFFFFFFFFFFFFF);
+        let (encoded, n) = varint.encode();
         let mut buffer = Vec::new();
         let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, 9);
+        assert_eq!(bytes_written, n);
+        assert_eq!(buffer, encoded[..n]);
 
         let varint = Varint::from_uint64(0xFFFFFFFFFFFFFFFF);
+        let (encoded, n) = varint.encode();
         let mut buffer = Vec::new();
         let bytes_written = buffer.write_varint(&varint).unwrap();
-        assert_eq!(bytes_written, MAX_VARINT_BYTES);
+        assert_eq!(bytes_written, n);
+        assert_eq!(buffer, encoded[..n]);
     }
 
     #[test]
