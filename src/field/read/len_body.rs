@@ -917,6 +917,22 @@ mod tests {
     }
 
     #[test]
+    fn packed_varints_truncated_mid_element_is_error() {
+        use super::ReadExtProtobuf;
+        use ::std::io::Cursor;
+
+        // Len claims 2 bytes; second byte continues a multi-byte varint (no terminator).
+        let message = [0x0A, 0x02, 0x01, 0x80];
+        let err = Cursor::new(message)
+            .read_protobuf_fields_with(message.len() as u32, |_n, body| {
+                body.varints().collect::<crate::Result<Vec<_>>>()
+            })
+            .collect::<crate::Result<Vec<_>>>()
+            .unwrap_err();
+        assert!(matches!(err, crate::ProtobufError::UnexpectedEof));
+    }
+
+    #[test]
     fn test_read_ext_respects_len_budget() {
         use super::ReadExtProtobuf;
         use ::std::io::Cursor;
