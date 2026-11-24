@@ -424,6 +424,18 @@ mod tests {
             }
             other => panic!("expected sint32 downcast error, got {other:?}"),
         }
+        // Negative ZigZag decode: error `value` is the sint64 bits as u64, not
+        // the raw varint (AGENTS.md known follow-up).
+        let too_low = Varint::from_sint64(i64::from(i32::MIN) - 1);
+        match too_low.try_to_sint32() {
+            Err(ProtobufError::VarintDowncastOutOfRange { value, target_type }) => {
+                assert_eq!(target_type, "i32");
+                // Same bit cast as `try_to_sint32()`'s error payload.
+                let expected = u64::from_ne_bytes((i64::from(i32::MIN) - 1).to_ne_bytes());
+                assert_eq!(value, expected);
+            }
+            other => panic!("expected negative sint32 downcast error, got {other:?}"),
+        }
         assert_eq!(
             Varint::from_sint32(i32::MAX).try_to_sint32().unwrap(),
             i32::MAX
