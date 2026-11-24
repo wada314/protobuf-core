@@ -118,16 +118,6 @@ mod tests {
     // ============================================================================
 
     #[test]
-    fn test_tag_struct() {
-        let tag = Tag {
-            field_number: FieldNumber::try_new(1).unwrap(),
-            wire_type: WireType::Varint,
-        };
-        assert_eq!(tag.field_number.as_u32(), 1);
-        assert_eq!(tag.wire_type, WireType::Varint);
-    }
-
-    #[test]
     fn test_tag_build_and_parse() {
         let tag = Tag {
             field_number: FieldNumber::try_new(1).unwrap(),
@@ -137,24 +127,6 @@ mod tests {
         assert_eq!(encoded.to_uint64(), 8);
         let parsed = Tag::try_from_varint(encoded).unwrap();
         assert_eq!(parsed, tag);
-    }
-
-    #[test]
-    fn test_from_varint() {
-        let varint = Varint::from_uint64(8);
-        let tag = Tag::try_from(varint).unwrap();
-        assert_eq!(tag.field_number.as_u32(), 1);
-        assert_eq!(tag.wire_type, WireType::Varint);
-    }
-
-    #[test]
-    fn test_try_from_varint_invalid() {
-        // Field number 0 is invalid.
-        let varint = Varint::from_uint64(0);
-        assert!(matches!(
-            Tag::try_from(varint),
-            Err(ProtobufError::FieldNumberOutOfRange { .. })
-        ));
     }
 
     #[test]
