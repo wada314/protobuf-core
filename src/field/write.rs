@@ -251,68 +251,114 @@ mod tests {
 
     #[test]
     fn test_fieldvalue_constructors() {
-        // Varint types
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_uint64(42),
-            FieldValue::Varint(_)
-        ));
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_uint32(42),
-            FieldValue::Varint(_)
-        ));
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_sint64(-42),
-            FieldValue::Varint(_)
-        ));
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_sint32(-42),
-            FieldValue::Varint(_)
-        ));
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_int64(-42),
-            FieldValue::Varint(_)
-        ));
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_int32(-42),
-            FieldValue::Varint(_)
-        ));
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_bool(true),
-            FieldValue::Varint(_)
-        ));
+        use crate::Varint;
 
-        // Fixed-width types
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_fixed32(42),
-            FieldValue::I32(_)
-        ));
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_sfixed32(-42),
-            FieldValue::I32(_)
-        ));
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_float(1.5),
-            FieldValue::I32(_)
-        ));
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_fixed64(42),
-            FieldValue::I64(_)
-        ));
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_sfixed64(-42),
-            FieldValue::I64(_)
-        ));
-        assert!(matches!(
-            FieldValue::<Vec<u8>>::from_double(1.5),
-            FieldValue::I64(_)
-        ));
+        // Varint constructors store the protobuf-typed encoding (ZigZag for sint).
+        match FieldValue::<Vec<u8>>::from_uint64(42) {
+            FieldValue::Varint(v) => assert_eq!(v.to_uint64(), 42),
+            other => panic!("expected varint, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_uint32(42) {
+            FieldValue::Varint(v) => assert_eq!(v.try_to_uint32().unwrap(), 42),
+            other => panic!("expected varint, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_sint64(-42) {
+            FieldValue::Varint(v) => assert_eq!(v.to_sint64(), -42),
+            other => panic!("expected varint, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_sint32(-42) {
+            FieldValue::Varint(v) => assert_eq!(v.try_to_sint32().unwrap(), -42),
+            other => panic!("expected varint, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_int64(-42) {
+            FieldValue::Varint(v) => assert_eq!(v.to_int64(), -42),
+            other => panic!("expected varint, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_int32(-42) {
+            FieldValue::Varint(v) => assert_eq!(v.try_to_int32().unwrap(), -42),
+            other => panic!("expected varint, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_bool(true) {
+            FieldValue::Varint(v) => assert!(v.to_bool()),
+            other => panic!("expected varint, got {other:?}"),
+        }
+        // sint vs int encodings differ for the same signed value.
+        let sint = match FieldValue::<Vec<u8>>::from_sint32(-1) {
+            FieldValue::Varint(v) => v,
+            other => panic!("expected varint, got {other:?}"),
+        };
+        let int = match FieldValue::<Vec<u8>>::from_int32(-1) {
+            FieldValue::Varint(v) => v,
+            other => panic!("expected varint, got {other:?}"),
+        };
+        assert_ne!(sint.to_uint64(), int.to_uint64());
+        assert_eq!(sint.to_uint64(), Varint::from_sint32(-1).to_uint64());
 
-        // Length-delimited types
-        assert!(matches!(FieldValue::Len(vec![1, 2, 3]), FieldValue::Len(_)));
-        assert!(matches!(
-            FieldValue::Len("test".to_string().into_bytes()),
-            FieldValue::Len(_)
-        ));
+        match FieldValue::<Vec<u8>>::from_fixed32(42) {
+            FieldValue::I32(bytes) => assert_eq!(bytes, 42u32.to_le_bytes()),
+            other => panic!("expected i32, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_sfixed32(-42) {
+            FieldValue::I32(bytes) => assert_eq!(bytes, (-42i32).to_le_bytes()),
+            other => panic!("expected i32, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_float(1.5) {
+            FieldValue::I32(bytes) => assert_eq!(bytes, 1.5f32.to_le_bytes()),
+            other => panic!("expected i32, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_fixed64(42) {
+            FieldValue::I64(bytes) => assert_eq!(bytes, 42u64.to_le_bytes()),
+            other => panic!("expected i64, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_sfixed64(-42) {
+            FieldValue::I64(bytes) => assert_eq!(bytes, (-42i64).to_le_bytes()),
+            other => panic!("expected i64, got {other:?}"),
+        }
+        match FieldValue::<Vec<u8>>::from_double(1.5) {
+            FieldValue::I64(bytes) => assert_eq!(bytes, 1.5f64.to_le_bytes()),
+            other => panic!("expected i64, got {other:?}"),
+        }
+
+        match FieldValue::Len(vec![1, 2, 3]) {
+            FieldValue::Len(data) => assert_eq!(data, vec![1, 2, 3]),
+            other => panic!("expected len, got {other:?}"),
+        }
+        match FieldValue::Len("test".to_string().into_bytes()) {
+            FieldValue::Len(data) => assert_eq!(data, b"test"),
+            other => panic!("expected len, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn write_varint_surfaces_io_error() {
+        use crate::WriteExtVarint;
+        use ::std::io::{self, Write};
+
+        struct FailAfter {
+            left: usize,
+        }
+
+        impl Write for FailAfter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                if self.left == 0 {
+                    return Err(io::Error::other("injected write failure"));
+                }
+                let n = buf.len().min(self.left);
+                self.left -= n;
+                Ok(n)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        // 150 encodes as two bytes; fail on the second.
+        let mut writer = FailAfter { left: 1 };
+        let err = writer
+            .write_varint(&crate::Varint::from_uint64(150))
+            .expect_err("write must fail");
+        assert_eq!(err.kind(), io::ErrorKind::Other);
     }
 
     #[test]
