@@ -1839,6 +1839,73 @@ mod len_payload {
     }
 
     #[test]
+    fn message_budget_over_limit_skip_until_reads_nothing() {
+        use super::ReadExtProtobuf;
+        use crate::{MAX_MESSAGE_SIZE, ProtobufError};
+        use ::std::io::Cursor;
+
+        let bytes = [0x08u8, 0x01, 0xAA];
+        let mut reader = Cursor::new(bytes);
+        let budget = u32::try_from(MAX_MESSAGE_SIZE).unwrap() + 1;
+        {
+            let mut fields = reader.read_protobuf_fields(budget);
+            let err = fields.skip_until(|_| Ok(true)).unwrap_err();
+            assert!(matches!(
+                err,
+                ProtobufError::SizeLimitExceeded { value, limit }
+                    if value == u64::from(budget) && limit == MAX_MESSAGE_SIZE
+            ));
+        }
+        assert_eq!(reader.position(), 0);
+    }
+
+    #[test]
+    fn message_budget_over_limit_copy_until_reads_nothing() {
+        use super::ReadExtProtobuf;
+        use crate::{MAX_MESSAGE_SIZE, ProtobufError};
+        use ::std::io::Cursor;
+
+        let bytes = [0x08u8, 0x01, 0xAA];
+        let mut reader = Cursor::new(bytes);
+        let budget = u32::try_from(MAX_MESSAGE_SIZE).unwrap() + 1;
+        let mut copied = Vec::new();
+        {
+            let mut fields = reader.read_protobuf_fields(budget);
+            let err = fields.copy_until(|_| Ok(true), &mut copied).unwrap_err();
+            assert!(matches!(
+                err,
+                ProtobufError::SizeLimitExceeded { value, limit }
+                    if value == u64::from(budget) && limit == MAX_MESSAGE_SIZE
+            ));
+        }
+        assert!(copied.is_empty());
+        assert_eq!(reader.position(), 0);
+    }
+
+    #[test]
+    fn len_prefix_past_u32_max_is_varint_downcast() {
+        use super::ReadExtProtobuf;
+        use crate::ProtobufError;
+        use ::std::io::Cursor;
+
+        // Len field 1 claiming payload length 0x1_0000_0000 (> u32::MAX).
+        let bytes = [0x0Au8, 0x80, 0x80, 0x80, 0x80, 0x10];
+        let mut reader = Cursor::new(bytes);
+        let budget = bytes.len() as u32;
+        {
+            let mut fields = reader.read_protobuf_fields(budget);
+            let err = fields.next().unwrap().unwrap_err();
+            assert!(matches!(
+                err,
+                ProtobufError::VarintDowncastOutOfRange {
+                    value: 0x1_0000_0000,
+                    target_type: "u32",
+                }
+            ));
+        }
+    }
+
+    #[test]
     fn message_budget_over_limit_does_not_call_handler() {
         use super::ReadExtProtobuf;
         use crate::ProtobufError;

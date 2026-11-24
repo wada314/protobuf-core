@@ -531,6 +531,54 @@ mod tests {
     }
 
     #[test]
+    fn stored_slice_error_skip_until_reads_nothing() {
+        use super::FieldIterFromSlice;
+        use crate::{MAX_MESSAGE_SIZE, ProtobufError};
+
+        let bytes = [0x08u8, 0x01, 0xAA];
+        let mut fields = FieldIterFromSlice {
+            slice: &bytes,
+            error: Some(ProtobufError::SizeLimitExceeded {
+                value: 3,
+                limit: MAX_MESSAGE_SIZE,
+            }),
+        };
+        let err = fields.skip_until(|_| Ok(true)).unwrap_err();
+        assert!(matches!(
+            err,
+            ProtobufError::SizeLimitExceeded {
+                value: 3,
+                limit: MAX_MESSAGE_SIZE
+            }
+        ));
+        assert_eq!(fields.slice, &bytes);
+    }
+
+    #[test]
+    fn stored_slice_error_take_until_reads_nothing() {
+        use super::FieldIterFromSlice;
+        use crate::{MAX_MESSAGE_SIZE, ProtobufError};
+
+        let bytes = [0x08u8, 0x01, 0xAA];
+        let mut fields = FieldIterFromSlice {
+            slice: &bytes,
+            error: Some(ProtobufError::SizeLimitExceeded {
+                value: 3,
+                limit: MAX_MESSAGE_SIZE,
+            }),
+        };
+        let err = fields.take_until(|_| Ok(true)).unwrap_err();
+        assert!(matches!(
+            err,
+            ProtobufError::SizeLimitExceeded {
+                value: 3,
+                limit: MAX_MESSAGE_SIZE
+            }
+        ));
+        assert_eq!(fields.slice, &bytes);
+    }
+
+    #[test]
     fn slice_parse_error_is_moved_out_once() {
         use super::AsRefExtProtobuf;
         use crate::ProtobufError;
